@@ -1,0 +1,8 @@
+.git
+bin
+dist
+tmp
+coverage.out
+.env
+.env.*
+.supacli

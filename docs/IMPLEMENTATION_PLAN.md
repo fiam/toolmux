@@ -1,10 +1,10 @@
 # Supacli Initial Provider Implementation Plan
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## Technical Direction
 
-Use Go for both the CLI and the minimal auth broker. Keep provider logic in one repository at first so the CLI and broker share token schemas, provider metadata, and test fixtures.
+Use Go for both the CLI and `supaclid`, the Supacli server daemon. Keep provider logic in one repository at first so the CLI and server share token schemas, provider metadata, and test fixtures.
 
 Use the latest stable Go release. As of 2026-05-06, the official release history shows Go 1.26.2 as the latest patch release on the Go 1.26 line. Set the module to Go 1.26, pin CI to the latest Go 1.26 patch, and update `AGENTS.md` whenever the project intentionally changes Go versions or toolchain expectations.
 
@@ -12,20 +12,21 @@ Initial repository layout:
 
 ```text
 cmd/supacli/                  # CLI entrypoint
-cmd/auth-broker/              # hosted OAuth broker entrypoint
+cmd/supaclid/                 # Supacli server daemon entrypoint
+Dockerfile.supaclid           # generic supaclid OCI image
 internal/cli/                 # command tree and command helpers
 internal/config/              # profiles and non-secret metadata
 internal/output/              # table/json/yaml renderers
 internal/policy/              # local command policy and RBAC engine
 internal/vault/               # local encrypted credential vault
-internal/oauth/               # PKCE, state, loopback, broker handoff
+internal/oauth/               # PKCE, state, loopback, server handoff
 internal/providers/           # provider registry and common interfaces
 internal/providers/notion/
 internal/providers/jira/
 internal/providers/slack/
 internal/providers/linear/
 internal/providers/google/
-internal/broker/              # broker HTTP handlers and provider exchanges
+internal/server/              # server HTTP handlers and provider exchanges
 internal/testutil/            # fake OAuth server and provider fixtures
 docs/
 ```
@@ -37,7 +38,7 @@ Recommended core dependencies:
 3. `github.com/99designs/keyring` behind an internal interface for OS credential stores.
 4. `golang.org/x/oauth2` only where it matches provider behavior; wrap provider differences instead of leaking it into commands.
 5. `golang.org/x/crypto/chacha20poly1305` using XChaCha20-Poly1305 for local vault encryption.
-6. `filippo.io/age` for broker-to-CLI encrypted handoff payloads.
+6. No extra handoff-encryption dependency for MVP; use HTTPS, one-time session secrets, and short-lived in-memory handoff. Shared or durable handoff storage is out of MVP and requires a separate threat model before implementation.
 7. `goreleaser` and `cosign` for signed releases.
 
 Recommended quality tooling:
@@ -54,6 +55,23 @@ Recommended quality tooling:
 10. `commitlint` or equivalent conventional-commit validation.
 11. `shellcheck` for shell scripts.
 12. `yamllint` and Markdown linting for repo configuration and docs.
+
+## Repository Boundary
+
+This OSS repo owns portable product code and public artifacts:
+
+1. `supacli` CLI source and releases.
+2. `supaclid` server source.
+3. Generic `supaclid` container images.
+4. Fake-provider tests and self-hosting docs.
+
+Supacli's hosted AWS/Lambda deployment belongs in a private infrastructure repo.
+That private repo owns Lambda packaging, API Gateway or Function URL routing,
+ECR promotion, provider secrets, DNS, certs, monitoring, abuse controls, and
+deployment state.
+
+The public repo should not grow Lambda-specific deployment code unless it is
+generic and useful to self-hosters. Keep `supaclid` portable as an HTTP daemon.
 
 ## Architecture
 
@@ -228,11 +246,11 @@ Implementation:
 
 The callback HTML should contain no token data.
 
-### Brokered Local-Custody Flow
+### supaclid-Backed Local-Custody Flow
 
 Used for Notion, Jira, and Slack bot/workspace mode.
 
-Broker endpoints:
+supaclid OAuth endpoints:
 
 ```text
 POST /v1/oauth/sessions
@@ -269,29 +287,28 @@ Session response:
 
 Callback handling:
 
-1. Validate broker session and OAuth `state`.
+1. Validate server session and OAuth `state`.
 2. Exchange code using deployment-only provider client secret.
 3. Normalize provider token response.
-4. Encrypt token bundle to CLI public key.
-5. Store only encrypted handoff payload in Redis/in-memory store with TTL <= 120 seconds.
-6. Return a browser page telling the user to return to the terminal.
+4. Store the token bundle in a short-lived in-memory handoff with TTL <= 120 seconds.
+5. Return a browser page telling the user to return to the terminal.
+6. Shared or durable handoff storage is out of MVP.
 
 CLI polling:
 
 1. Poll `GET /v1/oauth/sessions/{session_id}` with the session secret.
-2. Receive encrypted token bundle once.
-3. Decrypt locally.
-4. Store in local vault.
+2. Receive token bundle once over HTTPS.
+3. Store in local vault.
 
-Refresh for brokered providers:
+Refresh for supaclid-backed providers:
 
-1. CLI sends the current refresh token to broker over HTTPS.
-2. Broker calls provider token endpoint with its client secret.
-3. Broker returns new token bundle in the HTTP response.
-4. Broker does not persist the token.
+1. CLI sends the current refresh token to supaclid over HTTPS.
+2. supaclid calls provider token endpoint with its client secret.
+3. supaclid returns new token bundle in the HTTP response.
+4. supaclid does not persist the token.
 5. CLI atomically replaces the old local token.
 
-This is not zero-trust: the broker sees tokens in memory. It is local-custody: the broker does not retain tokens.
+This is not zero-trust: supaclid sees tokens in memory. It is local-custody: supaclid does not retain tokens.
 
 ## Milestones
 
@@ -300,21 +317,24 @@ This is not zero-trust: the broker sees tokens in memory. It is local-custody: t
 Deliverables:
 
 1. Initialize Go module with `go 1.26`.
-2. Add `cmd/supacli` and `cmd/auth-broker`.
+2. Add `cmd/supacli` and `cmd/supaclid`.
 3. Add `make test`, `make lint`, and `make build`.
 4. Add `make test-integration` for deterministic fake-upstream tests.
 5. Add `make test-live` for opt-in live-provider smoke tests.
 6. Add GitHub Actions for tests, race tests, integration tests, `govulncheck`, static analysis, security scanning, secret scanning, docs linting, and commit-message validation.
 7. Add GoReleaser config with signed artifacts.
 8. Add repository-level `AGENTS.md` with Go version, testing, linting, and commit-message rules.
+9. Add generic `supaclid` OCI image build config.
+10. Add public self-hosting docs that do not assume Supacli's AWS account.
 
 Acceptance criteria:
 
 1. `supacli --help` works.
-2. `auth-broker --help` works.
+2. `supaclid --help` works.
 3. CI passes without provider secrets.
 4. CI runs fake-upstream integration tests without network calls to real providers.
 5. Invalid conventional commits are rejected by local tooling or CI.
+6. `make build-supaclid-image` builds a generic server image when Docker is available.
 
 ### M1 - CLI Core
 
@@ -357,7 +377,7 @@ Acceptance criteria:
 
 Why first:
 
-Linear has a clean PKCE flow, short-lived access tokens, refresh tokens, and a GraphQL API. It exercises the local auth path without needing the broker.
+Linear has a clean PKCE flow, short-lived access tokens, refresh tokens, and a GraphQL API. It exercises the local auth path without needing supaclid.
 
 Deliverables:
 
@@ -382,19 +402,19 @@ Acceptance criteria:
 4. `disconnect linear` calls Linear revocation when possible and removes local tokens.
 5. Linear command specs appear in `supacli policy catalog`.
 
-### M3 - Auth Broker with Notion
+### M3 - supaclid with Notion
 
 Why second:
 
-Notion validates the brokered local-custody model and has explicit page/database access constraints users need to understand.
+Notion validates the supaclid-backed local-custody model and has explicit page/database access constraints users need to understand.
 
 Deliverables:
 
-1. Broker session API.
-2. Broker provider secret config via environment variables.
+1. supaclid session API.
+2. supaclid provider secret config via environment variables.
 3. Encrypted one-time handoff.
 4. Notion provider in CLI.
-5. Notion broker exchange and refresh handlers.
+5. Notion supaclid exchange and refresh handlers.
 6. Notion commands:
 
 ```bash
@@ -406,9 +426,9 @@ supacli notion database query
 
 Acceptance criteria:
 
-1. Broker durable store contains no plaintext token fields.
+1. supaclid durable store contains no plaintext token fields.
 2. Handoff payload is single-use and expires.
-3. Token refresh path uses broker and updates local rotating tokens if Notion returns replacements.
+3. Token refresh path uses supaclid and updates local rotating tokens if Notion returns replacements.
 4. Notion "missing page access" errors suggest sharing the page/database with the Supacli connection.
 5. Notion command specs include selected read/write effects for policy evaluation.
 
@@ -416,8 +436,8 @@ Acceptance criteria:
 
 Deliverables:
 
-1. Atlassian OAuth 3LO broker exchange.
-2. Atlassian broker refresh with rotating refresh token handling.
+1. Atlassian OAuth 3LO supaclid exchange.
+2. Atlassian supaclid refresh with rotating refresh token handling.
 3. `accessible-resources` lookup and local `cloudId` storage.
 4. Jira provider commands:
 
@@ -507,22 +527,22 @@ Acceptance criteria:
 Deliverables:
 
 1. Provider contract tests using fake OAuth and fake API servers.
-2. End-to-end tests for native OAuth and brokered handoff.
+2. End-to-end tests for native OAuth and supaclid-backed handoff.
 3. Threat model document.
-4. Privacy policy text for hosted broker.
+4. Privacy policy text for hosted supaclid.
 5. Signed release artifacts.
 6. Install docs for macOS, Linux, and Windows.
 
 Acceptance criteria:
 
 1. Automated tests assert that token-like fields are redacted from logs.
-2. Broker endpoints pass tests for TTL, replay prevention, state validation, and missing session handling.
+2. supaclid endpoints pass tests for TTL, replay prevention, state validation, and missing session handling.
 3. Release checksums and signatures are generated in CI.
 4. At least one clean-machine install test is run per OS.
 
 ## Provider Configuration
 
-Broker deployment environment variables:
+supaclid deployment environment variables:
 
 ```text
 SUPACLI_PUBLIC_BASE_URL=https://auth.supacli.dev
@@ -545,7 +565,7 @@ CLI configuration:
 
 ```yaml
 default_profile: default
-broker_url: https://auth.supacli.dev
+server_url: https://auth.supacli.dev
 profiles:
   default:
     output: table
@@ -572,13 +592,13 @@ Unit tests:
 Integration tests:
 
 1. Fake provider OAuth server for native flow.
-2. Fake brokered provider with client-secret exchange.
-3. Redis/in-memory handoff TTL and single-use behavior.
+2. Fake supaclid-backed provider with client-secret exchange.
+3. In-memory handoff TTL and single-use behavior.
 4. Token refresh rotation races.
 5. Policy denial before credential lookup for representative read, write, send, and disconnect commands.
 6. Fake Notion, Jira, Slack, Linear, Google Docs, Google Drive, and Gmail servers.
 7. Provider fixtures for success, expired token, revoked token, missing scope, permission denied, rate limit, pagination, malformed JSON, empty response, and 5xx retry behavior.
-8. OAuth callback and broker handoff tests that run fully offline.
+8. OAuth callback and supaclid handoff tests that run fully offline.
 9. Contract tests ensuring provider command specs, required scopes, and policy actions match implemented commands.
 
 Manual provider tests:
@@ -592,10 +612,10 @@ Security tests:
 
 1. Secret scanner in CI.
 2. Log redaction tests for `Authorization`, `access_token`, `refresh_token`, `code`, and provider-specific token prefixes.
-3. Static checks for accidental token fields in broker persistence types.
+3. Static checks for accidental token fields in supaclid persistence types.
 4. Replay tests for handoff sessions.
 5. Policy bypass tests for aliases and nested subcommands, ensuring every executable command has a command spec.
-6. Broker persistence tests that fail if token-shaped fields are written to Redis, files, databases, telemetry, or logs.
+6. supaclid persistence tests that fail if token-shaped fields are written to files, databases, telemetry, or logs.
 
 Lint and quality gates:
 
@@ -611,15 +631,22 @@ Lint and quality gates:
 1. Publish alpha builds for contributors with Linear and Notion first.
 2. Add Jira and Google Workspace commands behind explicit beta labels.
 3. Add Slack user mode after PKCE app configuration is validated.
-4. Sign every binary and checksum file.
-5. Publish SBOM and provenance with releases.
-6. Document provider app review status and known scope limitations per release.
+4. Publish signed `supacli` binaries and Homebrew tap updates.
+5. Publish generic `supaclid` container images.
+6. Sign every binary, checksum file, and server image.
+7. Publish SBOM and provenance with releases.
+8. Document provider app review status and known scope limitations per release.
 
 ## Operational Notes
 
-The hosted broker is required for a zero-manual-key experience for Notion and Jira. Self-hosters can run the broker, but they must create their own provider OAuth apps and supply client secrets. The server code can be open source; provider client secrets cannot.
+Hosted supaclid is required for a zero-manual-key experience for Notion and Jira. Self-hosters can run supaclid, but they must create their own provider OAuth apps and supply client secrets. The server code can be open source; provider client secrets cannot.
 
-The broker should be deployable without Postgres for the initial release. Redis is sufficient for short-lived handoff sessions. A single-node in-memory store is acceptable for local development only.
+supaclid should be deployable without Postgres for the initial release. A single-node in-memory handoff store is sufficient for MVP and local development. Redis or another shared handoff store should wait until we have a separate threat model and operational reason for multi-instance handoff storage.
+
+Supacli's production AWS/Lambda deployment should live outside this OSS repo.
+The private infrastructure repo should consume public `supaclid` release images
+or binaries and adapt them for Lambda, API Gateway, Function URLs, Secrets
+Manager, DNS, and monitoring.
 
 ## Initial Build Order
 
@@ -628,10 +655,10 @@ Recommended exact order:
 1. M0 repo/tooling.
 2. M1 CLI core and vault.
 3. M2 Linear native PKCE.
-4. M3 broker and Notion.
+4. M3 supaclid and Notion.
 5. M4 Jira.
 6. M5 Google Docs/Drive/Gmail.
 7. M6 Slack user mode.
 8. M7 hardening and beta.
 
-This order proves the two hardest foundations early: native local OAuth and brokered local-custody OAuth.
+This order proves the two hardest foundations early: native local OAuth and supaclid-backed local-custody OAuth.

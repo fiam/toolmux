@@ -12,6 +12,7 @@ Agents must update this file when they:
 2. Add, remove, or rename important `make` targets or CI checks.
 3. Add a new provider, auth mode, policy behavior, or test class.
 4. Change commit, release, linting, formatting, or security expectations.
+5. Change the public OSS/private infrastructure repository boundary.
 
 When updating Go guidance, check the official Go release notes and release
 history first:
@@ -40,7 +41,7 @@ Notable Go 1.26 features to keep in mind:
 3. `go fix` now includes modernizers; run it deliberately during upgrades.
 4. The Green Tea garbage collector is enabled by default.
 5. Heap base randomization improves security on 64-bit platforms.
-6. `crypto/hpke` is available for HPKE designs, including future handoff work.
+6. Prefer current standard-library APIs before adding dependencies.
 7. `errors.AsType` can simplify type-safe error extraction.
 8. `testing.T.ArtifactDir` can store integration-test artifacts.
 9. `testing/cryptotest.SetGlobalRandom` supports deterministic crypto tests.
@@ -49,7 +50,7 @@ Notable Go 1.26 features to keep in mind:
 Notable Go 1.25 features still relevant to this codebase:
 
 1. `testing/synctest` is available for deterministic concurrent tests.
-2. `net/http.CrossOriginProtection` can help protect broker browser endpoints.
+2. `net/http.CrossOriginProtection` can help protect daemon browser endpoints.
 3. `go vet` includes `waitgroup` and `hostport` analyzers.
 4. `log/slog` includes newer helpers such as `GroupAttrs` and source support.
 
@@ -61,14 +62,17 @@ milestone. Expected local targets:
 ```bash
 make fmt
 make fmt-check
+make help
 make lint
 make test
 make test-race
 make test-integration
 make test-live
 make build
+make build-supaclid-image
 make coverage
 make commitlint
+make dev-server-tunnel
 ```
 
 `make test-live` must be skipped by default and require explicit environment
@@ -102,10 +106,19 @@ Fake upstreams should emulate:
    responses, empty responses, 5xx errors, and retries.
 4. Notion, Jira, Slack, Linear, Google Docs, Google Drive, and Gmail behavior
    needed by implemented commands.
-5. Brokered local-custody handoff without storing plaintext provider tokens.
+5. supaclid local-custody handoff without storing plaintext provider tokens.
 
 Live-provider tests may exist for smoke coverage, but they must be opt-in,
 isolated from default CI, and must never record real tokens in fixtures.
+
+## Local Provider Harnesses
+
+`make dev-server-tunnel` starts the local server and exposes it through a
+Cloudflare Quick Tunnel for OAuth callback testing. It writes local, ignored
+environment hints to `.supacli/server-tunnel.env`.
+
+Do not commit tunnel URLs, Notion client secrets, OAuth codes, or generated
+token material.
 
 ## Security
 
@@ -115,6 +128,26 @@ crash reports, telemetry, or committed files.
 
 Policy checks must run before vault reads, token refresh, or provider API calls.
 Every executable command and alias needs a command spec for policy evaluation.
+
+## Repository Boundary
+
+This OSS repo contains portable product source and generic artifacts:
+
+1. `supacli` CLI source.
+2. `supaclid` server daemon source.
+3. Generic `supaclid` container build files.
+4. Fake-provider tests and public self-hosting docs.
+
+This repo must not contain Supacli's hosted deployment infrastructure:
+
+1. AWS Lambda, API Gateway, ECR, DNS, or certificate definitions.
+2. Terraform, Pulumi, CDK, or deployment state for Supacli production.
+3. Provider OAuth client secrets.
+4. Production monitoring, abuse-control, billing, or alerting internals.
+
+Hosted Supacli deployment work belongs in a private infrastructure repo. Keep
+public docs generic enough for self-hosters who bring their own provider OAuth
+apps and secrets.
 
 ## Commits
 

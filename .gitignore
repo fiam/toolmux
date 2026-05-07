@@ -8,6 +8,10 @@
 /coverage.out
 /tmp/
 
+.supacli/cloudflared.log
+.supacli/server.log
+.supacli/dev-tunnel.env
+.supacli/server-tunnel.env
+
 *.test
 *.prof
-
