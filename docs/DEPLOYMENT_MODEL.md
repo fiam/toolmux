@@ -13,7 +13,7 @@ This repository contains product source and public artifacts:
 cmd/supacli/                  # CLI source
 cmd/supaclid/                 # server daemon source
 internal/                     # shared CLI/server packages
-Dockerfile.supaclid           # generic supaclid OCI image
+Dockerfile                    # generic supaclid OCI image
 docs/                         # product, self-hosting, and provider docs
 ```
 

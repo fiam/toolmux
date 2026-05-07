@@ -13,7 +13,7 @@ Initial repository layout:
 ```text
 cmd/supacli/                  # CLI entrypoint
 cmd/supaclid/                 # Supacli server daemon entrypoint
-Dockerfile.supaclid           # generic supaclid OCI image
+Dockerfile                    # generic supaclid OCI image
 internal/cli/                 # command tree and command helpers
 internal/config/              # profiles and non-secret metadata
 internal/output/              # table/json/yaml renderers

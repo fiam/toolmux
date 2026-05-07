@@ -28,7 +28,7 @@ build:
 
 .PHONY: build-supaclid-image
 build-supaclid-image:
-	docker build -f Dockerfile.supaclid -t supaclid:dev .
+	docker build -t supaclid:dev .
 
 .PHONY: fmt
 fmt:
