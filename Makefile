@@ -1,5 +1,7 @@
 GO ?= go
 GOFLAGS ?=
+DOCKER ?= docker
+LINT_IMAGE ?= toolmux-lint:dev
 
 .DEFAULT_GOAL := help
 
@@ -10,7 +12,7 @@ help:
 	@printf '  %-27s %s\n' 'make build-toolmuxd-image' 'Build generic toolmuxd OCI image'
 	@printf '  %-27s %s\n' 'make fmt' 'Format Go source'
 	@printf '  %-27s %s\n' 'make fmt-check' 'Check Go formatting'
-	@printf '  %-27s %s\n' 'make lint' 'Run local linters when installed'
+	@printf '  %-27s %s\n' 'make lint' 'Run full Dockerfile-based linter pass'
 	@printf '  %-27s %s\n' 'make commitlint' 'Check the latest commit message'
 	@printf '  %-27s %s\n' 'make dev-server-tunnel' 'Run toolmuxd through cloudflared'
 	@printf '  %-27s %s\n' 'make vet' 'Run go vet'
@@ -28,7 +30,7 @@ build:
 
 .PHONY: build-toolmuxd-image
 build-toolmuxd-image:
-	docker build -t toolmuxd:dev .
+	$(DOCKER) build -t toolmuxd:dev .
 
 .PHONY: fmt
 fmt:
@@ -39,12 +41,8 @@ fmt-check:
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))"
 
 .PHONY: lint
-lint: fmt-check vet
-	@if command -v staticcheck >/dev/null 2>&1; then staticcheck ./...; else echo "staticcheck not installed"; fi
-	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not installed"; fi
-	@if command -v govulncheck >/dev/null 2>&1; then govulncheck ./...; else echo "govulncheck not installed"; fi
-	@if command -v gosec >/dev/null 2>&1; then gosec ./...; else echo "gosec not installed"; fi
-	@if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --no-git; else echo "gitleaks not installed"; fi
+lint:
+	$(DOCKER) build --target lint -t $(LINT_IMAGE) .
 
 .PHONY: commitlint
 commitlint:

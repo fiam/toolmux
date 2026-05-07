@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/fiam/toolmux/internal/policy"
@@ -83,10 +84,8 @@ func Lookup(id string) (Provider, bool) {
 		if provider.ID == id {
 			return provider, true
 		}
-		for _, alias := range provider.Aliases {
-			if alias == id {
-				return provider, true
-			}
+		if slices.Contains(provider.Aliases, id) {
+			return provider, true
 		}
 	}
 	return Provider{}, false

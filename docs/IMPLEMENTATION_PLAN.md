@@ -52,14 +52,12 @@ Recommended quality tooling:
 2. `go vet ./...`, including modern analyzers from the current Go toolchain.
 3. `go test -race ./...`.
 4. `go test -coverprofile=coverage.out ./...`.
-5. `govulncheck ./...`.
-6. `staticcheck ./...`.
-7. `golangci-lint run` with a strict project config.
-8. `gosec ./...` for security-focused static checks.
-9. `gitleaks detect` or equivalent secret scanning.
-10. `commitlint` or equivalent conventional-commit validation.
-11. `shellcheck` for shell scripts.
-12. `yamllint` and Markdown linting for repo configuration and docs.
+5. Dockerfile-based `make lint` with pinned `govulncheck`, `staticcheck`,
+   `modernize`, `golangci-lint`, `gosec`, `gitleaks`, and `actionlint`
+   versions, plus repository-wide YAML linting.
+6. `commitlint` or equivalent conventional-commit validation.
+7. `shellcheck` for shell scripts.
+8. `yamllint` and Markdown linting for repo configuration and docs.
 
 ## Repository Boundary
 
@@ -318,7 +316,8 @@ Deliverables:
 3. Add `make test`, `make lint`, and `make build`.
 4. Add `make test-integration` for deterministic fake-upstream tests.
 5. Add `make test-live` for opt-in live-provider smoke tests.
-6. Add GitHub Actions for tests, race tests, integration tests, `govulncheck`, static analysis, security scanning, secret scanning, docs linting, and commit-message validation.
+6. Add GitHub Actions for tests, race tests, integration tests,
+   Dockerfile-based linting, docs linting, and commit-message validation.
 7. Add GoReleaser config with signed artifacts.
 8. Add repository-level `AGENTS.md` with Go version, testing, linting, and commit-message rules.
 9. Add generic `toolmuxd` OCI image build config.
@@ -617,8 +616,8 @@ Security tests:
 Lint and quality gates:
 
 1. Formatting: `gofmt`, `go fmt`, Markdown lint, YAML lint.
-2. Correctness: `go vet`, `staticcheck`, `golangci-lint`, race tests.
-3. Security: `govulncheck`, `gosec`, secret scanning.
+2. Correctness: `go vet`, Dockerfile-based static analysis, race tests.
+3. Security: Dockerfile-based vulnerability, security, and secret scanning.
 4. Compatibility: cross-platform build checks for macOS, Linux, and Windows.
 5. Release hygiene: SBOM generation, signed artifacts, checksums, provenance.
 6. Git hygiene: Conventional Commits with subject lines at or below 50 characters and body lines wrapped at 72 characters.
