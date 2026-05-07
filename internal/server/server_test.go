@@ -1,4 +1,4 @@
-package broker
+package server
 
 import (
 	"net/http"

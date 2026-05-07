@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fiam/toolmux/internal/broker"
+	"github.com/fiam/toolmux/internal/server"
 )
 
 func main() {
-	if err := broker.NewCommand().Execute(); err != nil {
+	if err := server.NewCommand().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

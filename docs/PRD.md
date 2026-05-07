@@ -1,6 +1,6 @@
 # Toolmux Initial Providers PRD
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## Summary
 
@@ -13,8 +13,9 @@ The first release optimizes for a simple connection experience without asking us
 1. Let users connect each initial provider with a browser-based OAuth flow.
 2. Store long-lived provider credentials locally, protected by the user's operating system.
 3. Provide a consistent command model across providers for auth, listing, reading, creating, and updating common resources.
-4. Keep the hosted Toolmux auth broker open-source and minimized: it may exchange/refresh tokens when provider client secrets are required, but it must not persist provider tokens.
+4. Keep the hosted Toolmux server daemon, `toolmuxd`, open-source and minimized: its OAuth broker component may exchange/refresh tokens when provider client secrets are required, but it must not persist provider tokens.
 5. Make provider capability and scope limits explicit so users understand why some actions require reauthorization or are deferred.
+6. Keep Toolmux's production deployment infrastructure and provider secrets out of the OSS repo while publishing portable source and artifacts for CLI and server users.
 
 ## Non-Goals
 
@@ -25,6 +26,7 @@ The first release optimizes for a simple connection experience without asking us
 5. No unrestricted Google Drive indexing/search in the initial release, because broad Drive scopes are restricted and increase verification/compliance burden.
 6. No Gmail inbox search, message body reads, mailbox modification, forwarding, or admin settings in the initial release, because those scopes are restricted and increase verification/security-assessment burden.
 7. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
+8. No AWS Lambda, DNS, certificate, production secret, or hosted deployment infrastructure in the OSS repo.
 
 ## Users
 
@@ -38,6 +40,27 @@ Secondary users:
 
 1. Security-minded users who prefer open-source auth infrastructure and local token custody.
 2. Contributors who want to add providers through a stable integration interface.
+
+## Repository and Deployment Model
+
+The OSS repository contains:
+
+1. `toolmux` CLI source.
+2. `toolmuxd` server daemon source.
+3. Generic self-hosting documentation.
+4. Generic `toolmuxd` container build files.
+5. Release automation for CLI binaries, Homebrew tap artifacts, and generic server images.
+
+The OSS repository must not contain:
+
+1. Toolmux production AWS Lambda, API Gateway, ECR, DNS, certificate, or monitoring definitions.
+2. Terraform, Pulumi, CDK, or deployment state for Toolmux's hosted infrastructure.
+3. Provider OAuth client secrets.
+4. Production abuse controls, billing internals, allowlists, or alerting destinations.
+
+Toolmux's hosted deployment should live in a private infrastructure repo. That private repo may deploy `toolmuxd` to AWS Lambda, Lambda Function URLs, API Gateway, or another AWS entrypoint by consuming public release artifacts from this repo.
+
+Self-hosters can run the OSS `toolmuxd`, but they must create their own provider OAuth apps and supply their own provider client ids and secrets.
 
 ## Product Principles
 
@@ -252,20 +275,20 @@ Initial providers:
 2. Google Docs/Drive/Gmail through Google desktop OAuth.
 3. Slack user-token mode when using Slack PKCE-compatible desktop redirect flows.
 
-### Brokered Local-Custody OAuth
+### toolmuxd Local-Custody OAuth
 
 Used when the provider requires a confidential client secret for token exchange or refresh.
 
 Flow:
 
 ```text
-CLI generates one-time handoff id and encryption keypair
+CLI generates one-time handoff id and session secret
 CLI opens auth.toolmux.dev
-Provider redirects to Toolmux broker
-Broker exchanges code using provider client secret
-Broker encrypts token bundle to CLI public key
-CLI retrieves bundle once and stores it locally
-Broker deletes the handoff material
+Provider redirects to toolmuxd
+toolmuxd exchanges code using provider client secret
+toolmuxd stores token bundle in short-lived in-memory handoff
+CLI retrieves bundle once over HTTPS and stores it locally
+toolmuxd deletes the handoff material
 ```
 
 Initial providers:
@@ -274,7 +297,7 @@ Initial providers:
 2. Jira.
 3. Slack bot/workspace-install mode, if enabled after user-token MVP.
 
-The broker must not store provider access tokens or refresh tokens in durable storage.
+toolmuxd must not store provider access tokens or refresh tokens in durable storage.
 
 ## Local Credential Storage
 
@@ -300,8 +323,8 @@ The encrypted vault contains provider tokens, refresh tokens, expiry timestamps,
 
 Auth:
 
-1. Brokered OAuth through a Notion public connection.
-2. Token refresh is brokered because Notion requires client credentials for refresh.
+1. toolmuxd OAuth through a Notion public connection.
+2. Token refresh uses toolmuxd because Notion requires client credentials for refresh.
 3. User grants access to selected pages/databases in Notion.
 
 MVP commands:
@@ -323,9 +346,9 @@ Out of scope for MVP:
 
 Auth:
 
-1. Brokered Atlassian OAuth 2.0 3LO.
+1. toolmuxd-backed Atlassian OAuth 2.0 3LO.
 2. Store `cloudId`, site URL, user account id, scopes, access token, and rotating refresh token locally.
-3. Refresh is brokered because Atlassian requires the app client secret.
+3. Refresh uses toolmuxd because Atlassian requires the app client secret.
 
 Candidate scopes:
 
@@ -356,7 +379,7 @@ Auth:
 
 1. Default MVP path is user-token OAuth with PKCE where possible.
 2. Slack bot scopes are not the default because Slack desktop redirects with PKCE are not allowed to request bot scopes.
-3. Slack bot/workspace install can be added through the broker as a separate `--mode bot` path.
+3. Slack bot/workspace install can be added through toolmuxd as a separate `--mode bot` path.
 
 Candidate user scopes:
 
@@ -526,8 +549,8 @@ All providers must support:
 ## Security Requirements
 
 1. No provider token may be written to server logs, CLI logs, analytics, crash reports, command history, or plaintext config.
-2. Broker handoff records must expire within 120 seconds and be single-use.
-3. Broker handoff payloads must be encrypted to a CLI-generated public key before storage or retrieval.
+2. toolmuxd handoff records must expire within 120 seconds and be single-use.
+3. toolmuxd handoff payloads may be returned over HTTPS without extra application-level encryption when they are held in short-lived process memory. Shared or durable handoff storage is out of MVP and requires a separate threat model before implementation.
 4. OAuth `state` must be high entropy and validated on every flow.
 5. PKCE must use S256 where supported.
 6. Loopback listeners must bind to `127.0.0.1` and close immediately after callback.
@@ -548,7 +571,7 @@ Required quality gates:
 4. Test OAuth, refresh, revocation, policy denial, provider API errors, rate limits, pagination, and malformed responses against fake upstream servers.
 5. Keep live-provider tests separate from deterministic CI tests and require explicit opt-in credentials for them.
 6. Ensure every provider command has unit tests for command metadata, policy checks, output rendering, and error mapping.
-7. Ensure the auth broker has integration tests proving that plaintext provider tokens are never written to durable storage or logs.
+7. Ensure `toolmuxd` has integration tests proving that plaintext provider tokens are never written to durable storage or logs.
 8. Require conventional commits with 50-character subject lines and 72-character wrapped body lines so release automation and changelog generation remain reliable.
 
 ## Success Metrics
@@ -565,19 +588,21 @@ MVP success:
 8. CI blocks unformatted code, failing linters, broken fake-provider integration tests, detected vulnerabilities, token leaks, and invalid commit messages.
 9. Non-interactive command runs never hang on prompts and always produce stable machine-readable output when `--output json` or `--output yaml` is used.
 10. Human default output is readable enough that users can complete common read/create/update flows without consulting raw JSON.
+11. The OSS repo publishes generic CLI/server artifacts without exposing Toolmux production infrastructure or provider secrets.
 
 ## Risks
 
 1. Google verification can block or delay broad Docs/Drive/Gmail features.
 2. Slack PKCE user-token capabilities may not cover desired bot/workspace workflows.
-3. Broker availability affects Notion/Jira refresh flows even though tokens are local.
+3. toolmuxd availability affects Notion/Jira refresh flows even though tokens are local.
 4. Provider OAuth policies can change and may require re-review.
 5. Local keychains behave differently in headless Linux and CI environments.
 6. Local policy files are useful guardrails but can be bypassed by users who control their machine or working directory.
+7. Private deployment code can drift from public `toolmuxd` behavior unless artifact versions and compatibility checks are enforced.
 
 ## Open Questions
 
-1. Should Slack MVP be user-token only, or should brokered bot install be included in the first public beta?
+1. Should Slack MVP be user-token only, or should toolmuxd-backed bot install be included in the first public beta?
 2. Should Google Docs and Drive be separate top-level commands or grouped under `toolmux google`?
 3. Should Gmail commands be top-level as `toolmux gmail`, grouped under `toolmux google gmail`, or both?
 4. Should Notion write commands require an explicit `--parent` every time, or should users define a default workspace/page alias?
@@ -585,7 +610,8 @@ MVP success:
 6. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
 7. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
 8. Should aliases be stored per profile, per provider account, or both?
-9. What is the preferred hosted broker domain for production, staging, and local development?
+9. What are the preferred hosted `toolmuxd` domains for production, staging, and local development?
+10. Should hosted Toolmux deploy `toolmuxd` to Lambda as a container image, a wrapped generic image, or a Lambda-specific private image?
 
 ## Source References
 
@@ -606,3 +632,6 @@ MVP success:
 15. Go 1.26 release notes: https://go.dev/doc/go1.26
 16. Go release history: https://go.dev/doc/devel/release
 17. Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
+18. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
+19. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
+20. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html

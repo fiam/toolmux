@@ -8,6 +8,10 @@
 /coverage.out
 /tmp/
 
+.toolmux/cloudflared.log
+.toolmux/server.log
+.toolmux/dev-tunnel.env
+.toolmux/server-tunnel.env
+
 *.test
 *.prof
-

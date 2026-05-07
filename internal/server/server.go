@@ -1,4 +1,4 @@
-package broker
+package server
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 func NewCommand() *cobra.Command {
 	var addr string
 	cmd := &cobra.Command{
-		Use:   "auth-broker",
-		Short: "Run the Toolmux OAuth broker",
+		Use:   "toolmuxd",
+		Short: "Run the Toolmux local server daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			server := &http.Server{
 				Addr:              addr,

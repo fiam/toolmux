@@ -16,11 +16,23 @@ The initial provider set is:
 The current scaffold includes:
 
 1. `cmd/toolmux` for the CLI.
-2. `cmd/auth-broker` for the minimal OAuth broker.
+2. `cmd/toolmuxd` for the local server daemon.
 3. A provider command catalog.
 4. A local policy/RBAC engine.
 5. A starter Linear integration package.
 6. Starter tests, lint targets, and CI configuration.
+
+Deployment model:
+
+1. This OSS repo contains the CLI, `toolmuxd`, generic self-hosting docs, and
+   generic server container build files.
+2. Toolmux's hosted AWS/Lambda deployment belongs in a private infrastructure
+   repo with provider secrets, DNS, monitoring, and deployment state.
+
+See:
+
+1. [Deployment Model](docs/DEPLOYMENT_MODEL.md)
+2. [Self-Hosting toolmuxd](docs/SELF_HOSTING.md)
 
 ## Development
 
@@ -31,10 +43,11 @@ make fmt
 make test
 make test-integration
 make build
+make build-toolmuxd-image
 ```
 
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
 Linear is the first prepared provider because it supports native OAuth with
-PKCE, targeted scopes, and local refresh without the auth broker.
+PKCE, targeted scopes, and local refresh without `toolmuxd`.
