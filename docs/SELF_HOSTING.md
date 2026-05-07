@@ -105,7 +105,7 @@ The initial design is local custody:
 1. `toolmuxd` exchanges provider OAuth codes when a client secret is required.
 2. `toolmuxd` keeps handoff token bundles only in short-lived process memory.
 3. The CLI retrieves the token bundle once over HTTPS using a session secret.
-4. The CLI stores provider tokens locally.
+4. The CLI stores provider tokens in the user's OS credential store.
 5. `toolmuxd` deletes the handoff data.
 
 No extra application-level handoff encryption is required for this MVP model

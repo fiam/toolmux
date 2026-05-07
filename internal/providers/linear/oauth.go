@@ -11,7 +11,7 @@ import (
 
 const (
 	DefaultAuthorizeURL = "https://linear.app/oauth/authorize"
-	DefaultTokenURL     = "https://api.linear.app/oauth/token"
+	DefaultTokenURL     = "https://api.linear.app/oauth/token" // #nosec G101 -- OAuth token endpoint URL, not a credential.
 	DefaultRevokeURL    = "https://api.linear.app/oauth/revoke"
 
 	ScopeRead           = "read"

@@ -141,7 +141,7 @@ func policyCommand(opts *options) *cobra.Command {
 		Short: "Create a starter policy file",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Join(".toolmux", "policy.yaml")
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 				return err
 			}
 			if _, err := os.Stat(path); err == nil {

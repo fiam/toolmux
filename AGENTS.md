@@ -22,8 +22,8 @@ history first:
 
 ## Go Version
 
-Use the latest stable Go toolchain. As of 2026-05-06, the official Go release
-history shows Go 1.26.2 as the latest patch release on the Go 1.26 line.
+Use the latest stable Go toolchain. As of 2026-05-07, `govulncheck` reports
+Go 1.26.3 as the security-fix patch release for the Go 1.26 line.
 
 Repository expectations:
 
@@ -126,7 +126,8 @@ Provider tokens, auth codes, refresh tokens, one-time handoff secrets, and
 `Authorization` headers must never appear in logs, fixtures, command output,
 crash reports, telemetry, or committed files.
 
-Policy checks must run before vault reads, token refresh, or provider API calls.
+Policy checks must run before credential reads, token refresh, or provider API
+calls.
 Every executable command and alias needs a command spec for policy evaluation.
 
 ## Repository Boundary
@@ -178,5 +179,5 @@ Examples:
 feat(policy): add command catalog
 
 Add command metadata so local policy checks can run before provider
-credentials are loaded from the vault.
+credentials are loaded from the OS credential store.
 ```
