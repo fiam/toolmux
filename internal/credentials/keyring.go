@@ -234,7 +234,7 @@ func mapKeyringOpenError(err error) error {
 	if errors.Is(err, keyring.ErrNoAvailImpl) {
 		return fmt.Errorf("%w: no supported OS credential store backend found", ErrUnavailable)
 	}
-	return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 func mapKeyringError(err error) error {

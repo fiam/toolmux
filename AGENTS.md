@@ -75,6 +75,11 @@ make commitlint
 make dev-server-tunnel
 ```
 
+`make lint` is Dockerfile-based and should not require contributors to install
+`staticcheck`, `golangci-lint`, `govulncheck`, `gosec`, `gitleaks`,
+`actionlint`, or `yamllint` on the host. Keep linter versions pinned in the
+root `Dockerfile`.
+
 `make test-live` must be skipped by default and require explicit environment
 variables such as `SUPACLI_LIVE_TESTS=1`.
 
@@ -82,16 +87,14 @@ CI should run at least:
 
 1. `go fmt` or an equivalent format check.
 2. `go vet ./...`.
-3. `staticcheck ./...`.
-4. `golangci-lint run`.
-5. `go test ./...`.
-6. `go test -race ./...`.
-7. Deterministic fake-upstream integration tests.
-8. `govulncheck ./...`.
-9. `gosec ./...` or equivalent security linting.
-10. Secret scanning with `gitleaks` or equivalent.
-11. Markdown, YAML, and shell-script linting where applicable.
-12. Commit-message validation.
+3. Dockerfile-based `make lint`, including `staticcheck`, `golangci-lint`,
+   `modernize`, `govulncheck`, `gosec`, `gitleaks`, `actionlint`, and
+   repository-wide YAML linting.
+4. `go test ./...`.
+5. `go test -race ./...`.
+6. Deterministic fake-upstream integration tests.
+7. Markdown, YAML, and shell-script linting where applicable.
+8. Commit-message validation.
 
 ## Integration Tests
 

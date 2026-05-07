@@ -4,14 +4,14 @@ run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - bodyclose
-    - errcheck
     - errorlint
     - govet
     - ineffassign
+    - modernize
     - nilerr
-    - revive
     - staticcheck
     - unconvert
     - unused
@@ -25,4 +25,3 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-

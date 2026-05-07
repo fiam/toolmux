@@ -40,11 +40,15 @@ Use Go 1.26.3 or newer on the Go 1.26 line.
 
 ```bash
 make fmt
+make lint
 make test
 make test-integration
 make build
 make build-supaclid-image
 ```
+
+`make lint` runs the pinned linter toolchain through the root Dockerfile, so
+contributors only need Docker rather than local copies of every linter.
 
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
