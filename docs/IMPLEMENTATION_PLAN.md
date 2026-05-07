@@ -39,12 +39,25 @@ Recommended core dependencies:
 
 1. `spf13/cobra` for CLI commands.
 2. `gopkg.in/yaml.v3` for config and YAML output.
-3. `github.com/99designs/keyring` behind an internal interface for OS credential stores.
-4. `golang.org/x/oauth2` only where it matches provider behavior; wrap provider differences instead of leaking it into commands.
-5. No separate encrypted-file vault dependency in the MVP; provider token
+3. `charm.land/lipgloss/v2` for shared terminal styles, tables, hyperlinks,
+   and graceful color degradation.
+4. `github.com/muesli/termenv` for terminal capability and color-policy
+   detection, including `NO_COLOR` and `CLICOLOR_FORCE` behavior.
+5. `github.com/charmbracelet/glamour/v2` for rendering provider markdown
+   descriptions in human table/detail output.
+6. `github.com/99designs/keyring` behind an internal interface for OS
+   credential stores.
+7. `golang.org/x/oauth2` only where it matches provider behavior; wrap
+   provider differences instead of leaking it into commands.
+8. No separate full-screen TUI dependency for MVP; use regular commands with
+   terminal-aware rendering and external `$PAGER` integration.
+9. No separate encrypted-file vault dependency in the MVP; provider token
    bundles are stored directly in the user's OS credential store.
-6. No extra handoff-encryption dependency for MVP; use HTTPS, one-time session secrets, and short-lived in-memory handoff. Shared or durable handoff storage is out of MVP and requires a separate threat model before implementation.
-7. `goreleaser` and `cosign` for signed releases.
+10. No extra handoff-encryption dependency for MVP; use HTTPS, one-time session
+    secrets, and short-lived in-memory handoff. Shared or durable handoff
+    storage is out of MVP and requires a separate threat model before
+    implementation.
+11. `goreleaser` and `cosign` for signed releases.
 
 Recommended quality tooling:
 
@@ -101,6 +114,56 @@ Command -> PolicyEngine.Authorize(command metadata) -> Provider.AuthClient(profi
 ```
 
 Policy authorization must happen before credential reads, token refresh, or provider API calls.
+
+### Terminal Output Layer
+
+Toolmux should have one command surface for humans and agents. Provider commands
+return structured results; the shared output layer decides how to render those
+results for the current terminal and selected output format.
+
+Initial package shape:
+
+```text
+internal/output/
+  renderer.go       # table/json/yaml dispatch and result contracts
+  terminal.go       # TTY, width, color, and environment detection
+  styles.go         # shared semantic colors and status badges
+  table.go          # compact human tables
+  pager.go          # external $PAGER integration
+  markdown.go       # terminal markdown rendering
+  errors.go         # human and machine-readable error rendering
+```
+
+Output options:
+
+```go
+type Options struct {
+    Format      Format      // table, json, yaml
+    ColorPolicy ColorPolicy // auto, always, never
+    PagerPolicy PagerPolicy // auto, always, never
+    Interactive bool
+    Width       int
+    Quiet       bool
+}
+```
+
+Rules:
+
+1. Providers must not write precolored strings, invoke pagers, prompt directly,
+   or create provider-specific table renderers.
+2. JSON/YAML output is the automation contract: stable schemas, no ANSI escape
+   sequences, no pagers, no progress animation, and no implicit prompts.
+3. Human table output can use `lipgloss` styles, `termenv` capability detection,
+   `glamour` markdown rendering, semantic badges, and terminal hyperlinks.
+4. Pager support should call the user's `$PAGER` when output is long and stdout
+   is a TTY. JSON/YAML should not page unless the user explicitly requests it.
+5. `--color auto` must respect `NO_COLOR`, `CLICOLOR=0`,
+   `CLICOLOR_FORCE=1`, and `TERM=dumb`.
+6. Snapshot tests should fix terminal width and color policy so table output is
+   deterministic.
+7. Do not add a Bubble Tea-style app for MVP provider workflows. If interactive
+   browsing is added later, it must still share command specs, policy checks,
+   credential access, and output contracts with normal commands.
 
 ### Command Catalog and Policy Engine
 
@@ -362,12 +425,21 @@ toolmux policy doctor
 
 Acceptance criteria:
 
-1. Credential-store tests cover create, read, update, delete, missing credentials, corrupt payloads, and backend diagnostics.
-2. Table/JSON/YAML snapshots are stable.
-3. Missing keyring produces actionable diagnostics.
-4. Policy tests cover allow, deny, default-deny, default-allow, parent/child merge behavior, malformed policy files, and machine-readable denial output.
-5. A policy denial happens before credential-store access in a provider command test.
-6. Linter configuration is strict enough to catch unchecked errors, shadowing mistakes, leaked goroutines in tests, context misuse, unsafe formatting of host/port pairs, and insecure crypto defaults.
+1. Credential-store tests cover create, read, update, delete, missing
+   credentials, corrupt payloads, and backend diagnostics.
+2. Table/JSON/YAML snapshots are stable at fixed terminal widths.
+3. Output tests prove JSON/YAML disable ANSI color, pagers, prompts, spinners,
+   browser opens, and hyperlinks unless those values are literal data fields.
+4. Terminal tests cover `NO_COLOR`, `CLICOLOR=0`, `CLICOLOR_FORCE=1`,
+   `TERM=dumb`, non-TTY stdout, and explicit `--color`/`--pager` overrides.
+5. Missing keyring produces actionable diagnostics.
+6. Policy tests cover allow, deny, default-deny, default-allow, parent/child
+   merge behavior, malformed policy files, and machine-readable denial output.
+7. A policy denial happens before credential-store access in a provider command
+   test.
+8. Linter configuration is strict enough to catch unchecked errors, shadowing
+   mistakes, leaked goroutines in tests, context misuse, unsafe formatting of
+   host/port pairs, and insecure crypto defaults.
 
 ### M2 - Native OAuth Foundation with Linear
 
