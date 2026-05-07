@@ -28,7 +28,7 @@ build:
 
 .PHONY: build-toolmuxd-image
 build-toolmuxd-image:
-	docker build -f Dockerfile.toolmuxd -t toolmuxd:dev .
+	docker build -t toolmuxd:dev .
 
 .PHONY: fmt
 fmt:

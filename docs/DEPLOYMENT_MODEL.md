@@ -13,7 +13,7 @@ This repository contains product source and public artifacts:
 cmd/toolmux/                  # CLI source
 cmd/toolmuxd/                 # server daemon source
 internal/                     # shared CLI/server packages
-Dockerfile.toolmuxd           # generic toolmuxd OCI image
+Dockerfile                    # generic toolmuxd OCI image
 docs/                         # product, self-hosting, and provider docs
 ```
 

@@ -13,7 +13,7 @@ Initial repository layout:
 ```text
 cmd/toolmux/                  # CLI entrypoint
 cmd/toolmuxd/                 # Toolmux server daemon entrypoint
-Dockerfile.toolmuxd           # generic toolmuxd OCI image
+Dockerfile                    # generic toolmuxd OCI image
 internal/cli/                 # command tree and command helpers
 internal/config/              # profiles and non-secret metadata
 internal/output/              # table/json/yaml renderers
