@@ -53,5 +53,11 @@ contributors only need Docker rather than local copies of every linter.
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
+All current and future provider commands share the same output contract:
+human-friendly terminal output by default, and stable agent/script output with
+`--output json` or `--output yaml`. Provider implementations should return
+structured results and let the shared output layer handle colors, tables,
+markdown rendering, paging, and non-interactive behavior.
+
 Linear is the first prepared provider because it supports native OAuth with
 PKCE, targeted scopes, and local refresh without `supaclid`.

@@ -184,6 +184,35 @@ Human UX requirements:
 7. Users should be able to define aliases for provider-specific ids so command lines remain readable.
 8. Commands that return web resources should support `--open` to launch the provider URL in a browser.
 
+Terminal presentation contract:
+
+1. Supacli should not ship a separate full-screen TUI for provider workflows in
+   the MVP. The normal command surface must serve both humans and agents.
+2. Every current and future provider command must use shared output renderers
+   instead of provider-specific ANSI strings, paging, prompts, or table
+   formatting.
+3. Global output controls must include `--output table|json|yaml`,
+   `--color auto|always|never`, `--pager auto|always|never`, `--no-pager`,
+   `--no-input`, and `--quiet`.
+4. Color behavior must honor `NO_COLOR`, `CLICOLOR=0`, `CLICOLOR_FORCE=1`,
+   and `TERM=dumb` when `--color auto` is active.
+5. Pager behavior must honor `$PAGER`, fall back to direct output when no pager
+   is available, preserve ANSI color when paging human output, and never page
+   JSON/YAML unless explicitly requested.
+6. Human table output may use color, semantic badges, hyperlinks, aligned
+   columns, markdown rendering, and compact summaries when stdout is a TTY.
+7. Agent output must be undecorated: no ANSI escape sequences, no hyperlinks
+   beyond literal field values, no spinners, no prompts, no browser opens, and
+   no pager.
+8. Non-interactive stdin/stdout must disable prompts, browser opens, paging,
+   progress animation, and implicit color unless the user explicitly overrides
+   the behavior.
+9. Human errors should include a concise summary, likely cause, provider or
+   policy detail, retry guidance, and the equivalent inspect command when one
+   exists.
+10. Machine-readable errors must keep a stable schema for automation and policy
+   reporting.
+
 Human-oriented examples:
 
 ```bash
@@ -220,7 +249,9 @@ supacli linear issues
 supacli connections
 ```
 
-These TUI-style flows are not required for MVP, but the architecture should not block them.
+These optional flows are not required for MVP. If added later, they should remain
+part of the same command surface and output contract rather than becoming a
+separate application.
 
 ## Connection UX
 
@@ -554,9 +585,14 @@ All providers must support:
 10. Local policy enforcement before token access and provider API calls.
 11. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
 12. Human-friendly table output and stable JSON/YAML output for the same command.
-13. Preview or dry-run support for risky writes where the provider API allows safe preview.
-14. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-15. Open-in-browser support for commands that return provider URLs.
+13. Shared terminal presentation through `internal/output`; providers return
+    structured view models and never hand-roll colors, paging, prompts, or ad
+    hoc table layouts.
+14. Stable JSON/YAML schemas for automation, even when human table columns are
+    provider-specific or optimized for terminal width.
+15. Preview or dry-run support for risky writes where the provider API allows safe preview.
+16. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+17. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 

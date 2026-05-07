@@ -13,6 +13,7 @@ Agents must update this file when they:
 3. Add a new provider, auth mode, policy behavior, or test class.
 4. Change commit, release, linting, formatting, or security expectations.
 5. Change the public OSS/private infrastructure repository boundary.
+6. Change CLI output behavior, terminal UX, or machine-readable schemas.
 
 When updating Go guidance, check the official Go release notes and release
 history first:
@@ -113,6 +114,22 @@ Fake upstreams should emulate:
 
 Live-provider tests may exist for smoke coverage, but they must be opt-in,
 isolated from default CI, and must never record real tokens in fixtures.
+
+## CLI Output
+
+Supacli has one command surface for humans and agents. Do not add a separate
+provider-specific TUI, and do not let provider commands hand-roll ANSI styles,
+pagers, prompts, or table layouts.
+
+Provider commands must return structured results and route all presentation
+through `internal/output`. Human table output may use shared styles, color,
+hyperlinks, markdown rendering, compact tables, and pagers when stdout is a TTY.
+JSON/YAML output must stay stable and undecorated: no ANSI escape sequences, no
+pagers, no prompts, no progress animation, and no browser opens.
+
+When adding or changing a provider, update the PRD or implementation docs if the
+provider needs new output fields, error fields, aliases, shell completions,
+human table columns, or policy metadata.
 
 ## Local Provider Harnesses
 
