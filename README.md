@@ -19,7 +19,8 @@ The current scaffold includes:
 2. `cmd/auth-broker` for the minimal OAuth broker.
 3. A provider command catalog.
 4. A local policy/RBAC engine.
-5. Starter tests, lint targets, and CI configuration.
+5. A starter Linear integration package.
+6. Starter tests, lint targets, and CI configuration.
 
 ## Development
 
@@ -35,3 +36,5 @@ make build
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
+Linear is the first prepared provider because it supports native OAuth with
+PKCE, targeted scopes, and local refresh without the auth broker.

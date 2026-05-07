@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/fiam/toolmux/internal/policy"
+	"github.com/fiam/toolmux/internal/providers/linear"
 )
 
 type Provider struct {
@@ -53,12 +54,7 @@ func Initial() []Provider {
 			ID:          "linear",
 			DisplayName: "Linear",
 			AuthMode:    "native_pkce",
-			Specs: []policy.CommandSpec{
-				spec("linear.issues.list", "linear", []string{"linear", "issues", "list"}, "issue", "list", "read", nil, []string{"read"}),
-				spec("linear.issue.get", "linear", []string{"linear", "issue", "get"}, "issue", "read", "read", nil, []string{"read"}),
-				spec("linear.issue.create", "linear", []string{"linear", "issue", "create"}, "issue", "create", "write", []string{"ticket-write"}, []string{"issues:create"}),
-				spec("linear.comment.add", "linear", []string{"linear", "comment", "add"}, "comment", "create", "write", []string{"comment-write"}, []string{"comments:create"}),
-			},
+			Specs:       linear.CommandSpecs(),
 		},
 		{
 			ID:          "google",

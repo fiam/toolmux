@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 )
 
 type Server struct {
@@ -29,9 +30,7 @@ func New() *Server {
 		"ok":       true,
 		"channels": []map[string]string{{"id": "C123", "name": "general"}},
 	}))
-	mux.HandleFunc("POST /linear/graphql", jsonHandler(map[string]any{
-		"data": map[string]any{"viewer": map[string]string{"id": "linear-user-1"}},
-	}))
+	mux.HandleFunc("POST /linear/graphql", server.linearGraphQL)
 	mux.HandleFunc("GET /google/drive/v3/files", jsonHandler(map[string]any{
 		"files": []map[string]string{{"id": "file-1", "name": "Roadmap"}},
 	}))
@@ -76,7 +75,78 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		"refresh_token": "fake-refresh-token",
 		"expires_in":    3600,
 		"token_type":    "Bearer",
+		"scope":         "read issues:create comments:create",
 	})
+}
+
+func (s *Server) linearGraphQL(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid graphql request", http.StatusBadRequest)
+		return
+	}
+
+	switch {
+	case contains(request.Query, "viewer"):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"viewer": map[string]string{
+					"id": "linear-user-1", "name": "Linear User", "email": "user@example.com",
+				},
+			},
+		})
+	case contains(request.Query, "issues("):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"issues": map[string]any{
+					"nodes": []map[string]any{linearIssue("issue-1", "SUP-1", "Existing issue")},
+				},
+			},
+		})
+	case contains(request.Query, "issue("):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"issue": linearIssue("issue-1", "SUP-1", "Existing issue"),
+			},
+		})
+	case contains(request.Query, "issueCreate"):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"issueCreate": map[string]any{
+					"success": true,
+					"issue":   linearIssue("issue-2", "SUP-2", "Created issue"),
+				},
+			},
+		})
+	case contains(request.Query, "commentCreate"):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"commentCreate": map[string]any{
+					"success": true,
+					"comment": map[string]string{
+						"id": "comment-1", "body": "Looks good", "url": "https://linear.app/sup/comment-1", "issueId": "issue-2",
+					},
+				},
+			},
+		})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"errors": []map[string]string{{"message": "unsupported fake Linear query"}},
+		})
+	}
+}
+
+func linearIssue(id, identifier, title string) map[string]any {
+	return map[string]any{
+		"id": id, "identifier": identifier, "title": title, "url": "https://linear.app/sup/issue/" + identifier,
+		"team": map[string]string{"id": "team-1", "key": "SUP", "name": "Toolmux"},
+	}
+}
+
+func contains(value, needle string) bool {
+	return strings.Contains(value, needle)
 }
 
 func jsonHandler(value any) http.HandlerFunc {
