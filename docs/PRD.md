@@ -48,6 +48,7 @@ Secondary users:
 5. Scriptable defaults: commands fail with clear nonzero exits and structured errors in machine-readable output modes.
 6. No token leakage: tokens, auth codes, refresh tokens, and `Authorization` headers are never printed or logged.
 7. Policy before execution: every command and subcommand exposes authorization metadata and is checked against local policy before credential access or provider API calls.
+8. Agent-first, human-friendly: structured command contracts remain the source of truth, with TTY-aware affordances layered on top for people.
 
 ## Command Policy and RBAC
 
@@ -130,6 +131,73 @@ Policy evaluation requirements:
 7. Include a generated command/action catalog so users can write policies without reading source code.
 8. Treat policy files as configuration, not secrets.
 9. Avoid remote policy enforcement in the initial release; signed/team-managed policies can be added later.
+
+## Agent and Human UX
+
+Toolmux is primarily an agent-friendly CLI, but it should also feel fast, clear, and pleasant for humans. The product should expose one deterministic command model with two presentation modes:
+
+```bash
+toolmux ... --output json     # agent/script contract
+toolmux ...                   # human default
+```
+
+The structured interface is the source of truth. Human-friendly behavior must not make agent output unstable or ambiguous.
+
+Agent UX requirements:
+
+1. JSON/YAML output must be deterministic, schema-friendly, and quiet.
+2. Machine-readable errors must include provider, command id, error code, HTTP status when available, retry hint, and policy rule when relevant.
+3. Commands must not prompt, open browsers, page output, or render spinners when stdin/stdout are non-interactive unless explicitly requested.
+4. Every command must support nonzero exit codes that distinguish usage errors, policy denial, auth failures, provider failures, and partial success where relevant.
+
+Human UX requirements:
+
+1. Default output should use concise tables, readable summaries, color when supported, hyperlinks when supported, and clear empty states.
+2. Interactive prompts, selectors, confirmations, progress indicators, and browser opens are allowed only when attached to a TTY.
+3. Risky commands should support `--dry-run`, `--preview`, or `--confirm` patterns before mutation.
+4. Error messages should explain what failed, why it likely failed, the policy/provider detail behind it, and the exact command to retry or inspect.
+5. Common workflows may have ergonomic shortcuts that map to canonical commands.
+6. Shell completion should cover static commands and dynamic provider values such as profiles, Jira projects, Linear teams, Slack channels, Notion aliases, and Google accounts.
+7. Users should be able to define aliases for provider-specific ids so command lines remain readable.
+8. Commands that return web resources should support `--open` to launch the provider URL in a browser.
+
+Human-oriented examples:
+
+```bash
+toolmux linear mine
+toolmux jira open PROJ-123
+toolmux notion find roadmap
+toolmux slack send '#ops' 'deploy is done'
+toolmux linear issue create --title "Fix login" --dry-run
+toolmux gmail send --to user@example.com --subject "Hi" --preview
+```
+
+Discovery commands:
+
+```bash
+toolmux providers
+toolmux examples linear
+toolmux linear help workflows
+toolmux policy catalog
+```
+
+Alias commands:
+
+```bash
+toolmux alias set jira.default OPS
+toolmux alias set slack.ops C123456
+toolmux alias ls
+```
+
+Optional later UX:
+
+```bash
+toolmux browse
+toolmux linear issues
+toolmux connections
+```
+
+These TUI-style flows are not required for MVP, but the architecture should not block them.
 
 ## Connection UX
 
@@ -449,6 +517,11 @@ All providers must support:
 8. `--account <id-or-alias>` when multiple workspaces/sites are connected.
 9. Command metadata for policy evaluation.
 10. Local policy enforcement before token access and provider API calls.
+11. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
+12. Human-friendly table output and stable JSON/YAML output for the same command.
+13. Preview or dry-run support for risky writes where the provider API allows safe preview.
+14. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+15. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 
@@ -490,6 +563,8 @@ MVP success:
 6. The CLI can be installed as a signed binary on macOS, Linux, and Windows.
 7. A policy file can block write/destructive commands across all initial providers with consistent denial output.
 8. CI blocks unformatted code, failing linters, broken fake-provider integration tests, detected vulnerabilities, token leaks, and invalid commit messages.
+9. Non-interactive command runs never hang on prompts and always produce stable machine-readable output when `--output json` or `--output yaml` is used.
+10. Human default output is readable enough that users can complete common read/create/update flows without consulting raw JSON.
 
 ## Risks
 
@@ -508,7 +583,9 @@ MVP success:
 4. Should Notion write commands require an explicit `--parent` every time, or should users define a default workspace/page alias?
 5. Should Jira write commands be enabled in MVP or gated behind a second auth scope escalation?
 6. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
-7. What is the preferred hosted broker domain for production, staging, and local development?
+7. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
+8. Should aliases be stored per profile, per provider account, or both?
+9. What is the preferred hosted broker domain for production, staging, and local development?
 
 ## Source References
 
