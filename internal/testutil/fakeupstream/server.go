@@ -57,6 +57,8 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	values.Set("code", "fake-auth-code")
 	values.Set("state", state)
 	target.RawQuery = values.Encode()
+	// #nosec G710 -- fake OAuth upstream intentionally redirects to the
+	// caller-provided test callback URI after parsing it.
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 

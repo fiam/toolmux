@@ -6,7 +6,11 @@ Last updated: 2026-05-07
 
 Use Go for both the CLI and `supaclid`, the Supacli server daemon. Keep provider logic in one repository at first so the CLI and server share token schemas, provider metadata, and test fixtures.
 
-Use the latest stable Go release. As of 2026-05-06, the official release history shows Go 1.26.2 as the latest patch release on the Go 1.26 line. Set the module to Go 1.26, pin CI to the latest Go 1.26 patch, and update `AGENTS.md` whenever the project intentionally changes Go versions or toolchain expectations.
+Use the latest stable Go release. As of 2026-05-07, `govulncheck` reports Go
+1.26.3 as the security-fix patch release for the Go 1.26 line. Set the module
+to Go 1.26, pin CI to the latest Go 1.26 patch, and update `AGENTS.md`
+whenever the project intentionally changes Go versions or toolchain
+expectations.
 
 Initial repository layout:
 
@@ -18,7 +22,7 @@ internal/cli/                 # command tree and command helpers
 internal/config/              # profiles and non-secret metadata
 internal/output/              # table/json/yaml renderers
 internal/policy/              # local command policy and RBAC engine
-internal/vault/               # local encrypted credential vault
+internal/credentials/         # domain credential store over OS keyrings
 internal/oauth/               # PKCE, state, loopback, server handoff
 internal/providers/           # provider registry and common interfaces
 internal/providers/notion/
@@ -37,7 +41,8 @@ Recommended core dependencies:
 2. `gopkg.in/yaml.v3` for config and YAML output.
 3. `github.com/99designs/keyring` behind an internal interface for OS credential stores.
 4. `golang.org/x/oauth2` only where it matches provider behavior; wrap provider differences instead of leaking it into commands.
-5. `golang.org/x/crypto/chacha20poly1305` using XChaCha20-Poly1305 for local vault encryption.
+5. No separate encrypted-file vault dependency in the MVP; provider token
+   bundles are stored directly in the user's OS credential store.
 6. No extra handoff-encryption dependency for MVP; use HTTPS, one-time session secrets, and short-lived in-memory handoff. Shared or durable handoff storage is out of MVP and requires a separate threat model before implementation.
 7. `goreleaser` and `cosign` for signed releases.
 
@@ -84,7 +89,7 @@ AppContext
   ConfigStore
   PolicyEngine
   CommandCatalog
-  Vault
+  CredentialStore
   ProviderRegistry
   OutputRenderer
   HTTPClientFactory
@@ -97,7 +102,7 @@ Provider commands must not read tokens directly. They first authorize the comman
 Command -> PolicyEngine.Authorize(command metadata) -> Provider.AuthClient(profile, account, scopes) -> token refresh if needed -> API call
 ```
 
-Policy authorization must happen before vault reads, token refresh, or provider API calls.
+Policy authorization must happen before credential reads, token refresh, or provider API calls.
 
 ### Command Catalog and Policy Engine
 
@@ -181,54 +186,46 @@ type Provider interface {
 2. `brokered_local_custody`.
 3. `manual_token`, hidden behind an explicit unsupported/dev flag.
 
-### Local Vault
+### Local Credential Store
 
-Use a local encrypted vault instead of putting large JSON blobs directly into OS keychains.
+Store provider token bundles directly in the user's OS credential store through
+a domain-specific interface. Do not expose random key-value operations to
+provider code.
 
-Storage:
+Non-secret connection metadata:
 
 ```text
-OS keyring:
-  service: supacli
-  account: vault-key:<profile>
-  value: random 32-byte master key, base64 encoded
-
-Vault file:
-  path: ~/.local/share/supacli/vault.enc
-  contents: versioned encrypted JSON
+~/.config/supacli/config.yaml
+  profiles, selected account ids, display names, scopes, and provider metadata
 ```
 
-Vault plaintext schema:
+OS credential store item:
 
-```json
-{
-  "version": 1,
-  "profiles": {
-    "default": {
-      "connections": {
-        "linear:workspace-id": {
-          "provider": "linear",
-          "account_id": "workspace-id",
-          "display_name": "Linear Workspace",
-          "scopes": ["read", "issues:create"],
-          "access_token": "...",
-          "refresh_token": "...",
-          "expires_at": "2026-05-06T12:00:00Z",
-          "metadata": {}
-        }
-      }
-    }
-  }
+```text
+service: supacli
+key: profile/<profile>/provider/<provider>/service/<service>/account/<account-id>/oauth
+value: versioned OAuth token bundle JSON
+```
+
+Credential interface:
+
+```go
+type Store interface {
+    SaveOAuthTokens(ctx context.Context, ref ConnectionRef, tokens OAuthTokens) error
+    LoadOAuthTokens(ctx context.Context, ref ConnectionRef) (OAuthTokens, error)
+    DeleteOAuthTokens(ctx context.Context, ref ConnectionRef) error
+    Doctor(ctx context.Context) Diagnostics
 }
 ```
 
 Rules:
 
-1. Use atomic write: write temp file, fsync, rename.
-2. Lock the vault file during writes.
-3. Never log plaintext vault content.
-4. Disable plaintext fallback by default.
-5. Add `supacli vault doctor` for keyring availability diagnostics.
+1. Use `github.com/99designs/keyring` behind `internal/credentials`.
+2. Store only minimal OAuth token bundles and refresh metadata in keyring items.
+3. Store display names, provider account ids, selected accounts, and scopes in non-secret config.
+4. Do not rely on keyring enumeration for connection listing; config is the index.
+5. Disable plaintext fallback by default.
+6. Add `supacli connections doctor` for keyring availability diagnostics.
 
 ### Native PKCE Flow
 
@@ -298,7 +295,7 @@ CLI polling:
 
 1. Poll `GET /v1/oauth/sessions/{session_id}` with the session secret.
 2. Receive token bundle once over HTTPS.
-3. Store in local vault.
+3. Store in the local OS credential store.
 
 Refresh for supaclid-backed providers:
 
@@ -341,7 +338,7 @@ Acceptance criteria:
 Deliverables:
 
 1. Config profiles.
-2. Local encrypted vault.
+2. Local credential store over OS keyrings.
 3. Output renderers for table, JSON, and YAML.
 4. Provider registry.
 5. Command catalog and local policy engine.
@@ -366,11 +363,11 @@ supacli policy doctor
 
 Acceptance criteria:
 
-1. Vault tests cover create, read, update, delete, corrupt file handling, and concurrent write protection.
+1. Credential-store tests cover create, read, update, delete, missing credentials, corrupt payloads, and backend diagnostics.
 2. Table/JSON/YAML snapshots are stable.
 3. Missing keyring produces actionable diagnostics.
 4. Policy tests cover allow, deny, default-deny, default-allow, parent/child merge behavior, malformed policy files, and machine-readable denial output.
-5. A policy denial happens before vault access in a provider command test.
+5. A policy denial happens before credential-store access in a provider command test.
 6. Linter configuration is strict enough to catch unchecked errors, shadowing mistakes, leaked goroutines in tests, context misuse, unsafe formatting of host/port pairs, and insecure crypto defaults.
 
 ### M2 - Native OAuth Foundation with Linear
@@ -653,7 +650,7 @@ Manager, DNS, and monitoring.
 Recommended exact order:
 
 1. M0 repo/tooling.
-2. M1 CLI core and vault.
+2. M1 CLI core and credentials.
 3. M2 Linear native PKCE.
 4. M3 supaclid and Notion.
 5. M4 Jira.

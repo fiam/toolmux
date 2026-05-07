@@ -249,7 +249,8 @@ Connection success output should show:
 4. Local storage mode.
 5. Suggested first command.
 
-Connection metadata may be stored in config files, but token material must be stored in the encrypted local vault.
+Connection metadata may be stored in config files, but token material must be
+stored directly in the user's OS credential store.
 
 ## Auth Model
 
@@ -305,8 +306,7 @@ Supacli stores non-secret metadata separately from secrets.
 
 ```text
 ~/.config/supacli/config.yaml        # profiles, selected account ids, display names
-OS credential store                  # local vault key
-~/.local/share/supacli/vault.enc     # encrypted token bundle and refresh metadata
+OS credential store                  # OAuth token bundles and refresh metadata
 ```
 
 OS credential store targets:
@@ -315,7 +315,19 @@ OS credential store targets:
 2. Windows Credential Manager / DPAPI-backed credential APIs.
 3. Linux Secret Service via GNOME Keyring or KWallet.
 
-The encrypted vault contains provider tokens, refresh tokens, expiry timestamps, scopes, provider account ids, and workspace/site ids.
+Supacli stores one OS credential item per provider/service connection:
+
+```text
+service: supacli
+key: profile/<profile>/provider/<provider>/service/<service>/account/<account-id>/oauth
+value: versioned OAuth token bundle JSON
+```
+
+The keyring value contains provider access tokens, refresh tokens, expiry
+timestamps, token type, scopes, and small provider-specific secret OAuth fields.
+Display names, provider account ids, selected accounts, and other non-secret
+metadata remain in config files so connection listing does not depend on
+keyring enumeration.
 
 ## Provider MVPs
 
@@ -557,7 +569,7 @@ All providers must support:
 7. Token refresh must atomically replace rotating refresh tokens.
 8. `disconnect` must revoke remote tokens where the provider exposes a revocation endpoint, then delete local credentials.
 9. The OSS server repo must include secret scanning and clear documentation that deployment operators must provide provider client secrets out of band.
-10. Local policy denies must be checked before provider tokens are read from the vault.
+10. Local policy denies must be checked before provider tokens are read from the OS credential store.
 
 ## Quality Requirements
 
@@ -635,3 +647,4 @@ MVP success:
 18. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
 19. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
 20. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html
+21. 99designs Go keyring package: https://pkg.go.dev/github.com/99designs/keyring

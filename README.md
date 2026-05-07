@@ -36,7 +36,7 @@ See:
 
 ## Development
 
-Use Go 1.26.2 or newer on the Go 1.26 line.
+Use Go 1.26.3 or newer on the Go 1.26 line.
 
 ```bash
 make fmt
