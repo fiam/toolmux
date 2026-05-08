@@ -264,8 +264,11 @@ toolmux connect slack
 toolmux connect linear
 toolmux connect google
 
+toolmux status
+toolmux status notion jira
+toolmux doctor
+toolmux doctor notion jira
 toolmux connections ls
-toolmux connections doctor
 toolmux disconnect notion
 ```
 
@@ -573,7 +576,8 @@ Out of scope for MVP:
 
 All providers must support:
 
-1. `connect`, `disconnect`, `status`, and `doctor`.
+1. `connect`, `disconnect`, global `status [provider...]`, and global
+   `doctor [provider...]`.
 2. Local credential storage.
 3. Token refresh before expiry.
 4. Remote revocation where supported.
@@ -584,15 +588,19 @@ All providers must support:
 9. Command metadata for policy evaluation.
 10. Local policy enforcement before token access and provider API calls.
 11. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
-12. Human-friendly table output and stable JSON/YAML output for the same command.
-13. Shared terminal presentation through `internal/output`; providers return
+12. `status` output must show connection state plus known scopes/capabilities
+    or provider permissions.
+13. `doctor` output must run core diagnostics plus provider-defined checks and
+    include remediation when a check fails or warns.
+14. Human-friendly table output and stable JSON/YAML output for the same command.
+15. Shared terminal presentation through `internal/output`; providers return
     structured view models and never hand-roll colors, paging, prompts, or ad
     hoc table layouts.
-14. Stable JSON/YAML schemas for automation, even when human table columns are
+16. Stable JSON/YAML schemas for automation, even when human table columns are
     provider-specific or optimized for terminal width.
-15. Preview or dry-run support for risky writes where the provider API allows safe preview.
-16. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-17. Open-in-browser support for commands that return provider URLs.
+17. Preview or dry-run support for risky writes where the provider API allows safe preview.
+18. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+19. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 

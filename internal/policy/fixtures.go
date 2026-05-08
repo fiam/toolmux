@@ -8,7 +8,7 @@ roles:
     allow:
       - id: allow-read
         provider: "*"
-        actions: ["read", "list", "search", "status"]
+        actions: ["read", "list", "search", "status", "diagnose"]
   operator:
     extends: ["reader"]
     allow:

@@ -23,6 +23,8 @@ func Initial() []Provider {
 			DisplayName: "Notion",
 			AuthMode:    "brokered_local_custody",
 			Specs: []policy.CommandSpec{
+				spec("notion.status", "notion", []string{"status", "notion"}, "connection", "status", "read", nil, nil),
+				spec("notion.doctor", "notion", []string{"doctor", "notion"}, "connection", "diagnose", "read", nil, nil),
 				spec("notion.search", "notion", []string{"notion", "search"}, "workspace", "search", "read", nil, nil),
 				spec("notion.page.get", "notion", []string{"notion", "page", "get"}, "page", "read", "read", nil, nil),
 				spec("notion.page.create", "notion", []string{"notion", "page", "create"}, "page", "create", "write", []string{"content-write"}, nil),
@@ -34,6 +36,8 @@ func Initial() []Provider {
 			DisplayName: "Jira",
 			AuthMode:    "brokered_local_custody",
 			Specs: []policy.CommandSpec{
+				spec("jira.status", "jira", []string{"status", "jira"}, "connection", "status", "read", nil, nil),
+				spec("jira.doctor", "jira", []string{"doctor", "jira"}, "connection", "diagnose", "read", nil, nil),
 				spec("jira.sites.list", "jira", []string{"jira", "sites", "ls"}, "site", "list", "read", nil, []string{"read:jira-work"}),
 				spec("jira.issues.list", "jira", []string{"jira", "issues", "list"}, "issue", "list", "read", nil, []string{"read:jira-work"}),
 				spec("jira.issue.get", "jira", []string{"jira", "issue", "get"}, "issue", "read", "read", nil, []string{"read:jira-work"}),
@@ -46,6 +50,8 @@ func Initial() []Provider {
 			DisplayName: "Slack",
 			AuthMode:    "native_pkce",
 			Specs: []policy.CommandSpec{
+				spec("slack.status", "slack", []string{"status", "slack"}, "connection", "status", "read", nil, nil),
+				spec("slack.doctor", "slack", []string{"doctor", "slack"}, "connection", "diagnose", "read", nil, nil),
 				spec("slack.conversations.list", "slack", []string{"slack", "conversations", "ls"}, "conversation", "list", "read", nil, []string{"channels:read"}),
 				spec("slack.message.send", "slack", []string{"slack", "message", "send"}, "message", "send", "write", []string{"external-send"}, []string{"chat:write"}),
 				spec("slack.search", "slack", []string{"slack", "search"}, "message", "search", "read", nil, []string{"search:read"}),
@@ -63,6 +69,8 @@ func Initial() []Provider {
 			AuthMode:    "native_pkce",
 			Aliases:     []string{"google-docs", "google-drive", "gmail"},
 			Specs: []policy.CommandSpec{
+				spec("google.status", "google", []string{"status", "google"}, "connection", "status", "read", nil, nil),
+				spec("google.doctor", "google", []string{"doctor", "google"}, "connection", "diagnose", "read", nil, nil),
 				spec("google.docs.create", "google-docs", []string{"google", "docs", "create"}, "document", "create", "write", []string{"content-write"}, []string{"https://www.googleapis.com/auth/drive.file"}),
 				spec("google.docs.get", "google-docs", []string{"google", "docs", "get"}, "document", "read", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),
 				spec("google.docs.export", "google-docs", []string{"google", "docs", "export"}, "document", "read", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),

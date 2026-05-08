@@ -63,6 +63,10 @@ can persist across rebuilds.
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
+Use `toolmux status` for the connection overview, or pass provider names such
+as `toolmux status notion jira` to narrow the check. Use `toolmux doctor` or
+`toolmux doctor notion` for active setup and provider diagnostics.
+
 All current and future provider commands share the same output contract:
 human-friendly terminal output by default, and stable agent/script output with
 `--output json` or `--output yaml`. Provider implementations should return

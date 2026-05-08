@@ -286,7 +286,7 @@ Rules:
 3. Store display names, provider account ids, selected accounts, and scopes in non-secret config.
 4. Do not rely on keyring enumeration for connection listing; config is the index.
 5. Disable plaintext fallback by default.
-6. Add `toolmux connections doctor` for keyring availability diagnostics.
+6. Add `toolmux doctor` for keyring availability diagnostics and provider setup checks.
 
 ### Native PKCE Flow
 
@@ -410,7 +410,8 @@ Deliverables:
 toolmux connect <provider>
 toolmux disconnect <provider>
 toolmux connections ls
-toolmux connections doctor
+toolmux status [provider...]
+toolmux doctor [provider...]
 ```
 
 7. Base policy commands:

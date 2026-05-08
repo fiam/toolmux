@@ -133,6 +133,16 @@ hyperlinks, markdown rendering, compact tables, and pagers when stdout is a TTY.
 JSON/YAML output must stay stable and undecorated: no ANSI escape sequences, no
 pagers, no prompts, no progress animation, and no browser opens.
 
+Connection status is owned by the root `status [provider...]` command, and
+diagnostics are owned by the root `doctor [provider...]` command. Do not add
+provider-specific `status` or `doctor` subcommands; add or update the
+provider's `status <provider>` and `doctor <provider>` command specs so policy
+checks still cover each provider.
+
+`status` should report connection state and known scopes/capabilities.
+`doctor` should run active core and provider-defined diagnostics with
+actionable remediation, while still checking policy before provider token reads.
+
 When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
 human table columns, or policy metadata.
