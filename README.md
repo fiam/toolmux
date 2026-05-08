@@ -1,81 +1,223 @@
 # Toolmux
 
-Toolmux is a local-first mega CLI for connecting and operating SaaS services
-from one command surface.
+Toolmux is a local-first CLI for working with SaaS tools from one
+policy-aware command surface.
 
-The initial provider set is:
+It is built for both people and agents:
 
-1. Notion.
-2. Jira.
-3. Slack.
-4. Linear.
-5. Google Docs.
-6. Google Drive.
-7. Gmail.
+1. Humans get readable tables, colors, markdown rendering, pagers, browser
+   opens, and interactive selectors when running in a terminal.
+2. Agents and scripts get stable `json` and `yaml` output with no prompts,
+   spinners, pagers, browser opens, or ANSI escapes.
 
-The current scaffold includes:
+Toolmux stores provider tokens in your operating system credential store by
+default. The hosted or self-hosted `toolmuxd` server brokers OAuth for
+providers that require confidential client secrets, but it does not provide a
+cloud token vault in the initial design.
 
-1. `cmd/toolmux` for the CLI.
-2. `cmd/toolmuxd` for the local server daemon.
-3. A provider command catalog.
-4. A local policy/RBAC engine.
-5. A starter Linear integration package.
-6. Starter tests, lint targets, and CI configuration.
+## Status
 
-Deployment model:
+Toolmux is early software. The first usable provider is Notion.
 
-1. This OSS repo contains the CLI, `toolmuxd`, generic self-hosting docs, and
-   generic server container build files.
-2. Toolmux's hosted AWS/Lambda deployment belongs in a private infrastructure
-   repo with provider secrets, DNS, monitoring, and deployment state.
+| Provider | Status | Notes |
+| --- | --- | --- |
+| Notion | Active | OAuth connect, search, page reads/writes, links, page tree, and data sources. |
+| Linear | Planned | Provider metadata and early integration work exist. |
+| Jira | Planned | Command catalog exists. |
+| Slack | Planned | Command catalog exists. |
+| Google Docs | Planned | Command catalog exists. |
+| Google Drive | Planned | Command catalog exists. |
+| Gmail | Planned | Command catalog exists. |
 
-See:
+## Install
 
-1. [Deployment Model](docs/DEPLOYMENT_MODEL.md)
-2. [Self-Hosting toolmuxd](docs/SELF_HOSTING.md)
+For now, build from source:
+
+```bash
+git clone https://github.com/fiam/toolmux.git
+cd toolmux
+make dev-cli
+toolmux version
+```
+
+Use Go 1.26.3 or newer on the Go 1.26 line. Docker is only required for the
+full linter pass and container image builds.
+
+## Connect Notion
+
+The CLI defaults to hosted `https://api.toolmux.com` for brokered OAuth.
+
+```bash
+toolmux connect notion
+toolmux status notion
+toolmux doctor notion
+```
+
+For a local or self-hosted `toolmuxd`, point the CLI at your server:
+
+```bash
+export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
+toolmux connect notion
+```
+
+To print the OAuth URL without waiting for completion:
+
+```bash
+toolmux connect notion --auth-url-only
+```
+
+To disconnect and remove the local token:
+
+```bash
+toolmux disconnect notion --yes
+```
+
+Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+Notion app setup notes are in
+[docs/providers/notion-app.md](docs/providers/notion-app.md).
+
+## Notion Examples
+
+Search:
+
+```bash
+toolmux notion search roadmap
+toolmux notion search --query tasks --type data_source
+toolmux notion search --limit 10 --sort edited --direction desc
+```
+
+Read pages:
+
+```bash
+toolmux notion page read "Roadmap"
+toolmux notion page read --follow "Roadmap"
+toolmux notion page markdown "Roadmap"
+toolmux notion page links "Roadmap"
+toolmux notion page open "Roadmap"
+```
+
+Navigate page structure:
+
+```bash
+toolmux notion page children "Roadmap"
+toolmux notion page tree "Roadmap" --depth 3
+```
+
+Create and update pages:
+
+```bash
+toolmux notion page create \
+  --parent-type workspace \
+  --title "Meeting Notes" \
+  --markdown "# Meeting Notes"
+
+toolmux notion page update "Meeting Notes" --title "Team Notes"
+toolmux notion page content insert "Team Notes" --markdown "## Followups"
+toolmux notion page content replace "Team Notes" \
+  --markdown "# Replacement" \
+  --yes
+```
+
+Inspect page export fidelity before automated edits:
+
+```bash
+toolmux notion page doctor "Roadmap"
+```
+
+Work with data sources:
+
+```bash
+toolmux notion data-source query <data-source-id>
+toolmux notion data-source schema <data-source-id>
+toolmux notion data-source row create <data-source-id> \
+  --title "New Row"
+toolmux notion data-source row update <page-id> \
+  --title "Updated Row"
+```
+
+## Output Modes
+
+Human output is the default:
+
+```bash
+toolmux notion page read "Roadmap"
+```
+
+Use structured output for agents and scripts:
+
+```bash
+toolmux --output json notion page links "Roadmap"
+toolmux --output yaml status notion
+```
+
+Global output controls:
+
+```bash
+--output table|json|yaml
+--color auto|always|never
+--pager auto|always|never
+```
+
+Interactive features are disabled automatically when Toolmux is not attached
+to a terminal.
+
+## Local Policy
+
+Toolmux can enforce local command policy before it reads provider credentials
+or calls provider APIs.
+
+Create a starter policy:
+
+```bash
+toolmux policy init
+```
+
+Inspect available policy-aware commands:
+
+```bash
+toolmux policy catalog
+```
+
+Check a command:
+
+```bash
+toolmux policy check --command "notion page read Roadmap"
+```
+
+Policy discovery order:
+
+1. `--policy <path>`
+2. `TOOLMUX_POLICY=<path>`
+3. `.toolmux/policy.yaml` in the current directory or a parent directory
+4. No policy file means local usage is allowed by default
+
+Policy files are local guardrails for projects and automation. They are not a
+security boundary against a user who controls the machine or working directory.
+
+## Token Custody
+
+Toolmux uses local token custody:
+
+1. `toolmuxd` starts a browser OAuth flow.
+2. The provider redirects back to `toolmuxd`.
+3. `toolmuxd` exchanges the code when a client secret is required.
+4. The CLI retrieves the token bundle once over HTTPS.
+5. The CLI stores provider tokens in the OS credential store.
+6. `toolmuxd` keeps only short-lived handoff data in process memory.
+
+This keeps long-lived provider tokens on your machine instead of in Toolmux's
+hosted service.
+
+## Self-Hosting
+
+You can run your own `toolmuxd` with your own provider OAuth apps and secrets.
+See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+
+The public repository contains portable source, generic container builds, fake
+upstream tests, and self-hosting docs. Toolmux's hosted deployment
+infrastructure and provider secrets are intentionally outside this repository.
 
 ## Development
 
-Use Go 1.26.3 or newer on the Go 1.26 line.
-
-```bash
-make fmt
-make lint
-make test
-make test-integration
-make build
-make build-toolmuxd-image
-```
-
-`make lint` runs the pinned linter toolchain through the root Dockerfile, so
-contributors only need Docker rather than local copies of every linter.
-
-For local macOS Keychain testing, build a stable development binary with:
-
-```bash
-make dev-cli
-CODESIGN_IDENTITY="Toolmux Local Development" make dev-cli
-```
-
-The second form signs `./bin/toolmux` after building so Keychain trust prompts
-can persist across rebuilds.
-
-Provider commands are stubs for now, but they already pass through command
-metadata and local policy authorization.
-
-All current and future provider commands share the same output contract:
-human-friendly terminal output by default, and stable agent/script output with
-`--output json` or `--output yaml`. Provider implementations should return
-structured results and let the shared output layer handle colors, tables,
-markdown rendering, paging, and non-interactive behavior.
-
-The CLI defaults to hosted `https://api.toolmux.com` for brokered OAuth flows.
-Set `TOOLMUX_TOOLMUXD_URL` to point at a local or self-hosted `toolmuxd` during
-development.
-
-Use `toolmux status` for the connection overview, or pass provider names such
-as `toolmux status notion jira` to narrow the check. Use `toolmux doctor` or
-`toolmux doctor notion` for active setup and provider diagnostics.
-
-Linear is the first prepared provider because it supports native OAuth with
-PKCE, targeted scopes, and local refresh without `toolmuxd`.
+Contributor setup and project conventions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).

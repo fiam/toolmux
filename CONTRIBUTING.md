@@ -1,0 +1,221 @@
+# Contributing
+
+Thanks for helping build Toolmux. This guide is for developers working on the
+CLI, `toolmuxd`, provider integrations, docs, tests, and release tooling.
+
+## Requirements
+
+Install:
+
+1. Go 1.26.3 or newer on the Go 1.26 line.
+2. Docker, for the full Dockerfile-based linter pass.
+3. `make`.
+4. `cloudflared`, only if you are testing browser OAuth callbacks locally.
+
+On macOS, local Keychain testing is easier if you build a stable signed binary:
+
+```bash
+CODESIGN_IDENTITY="Apple Development:" make dev-cli
+```
+
+Any stable local or Apple Developer signing identity can work. The important
+part is that the rebuilt `bin/toolmux` keeps the same code-signing identity so
+Keychain trust prompts can persist across builds.
+
+## Setup
+
+```bash
+git clone https://github.com/fiam/toolmux.git
+cd toolmux
+make dev-cli
+./bin/toolmux version
+```
+
+Run the default test suite:
+
+```bash
+make test
+```
+
+Run the full local quality pass:
+
+```bash
+make fmt-check
+make vet
+make test
+make lint
+```
+
+`make lint` builds the `lint` target from the root `Dockerfile`. Contributors
+do not need to install `staticcheck`, `golangci-lint`, `govulncheck`,
+`gosec`, `gitleaks`, `actionlint`, or `yamllint` on the host.
+
+## Common Targets
+
+```bash
+make help
+make dev-cli
+make build
+make build-toolmuxd-image
+make fmt
+make fmt-check
+make vet
+make test
+make test-race
+make test-integration
+make test-live
+make lint
+make coverage
+make commitlint
+make dev-server-tunnel
+```
+
+`make test-live` is opt-in. It must not run live provider tests unless
+`TOOLMUX_LIVE_TESTS=1` and the required provider credentials are present.
+
+## Development Workflow
+
+1. Keep changes narrowly scoped.
+2. Prefer existing package patterns over new abstractions.
+3. Add or update command specs before a command can read credentials.
+4. Run policy checks before token reads or provider API calls.
+5. Keep human output in `internal/output`.
+6. Keep JSON/YAML output stable and free of ANSI escapes.
+7. Add fake-upstream tests for provider behavior.
+8. Do not rely on live SaaS providers for default CI correctness.
+
+Provider commands should be useful for both humans and agents. If a command
+adds a prompt, browser open, pager, spinner, or selector, it must be gated on
+interactive terminal use and must not affect JSON/YAML output.
+
+## Documentation Expectations
+
+Update docs in the same change when behavior changes:
+
+1. Update `README.md` for user-visible commands, auth behavior, output modes,
+   installation steps, or provider status.
+2. Update `CONTRIBUTING.md` for developer workflow, tests, linting, release,
+   local environment, or architecture expectations.
+3. Update `AGENTS.md` when agent instructions, required checks, or repository
+   conventions change.
+4. Update `docs/PRD.md` or `docs/IMPLEMENTATION_PLAN.md` when product scope or
+   planned provider behavior changes.
+5. Update provider docs under `docs/providers/` when OAuth setup or live
+   provider configuration changes.
+
+Do not leave README examples pointing at commands that no longer exist.
+
+## Provider Integrations
+
+When adding or expanding a provider:
+
+1. Add command specs with provider, resource, action, effect, risk, and scopes.
+2. Add client code that uses structured request and response types.
+3. Avoid `map[string]any` for server/client JSON when a stable struct is
+   practical.
+4. Use the OS credential store through the shared credentials interface.
+5. Keep provider tokens, auth codes, refresh tokens, and `Authorization`
+   headers out of logs and fixtures.
+6. Add fake-upstream behavior for success, pagination, malformed responses,
+   permission errors, rate limits, and server failures.
+7. Add integration tests that run without live provider credentials.
+8. Keep live tests optional and skipped by default.
+
+For commands that mutate or delete data, include `--dry-run` where useful and
+require explicit confirmation for destructive or broad replacement actions.
+
+## Local OAuth Testing
+
+For Notion or other brokered OAuth flows, run a local server tunnel:
+
+```bash
+make dev-server-tunnel
+```
+
+For a stable Cloudflare hostname:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create toolmux-dev
+cloudflared tunnel route dns toolmux-dev auth-dev.example.com
+
+TOOLMUX_TUNNEL_HOSTNAME=auth-dev.example.com \
+  TOOLMUX_TUNNEL_NAME=toolmux-dev \
+  make dev-server-tunnel
+```
+
+Then point the CLI at that server:
+
+```bash
+export TOOLMUX_TOOLMUXD_URL=https://auth-dev.example.com
+```
+
+Never commit tunnel URLs, Cloudflare tunnel tokens, provider client secrets,
+OAuth codes, provider tokens, `.env`, `.envrc`, or local credential material.
+
+## Policy and RBAC
+
+Every executable command and alias needs policy metadata. Policy must be
+evaluated before:
+
+1. Loading provider tokens from the credential store.
+2. Refreshing tokens.
+3. Calling provider APIs.
+4. Opening browser flows for provider auth.
+
+Use these commands while developing:
+
+```bash
+./bin/toolmux policy catalog
+./bin/toolmux policy check --command "notion page read Roadmap"
+./bin/toolmux policy doctor
+```
+
+## Commit Messages
+
+Use Conventional Commits:
+
+```text
+<type>[optional scope]: <description>
+
+[optional body]
+```
+
+Rules enforced by `make commitlint`:
+
+1. Subject line at or below 50 characters.
+2. Body lines wrapped at 72 characters.
+3. Blank line between subject and body.
+4. Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`,
+   `ci`, `chore`, and `revert`.
+
+Example:
+
+```text
+feat(notion): add page links command
+
+Expose page links as stable structured output so agents can inspect
+navigation targets without using the interactive follow menu.
+```
+
+## Pull Request Checklist
+
+Before opening a PR, check:
+
+1. `make fmt-check`
+2. `make vet`
+3. `make test`
+4. `make lint`, when Docker is available
+5. `make commitlint`, after creating commits
+6. README/CONTRIBUTING/AGENTS/docs updates for behavior changes
+
+If you cannot run a check, call that out in the PR with the reason.
+
+## Security
+
+Do not commit secrets or generated credential material. If you accidentally
+print or commit a token, revoke it immediately and tell maintainers.
+
+Security-sensitive changes should preserve local token custody and should not
+add durable server-side provider token storage without an explicit product and
+threat-model update.

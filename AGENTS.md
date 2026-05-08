@@ -14,6 +14,20 @@ Agents must update this file when they:
 4. Change commit, release, linting, formatting, or security expectations.
 5. Change the public OSS/private infrastructure repository boundary.
 6. Change CLI output behavior, terminal UX, or machine-readable schemas.
+7. Change public user behavior that should be reflected in `README.md`.
+8. Change developer workflow that should be reflected in `CONTRIBUTING.md`.
+
+Agents must keep `README.md`, `CONTRIBUTING.md`, and this file in sync:
+
+1. `README.md` is for users. Update it for user-visible commands, provider
+   status, auth flows, output modes, install instructions, and safety notes.
+2. `CONTRIBUTING.md` is for developers. Update it for local setup, test/lint
+   workflow, provider integration rules, PR expectations, and release tooling.
+3. `AGENTS.md` is for coding agents. Update it for repository expectations
+   that agents must follow while editing code or docs.
+4. Do not add or rename commands, flags, providers, auth behavior, policy
+   behavior, or quality gates without checking whether all three docs need an
+   update.
 
 When updating Go guidance, check the official Go release notes and release
 history first:
