@@ -2,16 +2,14 @@
 .env
 .env.*
 !.env.example
+.envrc
+.envrc.*
 
 /bin/
 /dist/
 /coverage.out
 /tmp/
-
-.toolmux/cloudflared.log
-.toolmux/server.log
-.toolmux/dev-tunnel.env
-.toolmux/server-tunnel.env
+/.toolmux/
 
 *.test
 *.prof

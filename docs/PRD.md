@@ -318,7 +318,7 @@ Flow:
 
 ```text
 CLI generates one-time handoff id and session secret
-CLI opens auth.toolmux.dev
+CLI opens api.toolmux.com
 Provider redirects to toolmuxd
 toolmuxd exchanges code using provider client secret
 toolmuxd stores token bundle in short-lived in-memory handoff
@@ -372,21 +372,34 @@ Auth:
 1. toolmuxd OAuth through a Notion public connection.
 2. Token refresh uses toolmuxd because Notion requires client credentials for refresh.
 3. User grants access to selected pages/databases in Notion.
+4. The CLI defaults to hosted `https://api.toolmux.com` for toolmuxd and uses
+   `TOOLMUX_TOOLMUXD_URL` for local development or self-hosted deployments.
 
 MVP commands:
 
 ```bash
+toolmux notion search roadmap
 toolmux notion search --query "roadmap"
 toolmux notion page get <page-id>
+toolmux notion page markdown <page-id>
 toolmux notion page create --parent <page-id> --title "..."
-toolmux notion database query <database-id>
+toolmux notion page update <page-id> --title "..."
+toolmux notion page content insert <page-id> --file body.md
+toolmux notion page content replace <page-id> --file body.md
+toolmux notion page content update <page-id> --old "..." --new "..."
+toolmux notion page delete <page-id> --yes
+toolmux notion page restore <page-id>
+toolmux notion page move <page-id> --parent <page-id>
+toolmux notion data-source query <data-source-id>
+toolmux notion database data-sources <database-id>
 ```
 
 Out of scope for MVP:
 
 1. Full workspace crawling beyond pages/databases selected in Notion's permission flow.
-2. Complex block editing UI.
-3. Database schema migrations.
+2. Permanent page deletion; Notion's API supports trash/restore, not hard delete.
+3. Complex block editing UI beyond markdown insert/replace/search-and-replace.
+4. Database or data-source schema migrations.
 
 ### Jira
 
@@ -596,11 +609,14 @@ All providers must support:
 15. Shared terminal presentation through `internal/output`; providers return
     structured view models and never hand-roll colors, paging, prompts, or ad
     hoc table layouts.
-16. Stable JSON/YAML schemas for automation, even when human table columns are
+16. Markdown-producing commands should render Markdown through
+    `charm.land/glamour/v2` for interactive human table output, while
+    JSON/YAML and non-interactive output remain undecorated and stable.
+17. Stable JSON/YAML schemas for automation, even when human table columns are
     provider-specific or optimized for terminal width.
-17. Preview or dry-run support for risky writes where the provider API allows safe preview.
-18. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-19. Open-in-browser support for commands that return provider URLs.
+18. Preview or dry-run support for risky writes where the provider API allows safe preview.
+19. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+17. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 

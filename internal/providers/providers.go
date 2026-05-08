@@ -6,6 +6,7 @@ import (
 
 	"github.com/fiam/toolmux/internal/policy"
 	"github.com/fiam/toolmux/internal/providers/linear"
+	"github.com/fiam/toolmux/internal/providers/notion"
 )
 
 type Provider struct {
@@ -22,14 +23,7 @@ func Initial() []Provider {
 			ID:          "notion",
 			DisplayName: "Notion",
 			AuthMode:    "brokered_local_custody",
-			Specs: []policy.CommandSpec{
-				spec("notion.status", "notion", []string{"status", "notion"}, "connection", "status", "read", nil, nil),
-				spec("notion.doctor", "notion", []string{"doctor", "notion"}, "connection", "diagnose", "read", nil, nil),
-				spec("notion.search", "notion", []string{"notion", "search"}, "workspace", "search", "read", nil, nil),
-				spec("notion.page.get", "notion", []string{"notion", "page", "get"}, "page", "read", "read", nil, nil),
-				spec("notion.page.create", "notion", []string{"notion", "page", "create"}, "page", "create", "write", []string{"content-write"}, nil),
-				spec("notion.database.query", "notion", []string{"notion", "database", "query"}, "database", "read", "read", nil, nil),
-			},
+			Specs:       notion.CommandSpecs(),
 		},
 		{
 			ID:          "jira",

@@ -133,6 +133,10 @@ hyperlinks, markdown rendering, compact tables, and pagers when stdout is a TTY.
 JSON/YAML output must stay stable and undecorated: no ANSI escape sequences, no
 pagers, no prompts, no progress animation, and no browser opens.
 
+Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
+only for interactive human table output; keep non-TTY, JSON, and YAML output
+plain and stable for agents.
+
 Connection status is owned by the root `status [provider...]` command, and
 diagnostics are owned by the root `doctor [provider...]` command. Do not add
 provider-specific `status` or `doctor` subcommands; add or update the
@@ -147,14 +151,23 @@ When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
 human table columns, or policy metadata.
 
+## Hosted Broker
+
+The CLI defaults to `https://api.toolmux.com` for brokered OAuth flows. Use
+`TOOLMUX_TOOLMUXD_URL` for local development and self-hosted deployments. Do not
+add provider-specific server URL flags unless the product contract changes.
+
 ## Local Provider Harnesses
 
-`make dev-server-tunnel` starts the local server and exposes it through a
-Cloudflare Quick Tunnel for OAuth callback testing. It writes local, ignored
-environment hints to `.toolmux/server-tunnel.env`.
+`make dev-server-tunnel` starts the local server and exposes it through
+Cloudflare Tunnel for OAuth callback testing. It uses a temporary Quick Tunnel
+by default. Set `TOOLMUX_TUNNEL_HOSTNAME` to use a stable Cloudflare account
+tunnel, either with a locally-managed tunnel name or a dashboard-managed tunnel
+token. It writes local, ignored environment hints to
+`.toolmux/server-tunnel.env`.
 
-Do not commit tunnel URLs, Notion client secrets, OAuth codes, or generated
-token material.
+Do not commit tunnel URLs, Cloudflare tunnel tokens, Notion client secrets,
+OAuth codes, or generated token material.
 
 ## Security
 

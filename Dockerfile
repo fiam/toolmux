@@ -22,13 +22,14 @@ RUN go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} && \
     go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} && \
     go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} && \
     go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION} && \
-    go install github.com/gitleaks/gitleaks/v8@${GITLEAKS_VERSION}
+    go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}
 
 FROM lint-tools AS lint
 COPY . .
 
 RUN test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
-RUN actionlint
+RUN find .github/workflows -name '*.yaml' -print0 | \
+    xargs -0 actionlint
 RUN find . -name '*.yaml' -not -path './.git/*' -print0 | \
     xargs -0 yamllint -c .yamllint.yaml
 RUN go vet ./...

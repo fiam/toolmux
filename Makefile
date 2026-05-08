@@ -18,7 +18,7 @@ help:
 	@printf '  %-27s %s\n' 'make fmt-check' 'Check Go formatting'
 	@printf '  %-27s %s\n' 'make lint' 'Run full Dockerfile-based linter pass'
 	@printf '  %-27s %s\n' 'make commitlint' 'Check the latest commit message'
-	@printf '  %-27s %s\n' 'make dev-server-tunnel' 'Run toolmuxd through cloudflared'
+	@printf '  %-27s %s\n' 'make dev-server-tunnel' 'Run toolmuxd through Cloudflare Tunnel'
 	@printf '  %-27s %s\n' 'make vet' 'Run go vet'
 	@printf '  %-27s %s\n' 'make test' 'Run unit tests'
 	@printf '  %-27s %s\n' 'make test-race' 'Run race tests'

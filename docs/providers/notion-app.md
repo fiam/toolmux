@@ -31,7 +31,7 @@ with `Any workspace`.
 Add the redirect URI that `toolmuxd` will expose:
 
 ```text
-https://auth.toolmux.dev/oauth/notion/callback
+https://api.toolmux.com/oauth/notion/callback
 ```
 
 For local development, add one of these too:
@@ -48,34 +48,55 @@ authorization URL must match one of the connection's configured redirect URIs.
 ## Local Cloudflare Tunnel Harness
 
 Toolmux includes a local server harness that starts `toolmuxd` and exposes
-it through a Cloudflare Quick Tunnel:
+it through Cloudflare Tunnel:
 
 ```bash
 make dev-server-tunnel
 ```
 
-The harness runs:
+By default, the harness uses a temporary Quick Tunnel:
 
 ```text
 toolmuxd --addr 127.0.0.1:8080
 cloudflared tunnel --url http://127.0.0.1:8080
 ```
 
-It prints the generated `https://*.trycloudflare.com` URL and the exact Notion
-redirect URI to paste into the Notion connection dashboard:
+Quick Tunnel URLs are temporary and usually change each run. If you have a
+Cloudflare account, prefer a stable named tunnel:
 
-```text
-https://<generated>.trycloudflare.com/oauth/notion/callback
+```bash
+cloudflared tunnel login
+cloudflared tunnel create toolmux-dev
+cloudflared tunnel route dns toolmux-dev auth-dev.example.com
+
+TOOLMUX_TUNNEL_HOSTNAME=auth-dev.example.com \
+  TOOLMUX_TUNNEL_NAME=toolmux-dev \
+  make dev-server-tunnel
 ```
 
-It also writes local, ignored environment hints to:
+The harness prints the public URL and generic OAuth callback template:
+
+```text
+https://<public-hostname>/oauth/<provider>/callback
+```
+
+For Notion, add this redirect URI in the Notion connection dashboard:
+
+```text
+https://<public-hostname>/oauth/notion/callback
+```
+
+`toolmux connect notion` also prints the Notion redirect URI returned by
+`toolmuxd`. If Notion shows `Missing or invalid redirect_uri`, copy that exact
+URI into the Notion connection's redirect URI settings, or fix the server's
+`TOOLMUX_PUBLIC_URL` / `NOTION_REDIRECT_URI` environment variables.
+
+It also writes local, ignored environment hints, including
+`TOOLMUX_TOOLMUXD_URL` and `TOOLMUX_PUBLIC_URL`, to:
 
 ```text
 .toolmux/server-tunnel.env
 ```
-
-Quick Tunnel URLs are temporary and usually change each run. If the URL changes,
-update the Notion connection's redirect URI before testing another OAuth flow.
 
 ## Capabilities
 
@@ -84,17 +105,20 @@ For the MVP Notion commands, request the smallest useful capability set:
 ```text
 Read content
 Insert content
+Update content
 No user information
 ```
 
 Why:
 
-1. `notion search`, `notion page get`, and `notion database query` need read
-   access to selected pages/databases.
+1. `notion search`, `notion page get`, `notion page markdown`, and
+   `notion data-source query` need read access to selected pages/databases.
 2. `notion page create` needs insert access.
-3. We do not need update content, comments, or user emails for the first pass.
+3. `notion page update`, `notion page content ...`, `notion page delete`,
+   `notion page restore`, and `notion page move` need update access.
+4. We do not need comments or user emails for the first pass.
 
-If we later add page updates, block edits, comments, or richer identity display,
+If we later add comments, user lookup, file upload, or richer identity display,
 we can add capabilities and require users to reauthorize.
 
 ## Secrets to Capture
@@ -139,7 +163,7 @@ For production, create a separate connection:
 ```text
 Connection name: Toolmux
 Installation scope: Any workspace
-Redirect URI: https://auth.toolmux.dev/oauth/notion/callback
+Redirect URI: https://api.toolmux.com/oauth/notion/callback
 ```
 
 Marketplace listing details are separate from creating a public connection. We
@@ -153,7 +177,9 @@ do not need a Marketplace listing for the initial OAuth implementation.
    https://developers.notion.com/guides/get-started/authorization
 3. Connection capabilities:
    https://developers.notion.com/reference/capabilities
-4. Cloudflare Quick Tunnels:
-   https://try.cloudflare.com/
-5. Cloudflare TryCloudflare notes:
+4. Cloudflare Tunnel locally-managed tunnels:
+   https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/
+5. Cloudflare Tunnel DNS routing:
+   https://developers.cloudflare.com/tunnel/routing/
+6. Cloudflare TryCloudflare notes:
    https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/

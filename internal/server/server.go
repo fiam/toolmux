@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -28,19 +27,18 @@ func NewCommand() *cobra.Command {
 }
 
 func NewHandler() http.Handler {
+	return NewHandlerWithConfig(ConfigFromEnv())
+}
+
+func NewHandlerWithConfig(config Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 	})
+	registerOAuthHandlers(mux, config)
 	return mux
 }
 
 func Shutdown(ctx context.Context, server *http.Server) error {
 	return server.Shutdown(ctx)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }
