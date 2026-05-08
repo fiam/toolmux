@@ -2,6 +2,9 @@ GO ?= go
 GOFLAGS ?=
 DOCKER ?= docker
 LINT_IMAGE ?= supacli-lint:dev
+BIN_DIR ?= bin
+CODESIGN_IDENTITY ?=
+UNAME_S ?= $(shell uname -s)
 
 .DEFAULT_GOAL := help
 
@@ -10,6 +13,7 @@ help:
 	@printf 'Supacli development targets\n\n'
 	@printf '  %-27s %s\n' 'make build' 'Build CLI and daemon binaries'
 	@printf '  %-27s %s\n' 'make build-supaclid-image' 'Build generic supaclid OCI image'
+	@printf '  %-27s %s\n' 'make dev-cli' 'Build CLI to ./bin and sign when configured'
 	@printf '  %-27s %s\n' 'make fmt' 'Format Go source'
 	@printf '  %-27s %s\n' 'make fmt-check' 'Check Go formatting'
 	@printf '  %-27s %s\n' 'make lint' 'Run full Dockerfile-based linter pass'
@@ -25,8 +29,21 @@ help:
 
 .PHONY: build
 build:
-	$(GO) build $(GOFLAGS) -o bin/supacli ./cmd/supacli
-	$(GO) build $(GOFLAGS) -o bin/supaclid ./cmd/supaclid
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/supacli ./cmd/supacli
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/supaclid ./cmd/supaclid
+
+.PHONY: dev-cli
+dev-cli:
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/supacli ./cmd/supacli
+ifneq ($(strip $(CODESIGN_IDENTITY)),)
+	codesign --force --sign "$(CODESIGN_IDENTITY)" --timestamp=none "$(BIN_DIR)/supacli"
+else
+ifeq ($(UNAME_S),Darwin)
+	@echo "codesign skipped: CODESIGN_IDENTITY is not set"
+endif
+endif
 
 .PHONY: build-supaclid-image
 build-supaclid-image:

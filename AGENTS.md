@@ -70,6 +70,7 @@ make test-race
 make test-integration
 make test-live
 make build
+make dev-cli
 make build-supaclid-image
 make coverage
 make commitlint
@@ -83,6 +84,11 @@ root `Dockerfile`.
 
 `make test-live` must be skipped by default and require explicit environment
 variables such as `SUPACLI_LIVE_TESTS=1`.
+
+`make dev-cli` builds `./bin/supacli` for local interactive testing. On macOS,
+set `CODESIGN_IDENTITY` to a stable local signing identity so the target signs
+the binary after every rebuild and Keychain "Always Allow" decisions can persist
+across development builds.
 
 CI should run at least:
 
