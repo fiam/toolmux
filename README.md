@@ -63,15 +63,19 @@ can persist across rebuilds.
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
-Use `supacli status` for the connection overview, or pass provider names such
-as `supacli status notion jira` to narrow the check. Use `supacli doctor` or
-`supacli doctor notion` for active setup and provider diagnostics.
-
 All current and future provider commands share the same output contract:
 human-friendly terminal output by default, and stable agent/script output with
 `--output json` or `--output yaml`. Provider implementations should return
 structured results and let the shared output layer handle colors, tables,
 markdown rendering, paging, and non-interactive behavior.
+
+The CLI defaults to hosted `https://api.supacli.com` for brokered OAuth flows.
+Set `SUPACLI_SUPACLID_URL` to point at a local or self-hosted `supaclid` during
+development.
+
+Use `supacli status` for the connection overview, or pass provider names such
+as `supacli status notion jira` to narrow the check. Use `supacli doctor` or
+`supacli doctor notion` for active setup and provider diagnostics.
 
 Linear is the first prepared provider because it supports native OAuth with
 PKCE, targeted scopes, and local refresh without `supaclid`.

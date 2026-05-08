@@ -43,7 +43,7 @@ Recommended core dependencies:
    and graceful color degradation.
 4. `github.com/muesli/termenv` for terminal capability and color-policy
    detection, including `NO_COLOR` and `CLICOLOR_FORCE` behavior.
-5. `github.com/charmbracelet/glamour/v2` for rendering provider markdown
+5. `charm.land/glamour/v2` for rendering provider markdown
    descriptions in human table/detail output.
 6. `github.com/99designs/keyring` behind an internal interface for OS
    credential stores.
@@ -286,7 +286,7 @@ Rules:
 3. Store display names, provider account ids, selected accounts, and scopes in non-secret config.
 4. Do not rely on keyring enumeration for connection listing; config is the index.
 5. Disable plaintext fallback by default.
-6. Add `supacli doctor` for keyring availability diagnostics and provider setup checks.
+6. Add `supacli doctor` for keyring availability diagnostics.
 
 ### Native PKCE Flow
 
@@ -338,7 +338,7 @@ Session response:
 ```json
 {
   "session_id": "...",
-  "auth_url": "https://auth.supacli.dev/oauth/notion/start?session_id=...",
+  "auth_url": "https://api.supacli.com/oauth/notion/start?session_id=...",
   "expires_at": "2026-05-06T12:01:00Z"
 }
 ```
@@ -409,9 +409,9 @@ Deliverables:
 ```bash
 supacli connect <provider>
 supacli disconnect <provider>
-supacli connections ls
 supacli status [provider...]
 supacli doctor [provider...]
+supacli connections ls
 ```
 
 7. Base policy commands:
@@ -481,16 +481,26 @@ Deliverables:
 
 1. supaclid session API.
 2. supaclid provider secret config via environment variables.
-3. Encrypted one-time handoff.
+3. Short-lived, single-use, in-memory token handoff.
 4. Notion provider in CLI.
 5. Notion supaclid exchange and refresh handlers.
 6. Notion commands:
 
 ```bash
 supacli notion search
+supacli status notion
 supacli notion page get
+supacli notion page markdown
 supacli notion page create
-supacli notion database query
+supacli notion page update
+supacli notion page content insert
+supacli notion page content replace
+supacli notion page content update
+supacli notion page delete
+supacli notion page restore
+supacli notion page move
+supacli notion data-source query
+supacli notion database data-sources
 ```
 
 Acceptance criteria:
@@ -500,6 +510,8 @@ Acceptance criteria:
 3. Token refresh path uses supaclid and updates local rotating tokens if Notion returns replacements.
 4. Notion "missing page access" errors suggest sharing the page/database with the Supacli connection.
 5. Notion command specs include selected read/write effects for policy evaluation.
+6. CLI defaults to `https://api.supacli.com` for supaclid and supports
+   `SUPACLI_SUPACLID_URL` for local development and self-hosting.
 
 ### M4 - Jira
 
@@ -614,27 +626,27 @@ Acceptance criteria:
 supaclid deployment environment variables:
 
 ```text
-SUPACLI_PUBLIC_BASE_URL=https://auth.supacli.dev
+SUPACLI_PUBLIC_URL=https://api.supacli.com
 SUPACLI_REDIS_URL=redis://...
 
 NOTION_CLIENT_ID=...
 NOTION_CLIENT_SECRET=...
-NOTION_REDIRECT_URI=https://auth.supacli.dev/oauth/notion/callback
+NOTION_REDIRECT_URI=https://api.supacli.com/oauth/notion/callback
 
 ATLASSIAN_CLIENT_ID=...
 ATLASSIAN_CLIENT_SECRET=...
-ATLASSIAN_REDIRECT_URI=https://auth.supacli.dev/oauth/jira/callback
+ATLASSIAN_REDIRECT_URI=https://api.supacli.com/oauth/jira/callback
 
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
-SLACK_REDIRECT_URI=https://auth.supacli.dev/oauth/slack/callback
+SLACK_REDIRECT_URI=https://api.supacli.com/oauth/slack/callback
 ```
 
 CLI configuration:
 
 ```yaml
 default_profile: default
-server_url: https://auth.supacli.dev
+server_url: https://api.supacli.com
 profiles:
   default:
     output: table

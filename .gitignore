@@ -2,16 +2,14 @@
 .env
 .env.*
 !.env.example
+.envrc
+.envrc.*
 
 /bin/
 /dist/
 /coverage.out
 /tmp/
-
-.supacli/cloudflared.log
-.supacli/server.log
-.supacli/dev-tunnel.env
-.supacli/server-tunnel.env
+/.supacli/
 
 *.test
 *.prof

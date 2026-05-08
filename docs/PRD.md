@@ -318,7 +318,7 @@ Flow:
 
 ```text
 CLI generates one-time handoff id and session secret
-CLI opens auth.supacli.dev
+CLI opens api.supacli.com
 Provider redirects to supaclid
 supaclid exchanges code using provider client secret
 supaclid stores token bundle in short-lived in-memory handoff
@@ -372,21 +372,34 @@ Auth:
 1. supaclid OAuth through a Notion public connection.
 2. Token refresh uses supaclid because Notion requires client credentials for refresh.
 3. User grants access to selected pages/databases in Notion.
+4. The CLI defaults to hosted `https://api.supacli.com` for supaclid and uses
+   `SUPACLI_SUPACLID_URL` for local development or self-hosted deployments.
 
 MVP commands:
 
 ```bash
+supacli notion search roadmap
 supacli notion search --query "roadmap"
 supacli notion page get <page-id>
+supacli notion page markdown <page-id>
 supacli notion page create --parent <page-id> --title "..."
-supacli notion database query <database-id>
+supacli notion page update <page-id> --title "..."
+supacli notion page content insert <page-id> --file body.md
+supacli notion page content replace <page-id> --file body.md
+supacli notion page content update <page-id> --old "..." --new "..."
+supacli notion page delete <page-id> --yes
+supacli notion page restore <page-id>
+supacli notion page move <page-id> --parent <page-id>
+supacli notion data-source query <data-source-id>
+supacli notion database data-sources <database-id>
 ```
 
 Out of scope for MVP:
 
 1. Full workspace crawling beyond pages/databases selected in Notion's permission flow.
-2. Complex block editing UI.
-3. Database schema migrations.
+2. Permanent page deletion; Notion's API supports trash/restore, not hard delete.
+3. Complex block editing UI beyond markdown insert/replace/search-and-replace.
+4. Database or data-source schema migrations.
 
 ### Jira
 
@@ -596,11 +609,14 @@ All providers must support:
 15. Shared terminal presentation through `internal/output`; providers return
     structured view models and never hand-roll colors, paging, prompts, or ad
     hoc table layouts.
-16. Stable JSON/YAML schemas for automation, even when human table columns are
+16. Markdown-producing commands should render Markdown through
+    `charm.land/glamour/v2` for interactive human table output, while
+    JSON/YAML and non-interactive output remain undecorated and stable.
+17. Stable JSON/YAML schemas for automation, even when human table columns are
     provider-specific or optimized for terminal width.
-17. Preview or dry-run support for risky writes where the provider API allows safe preview.
-18. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-19. Open-in-browser support for commands that return provider URLs.
+18. Preview or dry-run support for risky writes where the provider API allows safe preview.
+19. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+17. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 

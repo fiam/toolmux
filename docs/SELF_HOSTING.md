@@ -17,13 +17,32 @@ OAuth apps. Supacli's hosted provider secrets are not included in this repo.
 3. Provider OAuth apps for the providers you want to support.
 4. Deployment secrets for provider client ids and client secrets.
 
-For local testing, use:
+For local testing with a temporary `trycloudflare.com` hostname, use:
 
 ```bash
 make dev-server-tunnel
 ```
 
-For real self-hosting, use a stable domain instead of a temporary Quick Tunnel.
+If you have a Cloudflare account and a domain on Cloudflare, use a stable
+tunnel hostname so OAuth redirect URIs do not change every run:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create supacli-dev
+cloudflared tunnel route dns supacli-dev auth-dev.example.com
+
+SUPACLI_TUNNEL_HOSTNAME=auth-dev.example.com \
+  SUPACLI_TUNNEL_NAME=supacli-dev \
+  make dev-server-tunnel
+```
+
+The script also supports dashboard-managed tunnels with
+`SUPACLI_CLOUDFLARED_TOKEN_FILE` or `SUPACLI_CLOUDFLARED_TOKEN`. In that mode,
+configure the Cloudflare public hostname service to point at
+`http://127.0.0.1:8080`.
+
+For real self-hosting, use a stable domain and deployment process instead of a
+temporary Quick Tunnel.
 
 ## Run From Source
 
@@ -80,7 +99,7 @@ Use environment variables, a secret manager, or your hosting platform's secret
 facility:
 
 ```text
-SUPACLI_PUBLIC_BASE_URL=https://auth.example.com
+SUPACLI_PUBLIC_URL=https://auth.example.com
 
 NOTION_CLIENT_ID=...
 NOTION_CLIENT_SECRET=...
@@ -95,8 +114,15 @@ SLACK_CLIENT_SECRET=...
 SLACK_REDIRECT_URI=https://auth.example.com/oauth/slack/callback
 ```
 
-Do not commit secrets, tunnel URLs, OAuth codes, provider tokens, or local
-`.env` files.
+Do not commit secrets, Cloudflare tunnel tokens, tunnel URLs, OAuth codes,
+provider tokens, or local `.env` files.
+
+The CLI uses hosted `https://api.supacli.com` by default. For local development
+or self-hosting, set:
+
+```bash
+export SUPACLI_SUPACLID_URL=https://auth.example.com
+```
 
 ## Token Custody
 
