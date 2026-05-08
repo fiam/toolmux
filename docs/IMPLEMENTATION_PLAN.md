@@ -286,7 +286,7 @@ Rules:
 3. Store display names, provider account ids, selected accounts, and scopes in non-secret config.
 4. Do not rely on keyring enumeration for connection listing; config is the index.
 5. Disable plaintext fallback by default.
-6. Add `supacli connections doctor` for keyring availability diagnostics.
+6. Add `supacli doctor` for keyring availability diagnostics and provider setup checks.
 
 ### Native PKCE Flow
 
@@ -410,7 +410,8 @@ Deliverables:
 supacli connect <provider>
 supacli disconnect <provider>
 supacli connections ls
-supacli connections doctor
+supacli status [provider...]
+supacli doctor [provider...]
 ```
 
 7. Base policy commands:
