@@ -2,6 +2,9 @@ GO ?= go
 GOFLAGS ?=
 DOCKER ?= docker
 LINT_IMAGE ?= toolmux-lint:dev
+BIN_DIR ?= bin
+CODESIGN_IDENTITY ?=
+UNAME_S ?= $(shell uname -s)
 
 .DEFAULT_GOAL := help
 
@@ -10,6 +13,7 @@ help:
 	@printf 'Toolmux development targets\n\n'
 	@printf '  %-27s %s\n' 'make build' 'Build CLI and daemon binaries'
 	@printf '  %-27s %s\n' 'make build-toolmuxd-image' 'Build generic toolmuxd OCI image'
+	@printf '  %-27s %s\n' 'make dev-cli' 'Build CLI to ./bin and sign when configured'
 	@printf '  %-27s %s\n' 'make fmt' 'Format Go source'
 	@printf '  %-27s %s\n' 'make fmt-check' 'Check Go formatting'
 	@printf '  %-27s %s\n' 'make lint' 'Run full Dockerfile-based linter pass'
@@ -25,8 +29,21 @@ help:
 
 .PHONY: build
 build:
-	$(GO) build $(GOFLAGS) -o bin/toolmux ./cmd/toolmux
-	$(GO) build $(GOFLAGS) -o bin/toolmuxd ./cmd/toolmuxd
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmuxd ./cmd/toolmuxd
+
+.PHONY: dev-cli
+dev-cli:
+	@mkdir -p $(BIN_DIR)
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
+ifneq ($(strip $(CODESIGN_IDENTITY)),)
+	codesign --force --sign "$(CODESIGN_IDENTITY)" --timestamp=none "$(BIN_DIR)/toolmux"
+else
+ifeq ($(UNAME_S),Darwin)
+	@echo "codesign skipped: CODESIGN_IDENTITY is not set"
+endif
+endif
 
 .PHONY: build-toolmuxd-image
 build-toolmuxd-image:

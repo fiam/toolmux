@@ -50,6 +50,16 @@ make build-toolmuxd-image
 `make lint` runs the pinned linter toolchain through the root Dockerfile, so
 contributors only need Docker rather than local copies of every linter.
 
+For local macOS Keychain testing, build a stable development binary with:
+
+```bash
+make dev-cli
+CODESIGN_IDENTITY="Toolmux Local Development" make dev-cli
+```
+
+The second form signs `./bin/toolmux` after building so Keychain trust prompts
+can persist across rebuilds.
+
 Provider commands are stubs for now, but they already pass through command
 metadata and local policy authorization.
 
