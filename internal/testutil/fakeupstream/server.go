@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -23,9 +24,23 @@ func New() *Server {
 			NotionPageID: {
 				ID:       NotionPageID,
 				Title:    "Roadmap",
-				Markdown: "# Roadmap\n\nInitial content",
+				Markdown: "# Roadmap\n\nInitial content\n\n[Spec](https://example.com/spec)",
 				URL:      "https://notion.so/Roadmap-" + strings.ReplaceAll(NotionPageID, "-", ""),
 				Parent:   map[string]any{"type": "page_id", "page_id": NotionParentPageID},
+			},
+			NotionChildPageID: {
+				ID:       NotionChildPageID,
+				Title:    "April 2026",
+				Markdown: "# April 2026\n\nMonthly notes",
+				URL:      "https://notion.so/April-2026-" + strings.ReplaceAll(NotionChildPageID, "-", ""),
+				Parent:   map[string]any{"type": "page_id", "page_id": NotionPageID},
+			},
+			NotionNestedPageID: {
+				ID:       NotionNestedPageID,
+				Title:    "Week 1",
+				Markdown: "# Week 1\n\nNested notes",
+				URL:      "https://notion.so/Week-1-" + strings.ReplaceAll(NotionNestedPageID, "-", ""),
+				Parent:   map[string]any{"type": "page_id", "page_id": NotionChildPageID},
 			},
 		},
 	}
@@ -40,6 +55,8 @@ func New() *Server {
 	mux.HandleFunc("GET /notion/v1/pages/{page_id}/markdown", server.notionGetMarkdown)
 	mux.HandleFunc("PATCH /notion/v1/pages/{page_id}/markdown", server.notionUpdateMarkdown)
 	mux.HandleFunc("POST /notion/v1/pages/{page_id}/move", server.notionMovePage)
+	mux.HandleFunc("GET /notion/v1/blocks/{block_id}/children", server.notionListBlockChildren)
+	mux.HandleFunc("GET /notion/v1/data_sources/{data_source_id}", server.notionGetDataSource)
 	mux.HandleFunc("POST /notion/v1/data_sources/{data_source_id}/query", server.notionQueryDataSource)
 	mux.HandleFunc("GET /notion/v1/databases/{database_id}", server.notionGetDatabase)
 	mux.HandleFunc("GET /jira/rest/api/3/search/jql", jsonHandler(map[string]any{
@@ -67,6 +84,8 @@ const (
 	NotionParentPageID = "33333333-3333-4333-8333-333333333333"
 	NotionDataSourceID = "44444444-4444-4444-8444-444444444444"
 	NotionDatabaseID   = "55555555-5555-4555-8555-555555555555"
+	NotionChildPageID  = "66666666-6666-4666-8666-666666666666"
+	NotionNestedPageID = "77777777-7777-4777-8777-777777777777"
 )
 
 type notionPage struct {
@@ -144,9 +163,11 @@ func (s *Server) notionSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Query    string `json:"query"`
-		PageSize int    `json:"page_size"`
-		Filter   struct {
+		Query       string            `json:"query"`
+		PageSize    int               `json:"page_size"`
+		StartCursor string            `json:"start_cursor"`
+		Sort        map[string]string `json:"sort"`
+		Filter      struct {
 			Property string `json:"property"`
 			Value    string `json:"value"`
 		} `json:"filter"`
@@ -172,12 +193,13 @@ func (s *Server) notionSearch(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	}
+	start, end, nextCursor, hasMore := paginate(len(results), request.StartCursor, request.PageSize)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object":      "list",
 		"type":        "page_or_data_source",
-		"results":     results,
-		"has_more":    false,
-		"next_cursor": nil,
+		"results":     results[start:end],
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
 	})
 }
 
@@ -355,6 +377,42 @@ func (s *Server) notionMovePage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page.response())
 }
 
+func (s *Server) notionListBlockChildren(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNotion(w, r) {
+		return
+	}
+	children := s.blockChildren(r.PathValue("block_id"))
+	pageSize := 100
+	if value := r.URL.Query().Get("page_size"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			pageSize = parsed
+		}
+	}
+	start, end, nextCursor, hasMore := paginate(len(children), r.URL.Query().Get("start_cursor"), pageSize)
+	results := make([]map[string]any, 0, end-start)
+	for _, child := range children[start:end] {
+		results = append(results, child.childPageBlock(s.hasBlockChildren(child.ID)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object":      "list",
+		"type":        "block",
+		"results":     results,
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
+	})
+}
+
+func (s *Server) notionGetDataSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNotion(w, r) {
+		return
+	}
+	if r.PathValue("data_source_id") != NotionDataSourceID {
+		notionError(w, http.StatusNotFound, "object_not_found", "data source has not been shared with the connection")
+		return
+	}
+	writeJSON(w, http.StatusOK, dataSourceResponse())
+}
+
 func (s *Server) notionQueryDataSource(w http.ResponseWriter, r *http.Request) {
 	if !s.requireNotion(w, r) {
 		return
@@ -364,12 +422,19 @@ func (s *Server) notionQueryDataSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := s.page(NotionPageID)
+	var request struct {
+		PageSize    int    `json:"page_size"`
+		StartCursor string `json:"start_cursor"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	results := []map[string]any{page.response()}
+	start, end, nextCursor, hasMore := paginate(len(results), request.StartCursor, request.PageSize)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object":      "list",
 		"type":        "page",
-		"results":     []map[string]any{page.response()},
-		"has_more":    false,
-		"next_cursor": nil,
+		"results":     results[start:end],
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
 	})
 }
 
@@ -419,6 +484,23 @@ func (s *Server) pageOK(id string) (notionPage, bool) {
 	return page, ok
 }
 
+func (s *Server) blockChildren(blockID string) []notionPage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch blockID {
+	case NotionPageID:
+		return []notionPage{s.notionPages[NotionChildPageID]}
+	case NotionChildPageID:
+		return []notionPage{s.notionPages[NotionNestedPageID]}
+	default:
+		return nil
+	}
+}
+
+func (s *Server) hasBlockChildren(blockID string) bool {
+	return len(s.blockChildren(blockID)) > 0
+}
+
 func (p notionPage) response() map[string]any {
 	return map[string]any{
 		"object":           "page",
@@ -437,6 +519,70 @@ func (p notionPage) response() map[string]any {
 					"plain_text": p.Title,
 					"text":       map[string]string{"content": p.Title},
 				}},
+			},
+		},
+	}
+}
+
+func (p notionPage) childPageBlock(hasChildren bool) map[string]any {
+	return map[string]any{
+		"object":           "block",
+		"id":               p.ID,
+		"created_time":     "2026-05-07T10:00:00.000Z",
+		"last_edited_time": "2026-05-07T10:00:00.000Z",
+		"type":             "child_page",
+		"has_children":     hasChildren,
+		"in_trash":         p.InTrash,
+		"child_page": map[string]any{
+			"title": p.Title,
+		},
+	}
+}
+
+func paginate(total int, cursor string, pageSize int) (int, int, any, bool) {
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	start := 0
+	if cursor != "" {
+		if parsed, err := strconv.Atoi(cursor); err == nil && parsed >= 0 {
+			start = parsed
+		}
+	}
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	hasMore := end < total
+	var nextCursor any
+	if hasMore {
+		nextCursor = strconv.Itoa(end)
+	}
+	return start, end, nextCursor, hasMore
+}
+
+func dataSourceResponse() map[string]any {
+	return map[string]any{
+		"object": "data_source",
+		"id":     NotionDataSourceID,
+		"name":   "Tasks",
+		"url":    "https://notion.so/database/" + strings.ReplaceAll(NotionDataSourceID, "-", ""),
+		"properties": map[string]any{
+			"Name": map[string]any{
+				"id":   "title",
+				"type": "title",
+				"name": "Name",
+			},
+			"Done": map[string]any{
+				"id":   "done",
+				"type": "checkbox",
+				"name": "Done",
 			},
 		},
 	}

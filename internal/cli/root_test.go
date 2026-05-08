@@ -271,6 +271,63 @@ func TestNotionLinkSelectionDetailCompactsTargets(t *testing.T) {
 	}
 }
 
+func TestNotionPageLinksFromMarkdownClassifiesLinks(t *testing.T) {
+	links := notionPageLinksFromMarkdown(`[Roadmap](https://www.notion.so/Roadmap-11111111111141118111111111111111)
+[External](https://example.com/docs)`)
+	if len(links) != 2 {
+		t.Fatalf("expected 2 links, got %#v", links)
+	}
+	if links[0].Kind != "notion" || links[0].NotionPageID != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("unexpected Notion link classification: %#v", links[0])
+	}
+	if links[1].Kind != "external" || links[1].NotionPageID != "" {
+		t.Fatalf("unexpected external link classification: %#v", links[1])
+	}
+}
+
+func TestNotionPageDiagnosticsWarnsOnMarkdownFidelity(t *testing.T) {
+	diagnostics := notionPageDiagnostics(notionPageRead{
+		Page: notion.Page{ID: "11111111-1111-4111-8111-111111111111"},
+		Markdown: notion.PageMarkdown{
+			ID:              "11111111-1111-4111-8111-111111111111",
+			Markdown:        "[Spec](https://example.com/spec)",
+			Truncated:       true,
+			UnknownBlockIDs: []string{"block-1"},
+		},
+	})
+	var sawTruncated, sawUnknown bool
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Check == "markdown-truncation" && diagnostic.Status == "warn" {
+			sawTruncated = true
+		}
+		if diagnostic.Check == "unknown-blocks" && diagnostic.Status == "warn" {
+			sawUnknown = true
+		}
+	}
+	if !sawTruncated || !sawUnknown {
+		t.Fatalf("expected markdown fidelity warnings, got %#v", diagnostics)
+	}
+}
+
+func TestNotionPageContentReplaceRequiresYes(t *testing.T) {
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{
+		"notion", "page", "content", "replace",
+		"11111111-1111-4111-8111-111111111111",
+		"--markdown", "# Replacement",
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected replace confirmation error")
+	}
+	if !strings.Contains(err.Error(), "without --yes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func notionSearchClient(t *testing.T, results []map[string]any) (*notion.Client, func()) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
