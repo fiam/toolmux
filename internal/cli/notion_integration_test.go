@@ -36,10 +36,24 @@ func TestIntegrationNotionPageLifecycle(t *testing.T) {
 	assertOutputContains(t, notionDoctor, "search endpoint reachable")
 	assertOutputContains(t, runToolmux(t, deps, "notion", "search", "roadmap"), fakeupstream.NotionPageID)
 	assertOutputContains(t, runToolmux(t, deps, "notion", "search", "--query", "tasks"), "Tasks")
+	limitedSearch := runToolmux(t, deps, "notion", "search", "--limit", "1", "--sort", "edited", "--direction", "asc")
+	assertOutputContains(t, limitedSearch, fakeupstream.NotionPageID)
+	if strings.Contains(limitedSearch, "Tasks") {
+		t.Fatalf("expected search --limit 1 to hide second result, got %q", limitedSearch)
+	}
 	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "get", fakeupstream.NotionPageID), "Roadmap")
 	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "read", fakeupstream.NotionPageID), "Initial content")
 	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "markdown", fakeupstream.NotionPageID), "# Roadmap")
 	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "markdown", "Roadmap"), "# Roadmap")
+	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "links", fakeupstream.NotionPageID), "https://example.com/spec")
+	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "open", fakeupstream.NotionPageID, "--url-only"), "https://notion.so/Roadmap-")
+	assertOutputContains(t, runToolmux(t, deps, "notion", "page", "children", fakeupstream.NotionPageID), "April 2026")
+	tree := runToolmux(t, deps, "notion", "page", "tree", fakeupstream.NotionPageID)
+	assertOutputContains(t, tree, "April 2026")
+	assertOutputContains(t, tree, "Week 1")
+	pageDoctor := runToolmux(t, deps, "notion", "page", "doctor", fakeupstream.NotionPageID)
+	assertOutputContains(t, pageDoctor, "markdown-truncation")
+	assertOutputContains(t, pageDoctor, "unknown-blocks")
 
 	created := runToolmux(
 		t,
@@ -81,6 +95,7 @@ func TestIntegrationNotionPageLifecycle(t *testing.T) {
 		deps,
 		"notion", "page", "content", "replace", fakeupstream.NotionCreatedID,
 		"--markdown", "# Replacement",
+		"--yes",
 	)
 	assertOutputContains(t, replaced, "# Replacement")
 
@@ -103,6 +118,27 @@ func TestIntegrationNotionPageLifecycle(t *testing.T) {
 
 	rows := runToolmux(t, deps, "notion", "data-source", "query", fakeupstream.NotionDataSourceID)
 	assertOutputContains(t, rows, fakeupstream.NotionPageID)
+
+	schema := runToolmux(t, deps, "notion", "data-source", "schema", fakeupstream.NotionDataSourceID)
+	assertOutputContains(t, schema, "Name")
+	assertOutputContains(t, schema, "checkbox")
+
+	rowCreated := runToolmux(
+		t,
+		deps,
+		"notion", "data-source", "row", "create", fakeupstream.NotionDataSourceID,
+		"--title", "Created Row",
+		"--markdown", "# Created Row\n\nBody",
+	)
+	assertOutputContains(t, rowCreated, "Created Row")
+
+	rowUpdated := runToolmux(
+		t,
+		deps,
+		"notion", "data-source", "row", "update", fakeupstream.NotionCreatedID,
+		"--title", "Updated Row",
+	)
+	assertOutputContains(t, rowUpdated, "Updated Row")
 
 	dataSources := runToolmux(t, deps, "notion", "database", "data-sources", fakeupstream.NotionDatabaseID)
 	assertOutputContains(t, dataSources, fakeupstream.NotionDataSourceID)

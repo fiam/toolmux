@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -696,6 +697,8 @@ func notionSearchCommand(opts *options) *cobra.Command {
 	var query string
 	var objectType string
 	var limit int
+	var sortBy string
+	var direction string
 	cmd := &cobra.Command{
 		Use:   "search [query]",
 		Short: "Search Notion pages and data sources shared with Toolmux",
@@ -712,11 +715,14 @@ func notionSearchCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			results, err := client.Search(cmd.Context(), notion.SearchRequest{
+			request := notion.SearchRequest{
 				Query:      effectiveQuery,
 				ObjectType: objectType,
-				PageSize:   limit,
-			})
+			}
+			if strings.TrimSpace(sortBy) != "" && strings.TrimSpace(sortBy) != "none" {
+				request.Sort = &notion.SearchSort{Timestamp: sortBy, Direction: direction}
+			}
+			results, err := client.SearchAll(cmd.Context(), request, limit)
 			if err != nil {
 				return err
 			}
@@ -734,10 +740,11 @@ func notionSearchCommand(opts *options) *cobra.Command {
 						output.Value(result.URL),
 						result.Object,
 						output.StatusBadge(human, status),
+						output.Value(result.LastEditedTime),
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Title", "ID", "URL", "Type", "Status"},
+					Headers: []string{"Title", "ID", "URL", "Type", "Status", "Last Edited"},
 					Rows:    rows,
 					Empty:   "no Notion results",
 				})
@@ -747,6 +754,8 @@ func notionSearchCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&query, "query", "", "title query")
 	cmd.Flags().StringVar(&objectType, "type", "all", "result type: all, page, data_source")
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum results")
+	cmd.Flags().StringVar(&sortBy, "sort", "", "sort: edited, none")
+	cmd.Flags().StringVar(&direction, "direction", "desc", "sort direction: asc, desc")
 	return cmd
 }
 
@@ -757,6 +766,11 @@ func notionPageCommand(opts *options) *cobra.Command {
 	}
 	cmd.AddCommand(notionPageGetCommand(opts))
 	cmd.AddCommand(notionPageReadCommand(opts))
+	cmd.AddCommand(notionPageLinksCommand(opts))
+	cmd.AddCommand(notionPageOpenCommand(opts))
+	cmd.AddCommand(notionPageChildrenCommand(opts))
+	cmd.AddCommand(notionPageTreeCommand(opts))
+	cmd.AddCommand(notionPageDoctorCommand(opts))
 	cmd.AddCommand(notionPageMarkdownCommand(opts))
 	cmd.AddCommand(notionPageCreateCommand(opts))
 	cmd.AddCommand(notionPageUpdateCommand(opts))
@@ -828,6 +842,23 @@ type notionPageRead struct {
 	Markdown notion.PageMarkdown `json:"markdown"`
 }
 
+type notionPageLink struct {
+	Index        int    `json:"index"`
+	Label        string `json:"label"`
+	URL          string `json:"url"`
+	Kind         string `json:"kind"`
+	NotionPageID string `json:"notion_page_id,omitempty"`
+}
+
+type notionPageChild struct {
+	Depth       int    `json:"depth"`
+	Title       string `json:"title"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	URL         string `json:"url,omitempty"`
+	HasChildren bool   `json:"has_children"`
+}
+
 func notionPageReadCommand(opts *options) *cobra.Command {
 	var includeTranscript bool
 	var follow bool
@@ -862,6 +893,184 @@ func notionPageReadCommand(opts *options) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
 	cmd.Flags().BoolVar(&follow, "follow", false, "choose a link after reading; Notion links open in toolmux, external links open in the browser")
+	return cmd
+}
+
+func notionPageLinksCommand(opts *options) *cobra.Command {
+	var includeTranscript bool
+	cmd := &cobra.Command{
+		Use:   "links <page>",
+		Short: "List links from a Notion page",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.page.links"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			markdown, err := client.RetrievePageMarkdown(cmd.Context(), pageID, includeTranscript)
+			if err != nil {
+				return err
+			}
+			links := notionPageLinksFromMarkdown(markdown.Markdown)
+			return writeValue(cmd, opts, links, func(w io.Writer) {
+				human := humanOutputOptions(cmd, opts)
+				rows := make([][]string, 0, len(links))
+				for _, link := range links {
+					rows = append(rows, []string{
+						strconv.Itoa(link.Index),
+						output.Value(link.Label),
+						output.Value(link.Kind),
+						output.Value(link.URL),
+						output.Value(link.NotionPageID),
+					})
+				}
+				output.RenderTable(w, human, output.Table{
+					Headers: []string{"#", "Label", "Kind", "URL", "Notion Page"},
+					Rows:    rows,
+					Empty:   "no links on this page",
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
+	return cmd
+}
+
+func notionPageOpenCommand(opts *options) *cobra.Command {
+	var urlOnly bool
+	cmd := &cobra.Command{
+		Use:   "open <page>",
+		Short: "Open a Notion page in the browser",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.page.open"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			page, err := client.RetrievePage(cmd.Context(), pageID, nil)
+			if err != nil {
+				return err
+			}
+			pageURL := firstNonEmpty(page.URL, page.PublicURL, notionPageWebURL(page.ID))
+			if pageURL == "" {
+				return fmt.Errorf("Notion page %s has no URL", page.ID)
+			}
+			if urlOnly || opts.output != "table" {
+				return writeValue(cmd, opts, map[string]string{"id": page.ID, "url": pageURL}, func(w io.Writer) {
+					fmt.Fprintln(w, pageURL)
+				})
+			}
+			if err := openURL(pageURL); err != nil {
+				return fmt.Errorf("open Notion page %q: %w", pageURL, err)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), pageURL)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&urlOnly, "url-only", false, "print the page URL without opening a browser")
+	return cmd
+}
+
+func notionPageChildrenCommand(opts *options) *cobra.Command {
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "children <page>",
+		Short: "List child pages under a Notion page",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.page.children"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			children, err := collectNotionPageChildren(cmd.Context(), client, pageID, 1, limit)
+			if err != nil {
+				return err
+			}
+			return writeNotionPageChildren(cmd, opts, children, "no child pages")
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 100, "maximum child pages")
+	return cmd
+}
+
+func notionPageTreeCommand(opts *options) *cobra.Command {
+	var depth int
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "tree <page>",
+		Short: "List nested child pages under a Notion page",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.page.tree"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			children, err := collectNotionPageChildren(cmd.Context(), client, pageID, depth, limit)
+			if err != nil {
+				return err
+			}
+			return writeNotionPageChildren(cmd, opts, children, "no child pages")
+		},
+	}
+	cmd.Flags().IntVar(&depth, "depth", 3, "maximum child-page depth")
+	cmd.Flags().IntVar(&limit, "limit", 100, "maximum child pages")
+	return cmd
+}
+
+func notionPageDoctorCommand(opts *options) *cobra.Command {
+	var includeTranscript bool
+	cmd := &cobra.Command{
+		Use:   "doctor <page>",
+		Short: "Check Notion page markdown export fidelity",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.page.doctor"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			result, err := retrieveNotionPageRead(cmd.Context(), client, pageID, includeTranscript)
+			if err != nil {
+				return err
+			}
+			return writeDiagnostics(cmd, opts, notionPageDiagnostics(result))
+		},
+	}
+	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
 	return cmd
 }
 
@@ -1052,6 +1261,7 @@ func notionPageContentReplaceCommand(opts *options) *cobra.Command {
 	var file string
 	var allowDeletingContent bool
 	var dryRun bool
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "replace <page>",
 		Short: "Replace all markdown content in a Notion page",
@@ -1065,6 +1275,9 @@ func notionPageContentReplaceCommand(opts *options) *cobra.Command {
 				return err
 			}
 			request := notion.ReplaceMarkdownRequest{NewString: body, AllowDeletingContent: allowDeletingContent}
+			if !yes && !dryRun {
+				return fmt.Errorf("refusing to replace all Notion page content without --yes")
+			}
 			if dryRun {
 				return writeDryRun(cmd, opts, "notion.page.content.replace", request)
 			}
@@ -1087,6 +1300,7 @@ func notionPageContentReplaceCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "read replacement markdown from file")
 	cmd.Flags().BoolVar(&allowDeletingContent, "allow-deleting-content", false, "allow deleting child pages/databases")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm replacing all page content")
 	return cmd
 }
 
@@ -1096,6 +1310,7 @@ func notionPageContentUpdateCommand(opts *options) *cobra.Command {
 	var replaceAll bool
 	var allowDeletingContent bool
 	var dryRun bool
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "update <page>",
 		Short: "Search and replace Notion page markdown content",
@@ -1111,6 +1326,9 @@ func notionPageContentUpdateCommand(opts *options) *cobra.Command {
 					ReplaceAllMatches: replaceAll,
 				}},
 				AllowDeletingContent: allowDeletingContent,
+			}
+			if allowDeletingContent && !yes && !dryRun {
+				return fmt.Errorf("refusing to allow deleting child content without --yes")
 			}
 			if dryRun {
 				return writeDryRun(cmd, opts, "notion.page.content.update", request)
@@ -1135,6 +1353,7 @@ func notionPageContentUpdateCommand(opts *options) *cobra.Command {
 	cmd.Flags().BoolVar(&replaceAll, "replace-all", false, "replace all matching occurrences")
 	cmd.Flags().BoolVar(&allowDeletingContent, "allow-deleting-content", false, "allow deleting child pages/databases")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm allowing child content deletion")
 	return cmd
 }
 
@@ -1259,6 +1478,8 @@ func notionDataSourceCommand(opts *options) *cobra.Command {
 		Short:   "Operate Notion data sources",
 	}
 	cmd.AddCommand(notionDataSourceQueryCommand(opts))
+	cmd.AddCommand(notionDataSourceSchemaCommand(opts))
+	cmd.AddCommand(notionDataSourceRowCommand(opts))
 	return cmd
 }
 
@@ -1280,13 +1501,13 @@ func notionDataSourceQueryCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := client.QueryDataSource(cmd.Context(), args[0], notion.QueryDataSourceRequest{
+			result, err := client.QueryDataSourceAll(cmd.Context(), args[0], notion.QueryDataSourceRequest{
 				PageSize:         limit,
 				FilterProperties: filterProperties,
 				Filter:           json.RawMessage(strings.TrimSpace(filterJSON)),
 				Sorts:            json.RawMessage(strings.TrimSpace(sortsJSON)),
 				ResultType:       resultType,
-			})
+			}, limit)
 			if err != nil {
 				return err
 			}
@@ -1318,6 +1539,142 @@ func notionDataSourceQueryCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&sortsJSON, "sorts-json", "", "raw Notion sorts JSON")
 	cmd.Flags().StringVar(&resultType, "result-type", "", "optional result type: page or data_source")
 	cmd.Flags().StringSliceVar(&filterProperties, "filter-property", nil, "data source property to include")
+	return cmd
+}
+
+func notionDataSourceSchemaCommand(opts *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "schema <data-source>",
+		Short: "Inspect a Notion data source schema",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.data_source.schema"), args); err != nil {
+				return err
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			dataSource, err := client.RetrieveDataSource(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return writeValue(cmd, opts, dataSource, func(w io.Writer) {
+				rows := dataSourcePropertyRows(dataSource.Properties)
+				output.RenderTable(w, humanOutputOptions(cmd, opts), output.Table{
+					Headers: []string{"Property", "ID", "Type"},
+					Rows:    rows,
+					Empty:   "no data source properties",
+				})
+			})
+		},
+	}
+	return cmd
+}
+
+func notionDataSourceRowCommand(opts *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "row",
+		Short: "Create and update Notion data source rows",
+	}
+	cmd.AddCommand(notionDataSourceRowCreateCommand(opts))
+	cmd.AddCommand(notionDataSourceRowUpdateCommand(opts))
+	return cmd
+}
+
+func notionDataSourceRowCreateCommand(opts *options) *cobra.Command {
+	var title string
+	var titleProperty string
+	var markdownText string
+	var file string
+	var propertiesJSON string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "create <data-source>",
+		Short: "Create a row in a Notion data source",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.data_source.row.create"), args); err != nil {
+				return err
+			}
+			parent, err := notion.DataSourceParent(args[0])
+			if err != nil {
+				return err
+			}
+			body, err := readMarkdownInput(markdownText, file)
+			if err != nil {
+				return err
+			}
+			request := notion.CreatePageRequest{
+				Parent:        parent,
+				Title:         title,
+				TitleProperty: titleProperty,
+				Markdown:      body,
+				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
+			}
+			if dryRun {
+				return writeDryRun(cmd, opts, "notion.data_source.row.create", request)
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			page, err := client.CreatePage(cmd.Context(), request)
+			if err != nil {
+				return err
+			}
+			return writePage(cmd, opts, page)
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "row title")
+	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
+	cmd.Flags().StringVar(&markdownText, "markdown", "", "initial row page markdown")
+	cmd.Flags().StringVar(&file, "file", "", "read initial row page markdown from file")
+	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without creating the row")
+	return cmd
+}
+
+func notionDataSourceRowUpdateCommand(opts *options) *cobra.Command {
+	var title string
+	var titleProperty string
+	var propertiesJSON string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "update <page>",
+		Short: "Update row properties for a Notion data source page",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, notionSpec("notion.data_source.row.update"), args); err != nil {
+				return err
+			}
+			request := notion.UpdatePageRequest{
+				Title:         title,
+				TitleProperty: titleProperty,
+				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
+			}
+			if dryRun {
+				return writeDryRun(cmd, opts, "notion.data_source.row.update", request)
+			}
+			client, err := notionClient(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
+			if err != nil {
+				return err
+			}
+			page, err := client.UpdatePage(cmd.Context(), pageID, request)
+			if err != nil {
+				return err
+			}
+			return writePage(cmd, opts, page)
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "row title")
+	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
+	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the row")
 	return cmd
 }
 
@@ -1552,7 +1909,7 @@ func connectNotion(cmd *cobra.Command, opts *options, serverURL string, authURLO
 		return nil
 	}
 	if ui.interactive && !noBrowser {
-		if err := openBrowser(session.AuthURL); err != nil {
+		if err := openURL(session.AuthURL); err != nil {
 			ui.warn("Could not open browser automatically: %v", err)
 		} else {
 			ui.status("Opened browser for Notion authorization")
@@ -1864,6 +2221,228 @@ func retrieveNotionPageRead(ctx context.Context, client *notion.Client, pageID s
 	return notionPageRead{Page: page, Markdown: markdown}, nil
 }
 
+func notionPageDiagnostics(result notionPageRead) []providerDiagnostic {
+	pageID := result.Page.ID
+	if pageID == "" {
+		pageID = result.Markdown.ID
+	}
+	title := firstNonEmpty(result.Page.Title(), pageID)
+	diagnostics := []providerDiagnostic{{
+		Provider: "notion",
+		Check:    "page",
+		Status:   "ok",
+		Message:  firstNonEmpty(title, "page loaded"),
+		Details: map[string]string{
+			"page_id": pageID,
+		},
+	}}
+	if result.Markdown.Truncated {
+		diagnostics = append(diagnostics, providerDiagnostic{
+			Provider:    "notion",
+			Check:       "markdown-truncation",
+			Status:      "warn",
+			Message:     "Notion returned a truncated markdown export",
+			Remediation: "Read the page in Notion before relying on full round-trip edits.",
+			Details: map[string]string{
+				"page_id": pageID,
+			},
+		})
+	} else {
+		diagnostics = append(diagnostics, providerDiagnostic{
+			Provider: "notion",
+			Check:    "markdown-truncation",
+			Status:   "ok",
+			Message:  "markdown export is complete",
+			Details: map[string]string{
+				"page_id": pageID,
+			},
+		})
+	}
+	if len(result.Markdown.UnknownBlockIDs) > 0 {
+		diagnostics = append(diagnostics, providerDiagnostic{
+			Provider:    "notion",
+			Check:       "unknown-blocks",
+			Status:      "warn",
+			Message:     fmt.Sprintf("%d block(s) could not be represented as markdown", len(result.Markdown.UnknownBlockIDs)),
+			Remediation: "Use --output json on page markdown to inspect unknown_block_ids before editing.",
+			Details: map[string]string{
+				"page_id":           pageID,
+				"unknown_block_ids": strings.Join(result.Markdown.UnknownBlockIDs, ","),
+			},
+		})
+	} else {
+		diagnostics = append(diagnostics, providerDiagnostic{
+			Provider: "notion",
+			Check:    "unknown-blocks",
+			Status:   "ok",
+			Message:  "all exported blocks were represented",
+			Details: map[string]string{
+				"page_id": pageID,
+			},
+		})
+	}
+	links := notionPageLinksFromMarkdown(result.Markdown.Markdown)
+	diagnostics = append(diagnostics, providerDiagnostic{
+		Provider: "notion",
+		Check:    "links",
+		Status:   "ok",
+		Message:  fmt.Sprintf("%d link(s) found", len(links)),
+		Details: map[string]string{
+			"page_id": pageID,
+			"links":   strconv.Itoa(len(links)),
+		},
+	})
+	return diagnostics
+}
+
+func notionPageLinksFromMarkdown(markdown string) []notionPageLink {
+	rawLinks := output.ExtractMarkdownLinks(markdown)
+	links := make([]notionPageLink, 0, len(rawLinks))
+	for i, raw := range rawLinks {
+		link := notionPageLink{
+			Index: i + 1,
+			Label: strings.TrimSpace(raw.Label),
+			URL:   strings.TrimSpace(raw.URL),
+			Kind:  "external",
+		}
+		if link.Label == "" {
+			link.Label = link.URL
+		}
+		if id, ok := notionPageIDFromLink(link.URL); ok {
+			link.Kind = "notion"
+			link.NotionPageID = id
+		}
+		links = append(links, link)
+	}
+	return links
+}
+
+func collectNotionPageChildren(ctx context.Context, client *notion.Client, pageID string, maxDepth, limit int) ([]notionPageChild, error) {
+	if maxDepth <= 0 {
+		maxDepth = 1
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	children := make([]notionPageChild, 0)
+	seen := map[string]bool{}
+	var walk func(string, int) error
+	walk = func(parentID string, depth int) error {
+		if depth > maxDepth || len(children) >= limit {
+			return nil
+		}
+		blocks, err := listAllNotionChildBlocks(ctx, client, parentID, limit-len(children))
+		if err != nil {
+			return err
+		}
+		for _, block := range blocks {
+			child, ok := notionPageChildFromBlock(block, depth)
+			if !ok {
+				continue
+			}
+			if seen[child.ID] {
+				continue
+			}
+			seen[child.ID] = true
+			children = append(children, child)
+			if len(children) >= limit {
+				return nil
+			}
+			if err := walk(child.ID, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(pageID, 1); err != nil {
+		return nil, err
+	}
+	return children, nil
+}
+
+func listAllNotionChildBlocks(ctx context.Context, client *notion.Client, blockID string, limit int) ([]notion.Block, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	blocks := make([]notion.Block, 0)
+	cursor := ""
+	for len(blocks) < limit {
+		pageSize := limit - len(blocks)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+		result, err := client.ListBlockChildren(ctx, blockID, notion.ListBlockChildrenRequest{
+			StartCursor: cursor,
+			PageSize:    pageSize,
+		})
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, result.Results...)
+		if !result.HasMore || result.NextCursor == "" {
+			break
+		}
+		cursor = result.NextCursor
+	}
+	if len(blocks) > limit {
+		return blocks[:limit], nil
+	}
+	return blocks, nil
+}
+
+func notionPageChildFromBlock(block notion.Block, depth int) (notionPageChild, bool) {
+	switch block.Type {
+	case "child_page":
+		title := ""
+		if block.ChildPage != nil {
+			title = block.ChildPage.Title
+		}
+		return notionPageChild{
+			Depth:       depth,
+			Title:       firstNonEmpty(title, "(untitled)"),
+			ID:          block.ID,
+			Type:        block.Type,
+			URL:         notionPageWebURL(block.ID),
+			HasChildren: block.HasChildren,
+		}, true
+	case "child_database":
+		title := ""
+		if block.ChildDatabase != nil {
+			title = block.ChildDatabase.Title
+		}
+		return notionPageChild{
+			Depth:       depth,
+			Title:       firstNonEmpty(title, "(untitled)"),
+			ID:          block.ID,
+			Type:        block.Type,
+			HasChildren: block.HasChildren,
+		}, true
+	default:
+		return notionPageChild{}, false
+	}
+}
+
+func writeNotionPageChildren(cmd *cobra.Command, opts *options, children []notionPageChild, empty string) error {
+	return writeValue(cmd, opts, children, func(w io.Writer) {
+		human := humanOutputOptions(cmd, opts)
+		rows := make([][]string, 0, len(children))
+		for _, child := range children {
+			rows = append(rows, []string{
+				strconv.Itoa(child.Depth),
+				strings.Repeat("  ", child.Depth-1) + child.Title,
+				child.ID,
+				child.Type,
+				output.Value(child.URL),
+			})
+		}
+		output.RenderTable(w, human, output.Table{
+			Headers: []string{"Depth", "Title", "ID", "Type", "URL"},
+			Rows:    rows,
+			Empty:   empty,
+		})
+	})
+}
+
 func followNotionPageLinks(cmd *cobra.Command, opts *options, client *notion.Client, result notionPageRead, includeTranscript bool) error {
 	for {
 		if err := writePageRead(cmd, opts, result); err != nil {
@@ -1893,7 +2472,7 @@ func followNotionPageLinks(cmd *cobra.Command, opts *options, client *notion.Cli
 			result = next
 			continue
 		}
-		if err := openBrowser(link.URL); err != nil {
+		if err := openURL(link.URL); err != nil {
 			return fmt.Errorf("open link %q: %w", link.URL, err)
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), output.ToneText(humanOutputOptions(cmd, opts), output.ToneInfo, "opened "+link.URL))
@@ -1992,6 +2571,14 @@ func bareNotionLink(rawURL, id string) bool {
 	cleaned := strings.ToLower(strings.TrimSpace(rawURL))
 	compact := strings.ReplaceAll(strings.ToLower(id), "-", "")
 	return cleaned == strings.ToLower(id) || cleaned == compact || strings.HasSuffix(cleaned, "-"+compact)
+}
+
+func notionPageWebURL(id string) string {
+	compact := strings.ReplaceAll(strings.TrimSpace(id), "-", "")
+	if compact == "" {
+		return ""
+	}
+	return "https://www.notion.so/" + compact
 }
 
 func writePageRead(cmd *cobra.Command, opts *options, result notionPageRead) error {
@@ -2155,6 +2742,24 @@ func writeDryRun(cmd *cobra.Command, opts *options, action string, request any) 
 			},
 		})
 	})
+}
+
+func dataSourcePropertyRows(properties map[string]json.RawMessage) [][]string {
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	rows := make([][]string, 0, len(names))
+	for _, name := range names {
+		var property struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(properties[name], &property)
+		rows = append(rows, []string{name, output.Value(property.ID), output.Value(property.Type)})
+	}
+	return rows
 }
 
 func writeValue(cmd *cobra.Command, opts *options, value any, table func(io.Writer)) error {
@@ -2361,6 +2966,8 @@ func colorForced() bool {
 	force := os.Getenv("CLICOLOR_FORCE")
 	return force != "" && force != "0"
 }
+
+var openURL = openBrowser
 
 func openBrowser(rawURL string) error {
 	var command string

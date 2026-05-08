@@ -15,6 +15,11 @@ func CommandSpecs() []policy.CommandSpec {
 		spec("notion.search", []string{"notion", "search"}, "workspace", "search", "read", nil, []string{CapabilityReadContent}),
 		spec("notion.page.get", []string{"notion", "page", "get"}, "page", "read", "read", nil, []string{CapabilityReadContent}),
 		spec("notion.page.read", []string{"notion", "page", "read"}, "page", "read", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.page.links", []string{"notion", "page", "links"}, "page_link", "list", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.page.open", []string{"notion", "page", "open"}, "page", "open", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.page.children", []string{"notion", "page", "children"}, "page_child", "list", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.page.tree", []string{"notion", "page", "tree"}, "page_child", "list", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.page.doctor", []string{"notion", "page", "doctor"}, "page", "diagnose", "read", nil, []string{CapabilityReadContent}),
 		spec("notion.page.markdown", []string{"notion", "page", "markdown"}, "page", "read", "read", nil, []string{CapabilityReadContent}),
 		spec("notion.page.create", []string{"notion", "page", "create"}, "page", "create", "write", []string{"content-write"}, []string{CapabilityInsertContent}),
 		spec("notion.page.update", []string{"notion", "page", "update"}, "page", "update", "write", []string{"content-write"}, []string{CapabilityUpdateContent}),
@@ -25,6 +30,9 @@ func CommandSpecs() []policy.CommandSpec {
 		spec("notion.page.restore", []string{"notion", "page", "restore"}, "page", "restore", "write", []string{"content-write"}, []string{CapabilityUpdateContent}),
 		spec("notion.page.move", []string{"notion", "page", "move"}, "page", "move", "write", []string{"relocate"}, []string{CapabilityUpdateContent}),
 		spec("notion.data_source.query", []string{"notion", "data-source", "query"}, "data_source", "query", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.data_source.schema", []string{"notion", "data-source", "schema"}, "data_source", "read", "read", nil, []string{CapabilityReadContent}),
+		spec("notion.data_source.row.create", []string{"notion", "data-source", "row", "create"}, "data_source_row", "create", "write", []string{"content-write"}, []string{CapabilityInsertContent}),
+		spec("notion.data_source.row.update", []string{"notion", "data-source", "row", "update"}, "data_source_row", "update", "write", []string{"content-write"}, []string{CapabilityUpdateContent}),
 		spec("notion.database.data_sources", []string{"notion", "database", "data-sources"}, "database", "read", "read", nil, []string{CapabilityReadContent}),
 	}
 }

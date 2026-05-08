@@ -170,10 +170,16 @@ type PageMarkdown struct {
 }
 
 type SearchRequest struct {
-	Query       string `json:"query,omitempty"`
-	ObjectType  string `json:"-"`
-	StartCursor string `json:"start_cursor,omitempty"`
-	PageSize    int    `json:"page_size,omitempty"`
+	Query       string      `json:"query,omitempty"`
+	ObjectType  string      `json:"-"`
+	StartCursor string      `json:"start_cursor,omitempty"`
+	PageSize    int         `json:"page_size,omitempty"`
+	Sort        *SearchSort `json:"sort,omitempty"`
+}
+
+type SearchSort struct {
+	Direction string `json:"direction"`
+	Timestamp string `json:"timestamp"`
 }
 
 type SearchResponse struct {
@@ -290,6 +296,37 @@ type QueryDataSourceResponse struct {
 	Status     *RequestStatus `json:"request_status,omitempty"`
 }
 
+type ListBlockChildrenRequest struct {
+	StartCursor string `json:"start_cursor,omitempty"`
+	PageSize    int    `json:"page_size,omitempty"`
+}
+
+type ListBlockChildrenResponse struct {
+	Object     string         `json:"object"`
+	Type       string         `json:"type,omitempty"`
+	Results    []Block        `json:"results"`
+	NextCursor string         `json:"next_cursor"`
+	HasMore    bool           `json:"has_more"`
+	Status     *RequestStatus `json:"request_status,omitempty"`
+}
+
+type Block struct {
+	Object         string           `json:"object"`
+	ID             string           `json:"id"`
+	CreatedTime    string           `json:"created_time,omitempty"`
+	LastEditedTime string           `json:"last_edited_time,omitempty"`
+	HasChildren    bool             `json:"has_children,omitempty"`
+	InTrash        bool             `json:"in_trash,omitempty"`
+	Type           string           `json:"type"`
+	ChildPage      *ChildPage       `json:"child_page,omitempty"`
+	ChildDatabase  *ChildPage       `json:"child_database,omitempty"`
+	Raw            *json.RawMessage `json:"raw,omitempty"`
+}
+
+type ChildPage struct {
+	Title string `json:"title,omitempty"`
+}
+
 type Database struct {
 	Object      string       `json:"object"`
 	ID          string       `json:"id"`
@@ -298,8 +335,13 @@ type Database struct {
 }
 
 type DataSource struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	Object         string                     `json:"object,omitempty"`
+	ID             string                     `json:"id"`
+	Name           string                     `json:"name,omitempty"`
+	CreatedTime    string                     `json:"created_time,omitempty"`
+	LastEditedTime string                     `json:"last_edited_time,omitempty"`
+	URL            string                     `json:"url,omitempty"`
+	Properties     map[string]json.RawMessage `json:"properties,omitempty"`
 }
 
 func (c *Client) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
@@ -318,6 +360,13 @@ func (c *Client) Search(ctx context.Context, request SearchRequest) (SearchRespo
 	if request.StartCursor != "" {
 		body["start_cursor"] = request.StartCursor
 	}
+	if request.Sort != nil {
+		sort, err := normalizeSearchSort(*request.Sort)
+		if err != nil {
+			return SearchResponse{}, err
+		}
+		body["sort"] = sort
+	}
 	switch request.ObjectType {
 	case "page", "data_source":
 		body["filter"] = map[string]string{"property": "object", "value": request.ObjectType}
@@ -335,6 +384,62 @@ func (c *Client) Search(ctx context.Context, request SearchRequest) (SearchRespo
 		}
 	}
 	return out, nil
+}
+
+func (c *Client) SearchAll(ctx context.Context, request SearchRequest, limit int) (SearchResponse, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var out SearchResponse
+	cursor := request.StartCursor
+	for len(out.Results) < limit {
+		pageSize := limit - len(out.Results)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+		request.StartCursor = cursor
+		request.PageSize = pageSize
+		page, err := c.Search(ctx, request)
+		if err != nil {
+			return SearchResponse{}, err
+		}
+		if out.Object == "" {
+			out.Object = page.Object
+			out.Type = page.Type
+		}
+		out.Results = append(out.Results, page.Results...)
+		out.NextCursor = page.NextCursor
+		out.HasMore = page.HasMore
+		out.Status = page.Status
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(out.Results) > limit {
+		out.Results = out.Results[:limit]
+	}
+	return out, nil
+}
+
+func normalizeSearchSort(sort SearchSort) (SearchSort, error) {
+	direction := strings.TrimSpace(strings.ToLower(sort.Direction))
+	switch direction {
+	case "", "desc", "descending":
+		direction = "descending"
+	case "asc", "ascending":
+		direction = "ascending"
+	default:
+		return SearchSort{}, fmt.Errorf("unsupported Notion search sort direction %q", sort.Direction)
+	}
+	timestamp := strings.TrimSpace(strings.ToLower(strings.ReplaceAll(sort.Timestamp, "-", "_")))
+	switch timestamp {
+	case "", "edited", "last_edited", "last_edited_time":
+		timestamp = "last_edited_time"
+	default:
+		return SearchSort{}, fmt.Errorf("unsupported Notion search sort %q; only last_edited_time is supported", sort.Timestamp)
+	}
+	return SearchSort{Direction: direction, Timestamp: timestamp}, nil
 }
 
 func (c *Client) RetrievePage(ctx context.Context, pageID string, filterProperties []string) (Page, error) {
@@ -518,6 +623,77 @@ func (c *Client) QueryDataSource(ctx context.Context, dataSourceID string, reque
 	var out QueryDataSourceResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/data_sources/"+url.PathEscape(id)+"/query", query, body, &out); err != nil {
 		return QueryDataSourceResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) QueryDataSourceAll(ctx context.Context, dataSourceID string, request QueryDataSourceRequest, limit int) (QueryDataSourceResponse, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var out QueryDataSourceResponse
+	cursor := request.StartCursor
+	for len(out.Results) < limit {
+		pageSize := limit - len(out.Results)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+		request.StartCursor = cursor
+		request.PageSize = pageSize
+		page, err := c.QueryDataSource(ctx, dataSourceID, request)
+		if err != nil {
+			return QueryDataSourceResponse{}, err
+		}
+		if out.Object == "" {
+			out.Object = page.Object
+			out.Type = page.Type
+		}
+		out.Results = append(out.Results, page.Results...)
+		out.NextCursor = page.NextCursor
+		out.HasMore = page.HasMore
+		out.Status = page.Status
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(out.Results) > limit {
+		out.Results = out.Results[:limit]
+	}
+	return out, nil
+}
+
+func (c *Client) ListBlockChildren(ctx context.Context, blockID string, request ListBlockChildrenRequest) (ListBlockChildrenResponse, error) {
+	id, err := NormalizeID(blockID)
+	if err != nil {
+		return ListBlockChildrenResponse{}, err
+	}
+	if request.PageSize <= 0 {
+		request.PageSize = 100
+	}
+	if request.PageSize > 100 {
+		request.PageSize = 100
+	}
+	query := make(url.Values)
+	query.Set("page_size", strconv.Itoa(request.PageSize))
+	if request.StartCursor != "" {
+		query.Set("start_cursor", request.StartCursor)
+	}
+	var out ListBlockChildrenResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/blocks/"+url.PathEscape(id)+"/children", query, nil, &out); err != nil {
+		return ListBlockChildrenResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) RetrieveDataSource(ctx context.Context, dataSourceID string) (DataSource, error) {
+	id, err := NormalizeID(dataSourceID)
+	if err != nil {
+		return DataSource{}, err
+	}
+	var out DataSource
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/data_sources/"+url.PathEscape(id), nil, nil, &out); err != nil {
+		return DataSource{}, err
 	}
 	return out, nil
 }
