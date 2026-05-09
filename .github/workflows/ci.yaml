@@ -5,44 +5,117 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.3"
+  GOFLAGS: -mod=readonly
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
+    name: go checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - name: Check out repository
+        uses: actions/checkout@v5
         with:
-          go-version: "1.26.3"
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
           cache: true
-      - run: make fmt-check
-      - run: make vet
-      - run: make test
-      - run: make test-race
-      - run: make test-integration
-      - run: make build
+          cache-dependency-path: go.sum
+      - name: Show available targets
+        run: make help
+      - name: Check Go formatting
+        run: make fmt-check
+      - name: Vet packages
+        run: make vet
+      - name: Run unit tests
+        run: make test
+      - name: Run race tests
+        run: make test-race
+      - name: Run fake-upstream integration tests
+        run: make test-integration
+      - name: Generate coverage
+        run: make coverage
+      - name: Build binaries
+        run: make build
 
   lint:
+    name: docker lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - run: make lint
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Run Dockerfile-based lint pass
+        run: make lint
+
+  container:
+    name: container build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build supaclid image
+        run: make build-supaclid-image
 
   commitlint:
+    name: commit messages
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out repository
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Validate commit messages
         run: |
           set -euo pipefail
-          git log --format=%H \
-            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" |
-          while read -r sha; do
+
+          empty_tree=0000000000000000000000000000000000000000
+          case "${{ github.event_name }}" in
+          pull_request)
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+            ;;
+          push)
+            if [[ "${{ github.event.before }}" == "$empty_tree" ]]; then
+              range="${{ github.sha }}"
+            else
+              range="${{ github.event.before }}..${{ github.sha }}"
+            fi
+            ;;
+          *)
+            range="${{ github.sha }}"
+            ;;
+          esac
+
+          commits="$(git rev-list --reverse "$range")"
+
+          while IFS= read -r sha; do
+            if [[ -z "$sha" ]]; then
+              continue
+            fi
+            echo "Checking commit ${sha}"
             git log -1 --format=%B "$sha" | scripts/check-commit-message.sh
-          done
+          done <<<"$commits"

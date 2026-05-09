@@ -51,6 +51,11 @@ do not need to install `staticcheck`, `golangci-lint`, `govulncheck`,
 `gosec`, `gitleaks`, `actionlint`, or `yamllint` on the host. The Docker lint
 pass also checks Go formatting and import order through `golangci-lint fmt`.
 
+GitHub Actions runs these checks for pull requests and pushes to `main`, plus
+race tests, fake-upstream integration tests, coverage generation, binary
+builds, commit-message validation, and the generic `supaclid` container image
+build. Live-provider tests stay opt-in and are not part of default CI.
+
 ## Common Targets
 
 ```bash
@@ -224,7 +229,7 @@ Use Conventional Commits:
 
 Rules enforced by `make commitlint`:
 
-1. Subject line at or below 50 characters.
+1. Subject line at or below 72 characters.
 2. Body lines wrapped at 72 characters.
 3. Blank line between subject and body.
 4. Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`,
@@ -246,9 +251,14 @@ Before opening a PR, check:
 1. `make fmt-check`
 2. `make vet`
 3. `make test`
-4. `make lint`, when Docker is available
-5. `make commitlint`, after creating commits
-6. README/CONTRIBUTING/AGENTS/docs updates for behavior changes
+4. `make test-race`
+5. `make test-integration`
+6. `make build`
+7. `make coverage`
+8. `make build-supaclid-image`, when Docker is available
+9. `make lint`, when Docker is available
+10. `make commitlint`, after creating commits
+11. README/CONTRIBUTING/AGENTS/docs updates for behavior changes
 
 If you cannot run a check, call that out in the PR with the reason.
 

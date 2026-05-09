@@ -119,6 +119,8 @@ CI should run at least:
 6. Deterministic fake-upstream integration tests.
 7. Markdown, YAML, and shell-script linting where applicable.
 8. Commit-message validation.
+9. Generic `supaclid` container image build validation.
+10. Coverage generation with `make coverage`.
 
 ## Integration Tests
 
@@ -282,7 +284,7 @@ Allowed common types include `feat`, `fix`, `docs`, `test`, `refactor`,
 
 Commit message rules:
 
-1. Keep the subject line at or below 50 characters.
+1. Keep the subject line at or below 72 characters.
 2. Wrap body lines at 72 characters.
 3. Use a blank line between the subject and body.
 4. Explain why in the body when the change is not obvious.
