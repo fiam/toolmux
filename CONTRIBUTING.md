@@ -48,7 +48,8 @@ make lint
 
 `make lint` builds the `lint` target from the root `Dockerfile`. Contributors
 do not need to install `staticcheck`, `golangci-lint`, `govulncheck`,
-`gosec`, `gitleaks`, `actionlint`, or `yamllint` on the host.
+`gosec`, `gitleaks`, `actionlint`, or `yamllint` on the host. The Docker lint
+pass also checks Go formatting and import order through `golangci-lint fmt`.
 
 ## Common Targets
 
@@ -77,12 +78,23 @@ make dev-server-tunnel
 
 1. Keep changes narrowly scoped.
 2. Prefer existing package patterns over new abstractions.
-3. Add or update command specs before a command can read credentials.
+3. Add or update policy metadata before a command can read credentials.
 4. Run policy checks before token reads or provider API calls.
 5. Keep human output in `internal/output`.
 6. Keep JSON/YAML output stable and free of ANSI escapes.
 7. Add fake-upstream tests for provider behavior.
 8. Do not rely on live SaaS providers for default CI correctness.
+9. Add `t.Parallel()` to Go tests unless a specific shared-state constraint
+   prevents it.
+10. Keep imports grouped as standard library, third-party packages, then
+   `github.com/fiam/toolmux` packages.
+
+Provider integration tests that exercise real `toolmux` commands should live
+with the provider package and use `internal/testutil/toolmuxtest` for shared
+command-running helpers.
+
+Tests that need toolmuxd should use `internal/testutil/toolmuxdtest`, with
+provider-specific fake upstream behavior kept in provider fixtures.
 
 Provider commands should be useful for both humans and agents. If a command
 adds a prompt, browser open, pager, spinner, or selector, it must be gated on
@@ -109,7 +121,8 @@ Do not leave README examples pointing at commands that no longer exist.
 
 When adding or expanding a provider:
 
-1. Add command specs with provider, resource, action, effect, risk, and scopes.
+1. Add provider action specs with path, args, flags, provider, resource,
+   action, remote effect, local effect, risk, and scopes.
 2. Add client code that uses structured request and response types.
 3. Avoid `map[string]any` for server/client JSON when a stable struct is
    practical.
@@ -170,6 +183,34 @@ Use these commands while developing:
 ./bin/toolmux policy check --command "notion page read Roadmap"
 ./bin/toolmux policy doctor
 ```
+
+Provider command metadata is data-driven. Root `status [provider...]` and
+`doctor [provider...]` are explicit commands with provider-aware policy checks,
+so do not add provider-specific status or doctor subcommands.
+
+Provider command paths, args, flags, group help, aliases, and leaf help belong
+in a provider-owned `actions.Spec` tree. Use one spec type for both groups and
+leaf actions, then let the Cobra, MCP, REST, policy, and catalog layers walk
+that tree instead of maintaining separate command models.
+
+Provider command execution belongs with the provider too. Add client action
+handlers under `internal/providers/<provider>/client`, expose them through the
+provider catalog, and return typed results. The CLI root should only evaluate
+policy, construct an action context, invoke the handler, and render results
+through shared `internal/actions` and `internal/output` interfaces. Do not add
+provider-specific Cobra files under `internal/cli`.
+
+Provider facets self-register through package `init()` functions. Keep those
+functions pure and static: no env reads, I/O, network calls, credentials,
+goroutines, or logging. Add client provider facets to
+`internal/providers/all`; add toolmuxd OAuth/token broker facets to
+`internal/providers/brokers/all`. `toolmux`, `toolmuxd`, and test harnesses
+should import only the bundle they need for side effects.
+
+Server-side OAuth/token broker implementations should register descriptors in
+`internal/providers/brokers` from `internal/providers/<provider>/broker`.
+`internal/server` should depend on that broker registry, not on provider client
+packages.
 
 ## Commit Messages
 

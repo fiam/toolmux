@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	_ "github.com/fiam/toolmux/internal/providers/brokers/all"
 	"github.com/fiam/toolmux/internal/server"
 )
 

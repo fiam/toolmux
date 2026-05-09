@@ -69,6 +69,7 @@ func (r *fakeKeyring) Keys() ([]string, error) {
 }
 
 func TestKeyringStoreRoundTripOAuthTokens(t *testing.T) {
+	t.Parallel()
 	ring := newFakeKeyring()
 	store := newKeyringStore(ring, "toolmux-test", []string{"keychain"})
 	ref := ConnectionRef{Profile: "default", Provider: "notion", AccountID: "workspace-1"}
@@ -103,6 +104,7 @@ func TestKeyringStoreRoundTripOAuthTokens(t *testing.T) {
 }
 
 func TestKeyringStoreLoadMissingReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	store := newKeyringStore(newFakeKeyring(), "toolmux-test", []string{"keychain"})
 	_, err := store.LoadOAuthTokens(context.Background(), ConnectionRef{
 		Provider:  "slack",
@@ -114,6 +116,7 @@ func TestKeyringStoreLoadMissingReturnsNotFound(t *testing.T) {
 }
 
 func TestKeyringStoreDeleteMissingIsIdempotent(t *testing.T) {
+	t.Parallel()
 	store := newKeyringStore(newFakeKeyring(), "toolmux-test", []string{"keychain"})
 	err := store.DeleteOAuthTokens(context.Background(), ConnectionRef{
 		Provider:  "slack",
@@ -125,9 +128,10 @@ func TestKeyringStoreDeleteMissingIsIdempotent(t *testing.T) {
 }
 
 func TestKeyringStoreRejectsCorruptOAuthPayload(t *testing.T) {
+	t.Parallel()
 	ring := newFakeKeyring()
 	store := newKeyringStore(ring, "toolmux-test", []string{"keychain"})
-	ref := ConnectionRef{Provider: "linear", AccountID: "workspace-1"}
+	ref := ConnectionRef{Provider: "test-provider", AccountID: "workspace-1"}
 	key, err := oauthTokensKey(ref)
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +145,7 @@ func TestKeyringStoreRejectsCorruptOAuthPayload(t *testing.T) {
 }
 
 func TestKeyringStoreDoctor(t *testing.T) {
+	t.Parallel()
 	ring := newFakeKeyring()
 	store := newKeyringStore(ring, "toolmux-test", []string{"keychain"})
 
@@ -154,6 +159,7 @@ func TestKeyringStoreDoctor(t *testing.T) {
 }
 
 func TestKeyringStoreDoctorReportsWriteFailure(t *testing.T) {
+	t.Parallel()
 	ring := newFakeKeyring()
 	ring.setErr = errors.New("locked")
 	store := newKeyringStore(ring, "toolmux-test", []string{"keychain"})
@@ -165,6 +171,7 @@ func TestKeyringStoreDoctorReportsWriteFailure(t *testing.T) {
 }
 
 func TestKeyringBackendTypesRejectsUnknownBackend(t *testing.T) {
+	t.Parallel()
 	_, err := keyringBackendTypes([]string{"unknown"})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("error = %v, want ErrUnavailable", err)

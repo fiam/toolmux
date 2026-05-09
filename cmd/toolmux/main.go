@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/fiam/toolmux/internal/cli"
+	_ "github.com/fiam/toolmux/internal/providers/all"
 )
 
 func main() {

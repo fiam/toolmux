@@ -1,16 +1,18 @@
-package server
+package server_test
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/fiam/toolmux/internal/server"
+	"github.com/fiam/toolmux/internal/testutil/toolmuxdtest"
 )
 
 func TestHealthz(t *testing.T) {
-	server := httptest.NewServer(NewHandler())
-	defer server.Close()
+	t.Parallel()
+	toolmuxd := toolmuxdtest.New(t, server.Config{})
 
-	resp, err := server.Client().Get(server.URL + "/healthz")
+	resp, err := toolmuxd.Client().Get(toolmuxd.URL + "/healthz")
 	if err != nil {
 		t.Fatal(err)
 	}

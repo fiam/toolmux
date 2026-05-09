@@ -7,6 +7,7 @@ import (
 )
 
 func TestRenderTablePlainHasHeadersAndNoANSI(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	RenderTable(&out, Options{Color: false, Width: 160}, Table{
 		Headers: []string{"Provider", "Status"},
@@ -27,6 +28,7 @@ func TestRenderTablePlainHasHeadersAndNoANSI(t *testing.T) {
 }
 
 func TestStatusBadgeColorUsesANSI(t *testing.T) {
+	t.Parallel()
 	badge := StatusBadge(Options{Color: true, DarkBackground: true}, "ok")
 	if !strings.Contains(badge, "\x1b[") {
 		t.Fatalf("expected colored badge to contain ANSI escape sequence: %q", badge)
@@ -35,7 +37,7 @@ func TestStatusBadgeColorUsesANSI(t *testing.T) {
 
 func maxLineWidth(value string) int {
 	maximum := 0
-	for _, line := range strings.Split(strings.TrimRight(value, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(value, "\n"), "\n") {
 		if len(line) > maximum {
 			maximum = len(line)
 		}

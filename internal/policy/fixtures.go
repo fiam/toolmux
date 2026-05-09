@@ -8,25 +8,18 @@ roles:
     allow:
       - id: allow-read
         provider: "*"
-        actions: ["read", "list", "search", "status", "diagnose"]
+        remote_effects: ["read", "none"]
+        local_effects: ["none"]
   operator:
     extends: ["reader"]
     allow:
-      - id: allow-jira-write
-        provider: "jira"
-        resources: ["issue", "comment"]
-        actions: ["create", "update"]
-      - id: allow-linear-write
-        provider: "linear"
-        resources: ["issue", "comment"]
-        actions: ["create", "update"]
+      - id: allow-notion-write
+        provider: "notion"
+        resources: ["page", "page_content", "data_source_row"]
+        actions: ["create", "update", "restore", "move"]
     deny:
-      - id: deny-gmail-send
-        provider: "gmail"
-        actions: ["send"]
-      - id: deny-drive-delete-share
-        provider: "google-drive"
-        actions: ["delete", "share"]
+      - id: deny-destructive
+        risks: ["destructive"]
 
 bindings:
   - role: operator

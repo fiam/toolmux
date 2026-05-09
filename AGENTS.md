@@ -93,8 +93,10 @@ make dev-server-tunnel
 
 `make lint` is Dockerfile-based and should not require contributors to install
 `staticcheck`, `golangci-lint`, `govulncheck`, `gosec`, `gitleaks`,
-`actionlint`, or `yamllint` on the host. Keep linter versions pinned in the
-root `Dockerfile`.
+`actionlint`, or `yamllint` on the host. It must enforce the configured
+`golangci-lint` formatters, including `gci` import grouping as standard
+library, third-party, then `github.com/fiam/toolmux` packages. Keep linter
+versions pinned in the root `Dockerfile`.
 
 `make test-live` must be skipped by default and require explicit environment
 variables such as `TOOLMUX_LIVE_TESTS=1`.
@@ -106,11 +108,12 @@ across development builds.
 
 CI should run at least:
 
-1. `go fmt` or an equivalent format check.
+1. `golangci-lint fmt --diff` or an equivalent format check covering `gofmt`,
+   `goimports`, and `gci`.
 2. `go vet ./...`.
 3. Dockerfile-based `make lint`, including `staticcheck`, `golangci-lint`,
-   `modernize`, `govulncheck`, `gosec`, `gitleaks`, `actionlint`, and
-   repository-wide YAML linting.
+   `modernize`, `paralleltest`, `govulncheck`, `gosec`, `gitleaks`,
+   `actionlint`, and repository-wide YAML linting.
 4. `go test ./...`.
 5. `go test -race ./...`.
 6. Deterministic fake-upstream integration tests.
@@ -135,6 +138,22 @@ Fake upstreams should emulate:
 Live-provider tests may exist for smoke coverage, but they must be opt-in,
 isolated from default CI, and must never record real tokens in fixtures.
 
+All Go tests should call `t.Parallel()` unless there is a specific, documented
+reason they cannot. Avoid process-global state in tests; inject dependencies
+instead of using `t.Setenv`, `os.Setenv`, or working-directory changes in
+parallel tests.
+
+Provider integration tests that exercise the `toolmux` command surface should
+live with the provider package, usually as external tests such as
+`internal/providers/notion/client` package `client_test`. Use
+`internal/testutil/toolmuxtest` for command execution helpers instead of
+creating provider-specific `runToolmux` wrappers.
+
+Tests that need a real toolmuxd instance should use
+`internal/testutil/toolmuxdtest` instead of constructing `server.NewHandler`
+or `httptest.Server` directly. Provider-specific fake upstream behavior should
+stay with the provider test fixtures.
+
 ## CLI Output
 
 Toolmux has one command surface for humans and agents. Do not add a separate
@@ -153,9 +172,9 @@ plain and stable for agents.
 
 Connection status is owned by the root `status [provider...]` command, and
 diagnostics are owned by the root `doctor [provider...]` command. Do not add
-provider-specific `status` or `doctor` subcommands; add or update the
-provider's `status <provider>` and `doctor <provider>` command specs so policy
-checks still cover each provider.
+provider-specific `status` or `doctor` subcommands. Keep these root commands
+explicit and provider-aware; they construct their own policy specs before
+reading credentials.
 
 `status` should report connection state and known scopes/capabilities.
 `doctor` should run active core and provider-defined diagnostics with
@@ -191,7 +210,40 @@ crash reports, telemetry, or committed files.
 
 Policy checks must run before credential reads, token refresh, or provider API
 calls.
-Every executable command and alias needs a command spec for policy evaluation.
+Every executable command and alias needs policy metadata for evaluation. For
+provider commands, add data-driven action specs with both `remote_effect` and
+`local_effect`; do not register placeholder specs for providers that are not
+implemented yet.
+
+Provider command paths, argument constraints, flags, group help, aliases, and
+leaf help must come from a provider-owned `actions.Spec` tree. Use the same
+type for group nodes and leaf actions, and let upper layers walk the tree
+instead of maintaining a parallel group model. Do not hardcode provider command
+trees or provider command flags in the Cobra root layer. Root `connect`,
+`disconnect`, `status`, and `doctor` are the only code-driven CLI-only command
+surfaces.
+
+Provider command behavior must also live with the provider's client package, not
+in `internal/cli`. Register provider-owned `actions.Handler` functions through
+the provider catalog, return structured results, and implement shared
+renderable interfaces from `internal/actions` when human table output needs
+tables, Markdown, text, browser opens, or follow-up interactions. The Cobra
+layer may walk metadata, evaluate policy, invoke handlers, and render shared
+results; it must not contain provider-specific command implementations.
+
+Provider facets self-register. Use `internal/providers/<provider>/client` for
+CLI/API/MCP action metadata, handlers, diagnostics, and API clients; use
+`internal/providers/<provider>/broker` for toolmuxd OAuth/token broker support.
+Facet packages should expose `Descriptor()` or equivalent static constructors
+and call registry functions from `init()`. Keep `init()` limited to static
+registration: no env reads, filesystem access, network calls, goroutines,
+credentials, or logging. Add client providers to `internal/providers/all` and
+broker providers to `internal/providers/brokers/all`; binaries and test
+harnesses import the appropriate bundle for side effects.
+
+Broker facets register through `internal/providers/brokers`. Keep
+`internal/server` generic: it may use broker descriptors and OAuth interfaces,
+but it must not import provider client packages.
 
 ## Repository Boundary
 

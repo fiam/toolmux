@@ -1,15 +1,8 @@
 package policy
 
-type CommandSpec struct {
-	ID       string
-	Path     []string
-	Provider string
-	Resource string
-	Action   string
-	Effect   string
-	Risk     []string
-	Scopes   []string
-}
+import "github.com/fiam/toolmux/internal/actions"
+
+type CommandSpec = actions.Spec
 
 type Invocation struct {
 	Spec       CommandSpec
@@ -40,15 +33,17 @@ type Role struct {
 }
 
 type Rule struct {
-	ID        string   `yaml:"id"`
-	Command   string   `yaml:"command"`
-	Provider  string   `yaml:"provider"`
-	Resources []string `yaml:"resources"`
-	Actions   []string `yaml:"actions"`
-	Effects   []string `yaml:"effects"`
-	Risks     []string `yaml:"risks"`
-	Profiles  []string `yaml:"profiles"`
-	Accounts  []string `yaml:"accounts"`
+	ID            string   `yaml:"id"`
+	Command       string   `yaml:"command"`
+	Provider      string   `yaml:"provider"`
+	Resources     []string `yaml:"resources"`
+	Actions       []string `yaml:"actions"`
+	Effects       []string `yaml:"effects"`
+	RemoteEffects []string `yaml:"remote_effects"`
+	LocalEffects  []string `yaml:"local_effects"`
+	Risks         []string `yaml:"risks"`
+	Profiles      []string `yaml:"profiles"`
+	Accounts      []string `yaml:"accounts"`
 }
 
 type Binding struct {

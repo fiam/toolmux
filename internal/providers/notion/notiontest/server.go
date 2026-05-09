@@ -1,4 +1,4 @@
-package fakeupstream
+package notiontest
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ type Server struct {
 	requests    []string
 }
 
-func New() *Server {
+func NewUpstream() *Server {
 	mux := http.NewServeMux()
 	server := &Server{
 		notionPages: map[string]notionPage{
@@ -59,20 +59,6 @@ func New() *Server {
 	mux.HandleFunc("GET /notion/v1/data_sources/{data_source_id}", server.notionGetDataSource)
 	mux.HandleFunc("POST /notion/v1/data_sources/{data_source_id}/query", server.notionQueryDataSource)
 	mux.HandleFunc("GET /notion/v1/databases/{database_id}", server.notionGetDatabase)
-	mux.HandleFunc("GET /jira/rest/api/3/search/jql", jsonHandler(map[string]any{
-		"issues": []map[string]string{{"key": "OPS-1"}},
-	}))
-	mux.HandleFunc("GET /slack/api/conversations.list", jsonHandler(map[string]any{
-		"ok":       true,
-		"channels": []map[string]string{{"id": "C123", "name": "general"}},
-	}))
-	mux.HandleFunc("POST /linear/graphql", server.linearGraphQL)
-	mux.HandleFunc("GET /google/drive/v3/files", jsonHandler(map[string]any{
-		"files": []map[string]string{{"id": "file-1", "name": "Roadmap"}},
-	}))
-	mux.HandleFunc("GET /gmail/gmail/v1/users/me/labels", jsonHandler(map[string]any{
-		"labels": []map[string]string{{"id": "INBOX", "name": "INBOX"}},
-	}))
 
 	server.Server = httptest.NewServer(mux)
 	return server
@@ -555,10 +541,7 @@ func paginate(total int, cursor string, pageSize int) (int, int, any, bool) {
 	if start > total {
 		start = total
 	}
-	end := start + pageSize
-	if end > total {
-		end = total
-	}
+	end := min(start+pageSize, total)
 	hasMore := end < total
 	var nextCursor any
 	if hasMore {
@@ -630,82 +613,6 @@ func notionError(w http.ResponseWriter, status int, code, message string) {
 		"code":    code,
 		"message": message,
 	})
-}
-
-func (s *Server) linearGraphQL(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		Query string `json:"query"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid graphql request", http.StatusBadRequest)
-		return
-	}
-
-	switch {
-	case contains(request.Query, "viewer"):
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"viewer": map[string]string{
-					"id": "linear-user-1", "name": "Linear User", "email": "user@example.com",
-				},
-			},
-		})
-	case contains(request.Query, "issues("):
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"issues": map[string]any{
-					"nodes": []map[string]any{linearIssue("issue-1", "SUP-1", "Existing issue")},
-				},
-			},
-		})
-	case contains(request.Query, "issue("):
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"issue": linearIssue("issue-1", "SUP-1", "Existing issue"),
-			},
-		})
-	case contains(request.Query, "issueCreate"):
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"issueCreate": map[string]any{
-					"success": true,
-					"issue":   linearIssue("issue-2", "SUP-2", "Created issue"),
-				},
-			},
-		})
-	case contains(request.Query, "commentCreate"):
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"commentCreate": map[string]any{
-					"success": true,
-					"comment": map[string]string{
-						"id": "comment-1", "body": "Looks good", "url": "https://linear.app/sup/comment-1", "issueId": "issue-2",
-					},
-				},
-			},
-		})
-	default:
-		writeJSON(w, http.StatusOK, map[string]any{
-			"errors": []map[string]string{{"message": "unsupported fake Linear query"}},
-		})
-	}
-}
-
-func linearIssue(id, identifier, title string) map[string]any {
-	return map[string]any{
-		"id": id, "identifier": identifier, "title": title, "url": "https://linear.app/sup/issue/" + identifier,
-		"team": map[string]string{"id": "team-1", "key": "SUP", "name": "Toolmux"},
-	}
-}
-
-func contains(value, needle string) bool {
-	return strings.Contains(value, needle)
-}
-
-func jsonHandler(value any) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, value)
-	}
 }
 
 func status(code int) http.HandlerFunc {

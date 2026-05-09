@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/fiam/toolmux/internal/actions"
 )
 
 var ErrDenied = errors.New("policy denied command")
@@ -136,6 +138,19 @@ func (e *Engine) Require(inv Invocation) error {
 	return fmt.Errorf("%w: %s", ErrDenied, decision.Reason)
 }
 
+func AllowsReadOnly(spec CommandSpec) bool {
+	return readOnlyEffect(spec.RemoteEffect) && readOnlyEffect(spec.LocalEffect)
+}
+
+func readOnlyEffect(effect string) bool {
+	switch actions.Effect(effect) {
+	case "", actions.EffectNone, actions.EffectRead:
+		return true
+	default:
+		return false
+	}
+}
+
 func evaluatePolicy(p Policy, inv Invocation) Decision {
 	roles := boundRoles(p, inv)
 	defaultAllow := strings.EqualFold(p.Default, "allow")
@@ -250,7 +265,19 @@ func ruleMatches(rule Rule, inv Invocation) bool {
 	if len(rule.Actions) > 0 && !stringListMatches(rule.Actions, inv.Spec.Action) {
 		return false
 	}
-	if len(rule.Effects) > 0 && !stringListMatches(rule.Effects, inv.Spec.Effect) {
+	remoteEffect := firstNonEmpty(inv.Spec.RemoteEffect, inv.Spec.Effect)
+	localEffect := firstNonEmpty(inv.Spec.LocalEffect, string(actions.EffectNone))
+	legacyEffect := firstNonEmpty(
+		inv.Spec.Effect,
+		string(actions.CombinedEffect(actions.Effect(remoteEffect), actions.Effect(localEffect))),
+	)
+	if len(rule.Effects) > 0 && !stringListMatches(rule.Effects, legacyEffect) {
+		return false
+	}
+	if len(rule.RemoteEffects) > 0 && !stringListMatches(rule.RemoteEffects, remoteEffect) {
+		return false
+	}
+	if len(rule.LocalEffects) > 0 && !stringListMatches(rule.LocalEffects, localEffect) {
 		return false
 	}
 	if len(rule.Risks) > 0 && !anyStringMatches(rule.Risks, inv.Spec.Risk) {
@@ -295,4 +322,13 @@ func globMatch(pattern, value string) bool {
 		return pattern == value
 	}
 	return ok
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

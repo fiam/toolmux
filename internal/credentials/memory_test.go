@@ -8,9 +8,10 @@ import (
 )
 
 func TestMemoryStoreRoundTripOAuthTokens(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	ref := ConnectionRef{
-		Provider:  "linear",
+		Provider:  "test-provider",
 		AccountID: "workspace-1",
 	}
 	tokens := OAuthTokens{
@@ -48,6 +49,7 @@ func TestMemoryStoreRoundTripOAuthTokens(t *testing.T) {
 }
 
 func TestMemoryStoreMissingReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	_, err := store.LoadOAuthTokens(context.Background(), ConnectionRef{
 		Provider:  "notion",
@@ -59,6 +61,7 @@ func TestMemoryStoreMissingReturnsNotFound(t *testing.T) {
 }
 
 func TestMemoryStoreZeroValueCanSaveTokens(t *testing.T) {
+	t.Parallel()
 	var store MemoryStore
 	ref := ConnectionRef{Provider: "notion", AccountID: "workspace-1"}
 	if err := store.SaveOAuthTokens(context.Background(), ref, OAuthTokens{AccessToken: "access-1"}); err != nil {
@@ -70,6 +73,7 @@ func TestMemoryStoreZeroValueCanSaveTokens(t *testing.T) {
 }
 
 func TestMemoryStoreDeleteOAuthTokensIsIdempotent(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	ref := ConnectionRef{Provider: "notion", AccountID: "workspace-1"}
 	if err := store.SaveOAuthTokens(context.Background(), ref, OAuthTokens{AccessToken: "access-1"}); err != nil {
@@ -88,6 +92,7 @@ func TestMemoryStoreDeleteOAuthTokensIsIdempotent(t *testing.T) {
 }
 
 func TestMemoryStoreDoctor(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	diagnostics := store.Doctor(context.Background())
 	if !diagnostics.Available {

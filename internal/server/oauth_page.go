@@ -16,14 +16,6 @@ type oauthProviderPage struct {
 	Logo string
 }
 
-func notionOAuthProviderPage() oauthProviderPage {
-	return oauthProviderPage{
-		Name: "Notion",
-		Slug: "notion",
-		Logo: "N",
-	}
-}
-
 func writeOAuthSuccessPage(w http.ResponseWriter, page oauthSuccessPage) {
 	var body bytes.Buffer
 	if err := oauthSuccessTemplate.Execute(&body, page); err != nil {

@@ -12,6 +12,7 @@ linters:
     - ineffassign
     - modernize
     - nilerr
+    - paralleltest
     - staticcheck
     - unconvert
     - unused
@@ -19,8 +20,16 @@ linters:
 
 formatters:
   enable:
+    - gci
     - gofmt
     - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/fiam/toolmux)
+      custom-order: true
 
 issues:
   max-issues-per-linter: 0

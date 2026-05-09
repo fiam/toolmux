@@ -6,6 +6,7 @@ import (
 )
 
 func TestRenderMarkdownPlainKeepsReadableText(t *testing.T) {
+	t.Parallel()
 	rendered, err := RenderMarkdown("# Roadmap\n\n- Ship Toolmux", MarkdownOptions{
 		Width: 80,
 		Theme: MarkdownPlain,
@@ -22,6 +23,7 @@ func TestRenderMarkdownPlainKeepsReadableText(t *testing.T) {
 }
 
 func TestPrepareReadableMarkdownAnnotatesLinksAndPreservesLines(t *testing.T) {
+	t.Parallel()
 	source := PrepareReadableMarkdown("# Work Diary\n\n[April 2026](https://notion.so/april)\n[May 2026](https://notion.so/may)")
 	if !strings.Contains(source, "- **April 2026 [1]**") {
 		t.Fatalf("prepared markdown does not annotate first link: %q", source)
@@ -52,6 +54,7 @@ func TestPrepareReadableMarkdownAnnotatesLinksAndPreservesLines(t *testing.T) {
 }
 
 func TestPrepareReadableMarkdownNormalizesNotionPageLinks(t *testing.T) {
+	t.Parallel()
 	source := PrepareReadableMarkdown(`<page url="https://www.notion.so/april">April 2026</page>
 <page url="https://www.notion.so/may">May 2026</page>
 <empty-block/>`)
@@ -87,6 +90,7 @@ func TestPrepareReadableMarkdownNormalizesNotionPageLinks(t *testing.T) {
 }
 
 func TestExtractMarkdownLinksNormalizesNotionPageLinks(t *testing.T) {
+	t.Parallel()
 	links := ExtractMarkdownLinks(`<page url="https://www.notion.so/Roadmap-11111111111141118111111111111111">Roadmap</page>
 [External](https://example.com/docs)`)
 	if len(links) != 2 {
