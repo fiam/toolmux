@@ -12,8 +12,8 @@ if [[ ! "$subject" =~ $subject_re ]]; then
   exit 1
 fi
 
-if ((${#subject} > 50)); then
-  echo "commit subject is ${#subject} chars; max is 50" >&2
+if ((${#subject} > 72)); then
+  echo "commit subject is ${#subject} chars; max is 72" >&2
   exit 1
 fi
 
@@ -28,4 +28,3 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     exit 1
   fi
 done <<<"$message"
-
