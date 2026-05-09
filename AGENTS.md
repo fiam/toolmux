@@ -198,16 +198,23 @@ credentials are read. Do not add separate MCP-only provider command trees.
 `toolmux mcp configure` manages supported agent CLIs: Codex, Claude Code, and
 Gemini CLI. With no agent argument it autodetects installed supported CLIs; with
 arguments it accepts known agent names and aliases such as `claude-code` and
-`gemini-cli`. It configures agents to launch `toolmux mcp serve`.
+`gemini-cli`. Interactive no-argument runs must show a checkbox selector and
+preselect agents where Toolmux MCP is configured and enabled. The selector must
+show how each existing Toolmux MCP server is configured, and unchecking a
+configured agent must remove the Toolmux MCP server from that agent. It
+configures agents to launch `toolmux mcp serve`. Use `toolmux mcp enable` and
+`toolmux mcp disable` for non-interactive agent setup and teardown. Keep common
+agent scope behavior consistent across agents where their CLIs support the same
+scope.
 
-MCP tool profiles are non-secret configuration. Global profiles live under the
-user config directory; project profiles live in `.toolmux/mcp-profiles.yaml`.
-Manage both through `toolmux mcp profile`. Project config overrides global
-config for matching profile names and default profile selection, similar to Git
-config layering. Profiles select tools with shell-style globs (`--tool`,
-`--exclude-tool`) and regular expressions (`--tool-regex`,
-`--exclude-tool-regex`). Keep profile docs and tests in sync when changing
-selection behavior.
+MCP tool profiles are non-secret configuration under the general Toolmux config
+`mcp` key. Global config lives at `toolmux/config.yaml` under the user config
+directory; project config lives in `.toolmux/config.yaml`. Manage both through
+`toolmux mcp profile`. Project config overrides global config for matching
+profile names and default profile selection, similar to Git config layering.
+Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
+regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
+and tests in sync when changing selection behavior.
 
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output

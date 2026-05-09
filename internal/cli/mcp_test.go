@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -107,8 +109,7 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 		"--mcp-profile", "notion read",
 		"--tool", "notion.page.*",
 		"--exclude-tool", "*.delete",
-		"--claude-scope", "user",
-		"--gemini-scope", "user",
+		"--scope", "project",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -117,8 +118,72 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	rendered := out.String()
 	for _, want := range []string{
 		"codex: codex mcp add toolmux-notion-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
-		"claude: claude mcp add --scope user --transport stdio toolmux-notion-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
-		"gemini: gemini mcp add --scope user --transport stdio toolmux-notion-read /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+		"claude: claude mcp add --scope project --transport stdio toolmux-notion-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+		"gemini: gemini mcp add --scope project --transport stdio toolmux-notion-read /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestMCPEnableDryRunSupportsKnownAgents(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{
+		"mcp", "enable", "codex", "claude-code",
+		"--dry-run",
+		"--command", "/opt/toolmux/bin/toolmux",
+		"--mcp-profile", "notion read",
+		"--tool", "notion.*",
+		"--scope", "project",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	for _, want := range []string{
+		"codex: codex mcp add toolmux-notion-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.*'",
+		"claude: claude mcp add --scope project --transport stdio toolmux-notion-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'notion read' --tool 'notion.*'",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestMCPDisableDryRunSupportsKnownAgents(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{
+		"mcp", "disable", "claude-code", "gemini-cli",
+		"--dry-run",
+		"--mcp-profile", "notion read",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	for _, want := range []string{
+		"claude: claude mcp remove --scope local toolmux-notion-read",
+		"claude: claude mcp remove --scope user toolmux-notion-read",
+		"claude: claude mcp remove --scope project toolmux-notion-read",
+		"gemini: gemini mcp remove --scope user toolmux-notion-read",
+		"gemini: gemini mcp remove --scope project toolmux-notion-read",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -130,14 +195,16 @@ func TestMCPProfileSetWritesLocalProfile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	profilePath := filepath.Join(dir, ".toolmux", "mcp-profiles.yaml")
+	profilePath := filepath.Join(dir, ".toolmux", "config.yaml")
 	profile := mcpProfileConfigFromSelection(mcpToolSelection{
 		Tools:        []string{"notion.page.*"},
 		ExcludeTools: []string{"*.delete"},
 	})
-	if err := writeMCPProfileFile(profilePath, mcpProfileFile{
-		Version:  1,
-		Profiles: map[string]mcpProfileConfig{"readonly": profile},
+	if err := writeToolmuxConfigFile(profilePath, toolmuxConfigFile{
+		Version: 1,
+		MCP: mcpConfig{
+			Profiles: map[string]mcpProfileConfig{"readonly": profile},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -164,23 +231,27 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	globalPath := filepath.Join(t.TempDir(), "mcp-profiles.yaml")
-	if err := writeMCPProfileFile(globalPath, mcpProfileFile{
-		Version:        1,
-		DefaultProfile: "global",
-		Profiles: map[string]mcpProfileConfig{
-			"global": {Tools: []string{"notion.*"}},
-			"shared": {Tools: []string{"notion.*"}},
+	globalPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeToolmuxConfigFile(globalPath, toolmuxConfigFile{
+		Version: 1,
+		MCP: mcpConfig{
+			DefaultProfile: "global",
+			Profiles: map[string]mcpProfileConfig{
+				"global": {Tools: []string{"notion.*"}},
+				"shared": {Tools: []string{"notion.*"}},
+			},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeMCPProfileFile(filepath.Join(dir, ".toolmux", "mcp-profiles.yaml"), mcpProfileFile{
-		Version:        1,
-		DefaultProfile: "project",
-		Profiles: map[string]mcpProfileConfig{
-			"project": {Tools: []string{"notion.page.*"}},
-			"shared":  {Tools: []string{"notion.data_source.*"}},
+	if err := writeToolmuxConfigFile(filepath.Join(dir, ".toolmux", "config.yaml"), toolmuxConfigFile{
+		Version: 1,
+		MCP: mcpConfig{
+			DefaultProfile: "project",
+			Profiles: map[string]mcpProfileConfig{
+				"project": {Tools: []string{"notion.page.*"}},
+				"shared":  {Tools: []string{"notion.data_source.*"}},
+			},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -217,10 +288,12 @@ func TestMCPConfiguredDefaultMustExist(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	if err := writeMCPProfileFile(filepath.Join(dir, ".toolmux", "mcp-profiles.yaml"), mcpProfileFile{
-		Version:        1,
-		DefaultProfile: "missing",
-		Profiles:       map[string]mcpProfileConfig{},
+	if err := writeToolmuxConfigFile(filepath.Join(dir, ".toolmux", "config.yaml"), toolmuxConfigFile{
+		Version: 1,
+		MCP: mcpConfig{
+			DefaultProfile: "missing",
+			Profiles:       map[string]mcpProfileConfig{},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +322,65 @@ func TestSelectMCPAgentsAutodetectsSupportedCLIs(t *testing.T) {
 	}
 	if !slices.Equal(agents, []string{"codex", "gemini"}) {
 		t.Fatalf("unexpected agents: %v", agents)
+	}
+}
+
+func TestSelectedEnabledMCPAgentsKeepsSupportedOrder(t *testing.T) {
+	t.Parallel()
+
+	statuses := map[string]mcpAgentStatus{
+		"codex":  {Configured: true, Enabled: true},
+		"claude": {Configured: true, Enabled: false},
+		"gemini": {Configured: true, Enabled: true},
+	}
+	selected := selectedEnabledMCPAgents(statuses, []string{"codex", "claude", "gemini"})
+	if !slices.Equal(selected, []string{"codex", "gemini"}) {
+		t.Fatalf("unexpected selected agents: %v", selected)
+	}
+}
+
+func TestRemoveMCPAgentsRemovesSupportedScopes(t *testing.T) {
+	t.Parallel()
+
+	var ran []string
+	runtime := mcpAgentRuntime{
+		run: func(ctx context.Context, name string, args []string) error {
+			ran = append(ran, name+" "+strings.Join(args, " "))
+			return nil
+		},
+	}
+	results, err := removeMCPAgents(context.Background(), runtime, mcpConfigureOptions{}, []string{"claude", "gemini"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected removal results for two agents, got %+v", results)
+	}
+	for _, want := range []string{
+		"claude mcp remove --scope local toolmux",
+		"claude mcp remove --scope user toolmux",
+		"claude mcp remove --scope project toolmux",
+		"gemini mcp remove --scope user toolmux",
+		"gemini mcp remove --scope project toolmux",
+	} {
+		if !slices.Contains(ran, want) {
+			t.Fatalf("expected removal command %q, got %v", want, ran)
+		}
+	}
+}
+
+func TestGeminiMCPConfigDetectsConfiguredServer(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"toolmux":{"command":"toolmux"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !mcpConfigHasServer(path, "toolmux") {
+		t.Fatal("expected toolmux MCP server to be detected")
+	}
+	if mcpConfigHasServer(path, "other") {
+		t.Fatal("unexpected MCP server detection")
 	}
 }
 
@@ -312,6 +444,10 @@ func TestMCPAgentConfigureCommandsRejectInvalidScopes(t *testing.T) {
 	_, err = mcpAgentConfigureCommands("claude", "toolmux", mcpConfigureOptions{ClaudeScope: "global"}, []string{"mcp", "serve"})
 	if err == nil || !strings.Contains(err.Error(), "--claude-scope") {
 		t.Fatalf("expected Claude scope error, got %v", err)
+	}
+	_, err = mcpAgentConfigureCommands("gemini", "toolmux", mcpConfigureOptions{AgentScope: "local"}, []string{"mcp", "serve"})
+	if err == nil || !strings.Contains(err.Error(), "--scope") {
+		t.Fatalf("expected common scope error, got %v", err)
 	}
 }
 

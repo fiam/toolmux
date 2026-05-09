@@ -177,34 +177,140 @@ to a terminal.
 
 ## MCP
 
-Toolmux can expose implemented provider actions as Model Context Protocol
-tools over stdio:
+Toolmux exposes implemented provider actions as Model Context Protocol tools
+over stdio. The MCP server is generated from the same provider action metadata
+as the CLI, and tool calls still pass through local policy checks,
+`--read-only`, credential profiles, account selection, and provider auth.
 
 ```bash
 toolmux mcp serve
 ```
 
-Configure installed agents automatically:
+Use `mcp serve` directly when an agent lets you provide a command manually:
+
+```bash
+toolmux mcp serve \
+  --mcp-profile notion-read \
+  --tool 'notion.*' \
+  --exclude-tool '*.delete'
+```
+
+`mcp serve` accepts `--mcp-profile`, `--tool`, `--tool-regex`,
+`--exclude-tool`, and `--exclude-tool-regex`.
+
+### Agent Setup
+
+Toolmux can configure supported local agent CLIs automatically:
 
 ```bash
 toolmux mcp configure
 ```
 
-When no agent is named, Toolmux autodetects supported installed CLIs. You can
-also configure specific agents:
+Supported agent targets:
+
+| Agent | Names | Scope support |
+| --- | --- | --- |
+| Codex | `codex` | Codex default MCP config |
+| Claude Code | `claude`, `claude-code` | `local`, `user`, `project` |
+| Gemini CLI | `gemini`, `gemini-cli` | `user`, `project` |
+
+When no agent is named, `mcp configure` autodetects supported installed CLIs.
+Interactive runs show detected agents as checkboxes, preselect agents where
+Toolmux MCP is configured and enabled, and show the detected command, scope, or
+config path. Unchecking an already configured agent removes the Toolmux MCP
+server from that agent.
 
 ```bash
 toolmux mcp configure codex claude gemini
 ```
 
-Supported agent targets are Codex, Claude Code, and Gemini CLI. The configured
-command is `toolmux mcp serve`, so MCP tools use the same provider metadata,
-local policy checks, `--read-only` guard, credential profiles, and provider
-tokens as the regular CLI.
+For scripts, use explicit non-interactive commands. With no agent arguments,
+`enable` and `disable` autodetect supported installed CLIs.
 
-Use MCP profiles to expose only selected tools. Profiles can be global in
-your user config or project-local in `.toolmux/mcp-profiles.yaml`; project
-profiles override global profiles with the same name.
+```bash
+toolmux mcp enable codex claude
+toolmux mcp disable gemini
+```
+
+`mcp configure` is the interactive manager. `mcp enable` adds or replaces the
+Toolmux MCP server in the selected agents. `mcp disable` removes the Toolmux
+MCP server from the selected agents.
+
+Claude Code and Gemini CLI default to user-scoped MCP config for consistency.
+Use `--scope project` for project-scoped agent config, or `--claude-scope
+local` when you want Claude Code's private local project scope.
+
+`toolmux mcp configure` and `toolmux mcp enable` accept these configuration
+options:
+
+- `--command`: executable path written into agent MCP config; defaults to
+  `toolmux`.
+- `--server-name`: MCP server name written into agent config; defaults to
+  `toolmux`, or `toolmux-<profile>` when `--mcp-profile` is set.
+- `--scope`: common agent config scope for Claude Code and Gemini CLI;
+  defaults to `user`; accepts `user` or `project`.
+- `--claude-scope`: Claude Code-specific override; accepts `local`, `user`, or
+  `project`.
+- `--gemini-scope`: Gemini CLI-specific override; accepts `user` or `project`.
+- `--dry-run`: print the agent CLI commands without running them.
+- `--mcp-profile`, `--tool`, `--tool-regex`, `--exclude-tool`, and
+  `--exclude-tool-regex`: configure the launched server's tool selection.
+
+Global Toolmux flags passed to `mcp configure` or `mcp enable` are also written
+into the launched `toolmux mcp serve` command when relevant:
+
+- `--profile`
+- `--account`
+- `--policy`
+- `--read-only`
+
+`toolmux mcp disable` removes the Toolmux MCP server from the selected agents.
+It accepts `--server-name`, `--mcp-profile`, and `--dry-run`. Claude Code and
+Gemini CLI removal checks all scopes that Toolmux supports for those agents, so
+disabling cleans up stale local, user, and project entries.
+
+Examples:
+
+```bash
+toolmux mcp enable codex \
+  --command /opt/toolmux/bin/toolmux \
+  --mcp-profile notion-read \
+  --read-only \
+  --dry-run
+
+toolmux mcp enable claude gemini \
+  --scope project \
+  --tool 'notion.page.*' \
+  --exclude-tool '*.delete'
+
+toolmux mcp disable claude gemini --mcp-profile notion-read
+```
+
+### MCP Profiles
+
+Use MCP profiles to expose only selected tools. Toolmux stores profiles in the
+general Toolmux config: global config is
+`$XDG_CONFIG_HOME/toolmux/config.yaml` or the platform user config directory,
+and project config is `.toolmux/config.yaml`. Project config overrides global
+config with the same profile name or default profile, like Git config layering.
+
+```yaml
+version: 1
+mcp:
+  default_profile: notion-read
+  profiles:
+    notion-read:
+      tools:
+        - "notion.*"
+      exclude_tools:
+        - "*.create"
+        - "*.update"
+        - "*.delete"
+      tool_regex:
+        - "^notion\\.page\\."
+      exclude_tool_regex:
+        - "\\.delete$"
+```
 
 ```bash
 toolmux mcp profile set notion-read \
@@ -216,6 +322,15 @@ toolmux mcp profile set notion-read \
 toolmux mcp configure codex --mcp-profile notion-read
 ```
 
+Profile commands:
+
+```bash
+toolmux mcp profile set <name>
+toolmux mcp profile default <name>
+toolmux mcp profile ls
+toolmux mcp profile show <name>
+```
+
 Set a default profile so `toolmux mcp serve` uses it even when no
 `--mcp-profile` is passed:
 
@@ -223,8 +338,9 @@ Set a default profile so `toolmux mcp serve` uses it even when no
 toolmux mcp profile default notion-read
 ```
 
-Use `--global` to write global profile config. Without `--global`, profile
-commands write project-local config, like Git.
+Use `--global` to write global Toolmux config. Without `--global`, profile
+commands write project-local config. `--local` is also accepted for explicit
+project writes.
 
 Filters support shell-style globs through `--tool` and `--exclude-tool`, and
 regular expressions through `--tool-regex` and `--exclude-tool-regex`. You can

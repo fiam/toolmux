@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -27,7 +28,7 @@ import (
 )
 
 const mcpProtocolVersion = "2025-06-18"
-const mcpProfilesRelPath = ".toolmux/mcp-profiles.yaml"
+const toolmuxConfigRelPath = ".toolmux/config.yaml"
 const mcpDefaultProfileName = "default"
 
 type mcpToolSelection struct {
@@ -42,6 +43,7 @@ type mcpConfigureOptions struct {
 	mcpToolSelection
 	Command     string
 	ServerName  string
+	AgentScope  string
 	ClaudeScope string
 	GeminiScope string
 	DryRun      bool
@@ -59,6 +61,8 @@ func mcpCommand(opts *options) *cobra.Command {
 	}
 	cmd.AddCommand(mcpServeCommand(opts))
 	cmd.AddCommand(mcpConfigureCommand(opts))
+	cmd.AddCommand(mcpEnableCommand(opts))
+	cmd.AddCommand(mcpDisableCommand(opts))
 	cmd.AddCommand(mcpProfileCommand(opts))
 	return cmd
 }
@@ -92,9 +96,8 @@ func mcpServeCommand(opts *options) *cobra.Command {
 
 func mcpConfigureCommand(opts *options) *cobra.Command {
 	configure := mcpConfigureOptions{
-		Command:     "toolmux",
-		ClaudeScope: "local",
-		GeminiScope: "project",
+		Command:    "toolmux",
+		AgentScope: "user",
 	}
 	cmd := &cobra.Command{
 		Use:   "configure [agent...]",
@@ -114,10 +117,41 @@ func mcpConfigureCommand(opts *options) *cobra.Command {
 			runtime := mcpAgentRuntime{
 				lookPath: exec.LookPath,
 				run:      runMCPAgentCommand,
+				inspect:  inspectMCPAgent,
+			}
+			var removed []string
+			if len(args) == 0 && interactiveCommand(cmd, opts) {
+				selection, err := selectMCPAgentsInteractive(cmd, runtime, mcpConfiguredServerName(configure), configure)
+				if err != nil {
+					return err
+				}
+				if len(selection.Selected) == 0 && len(selection.Removed) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "no agent changes selected")
+					return nil
+				}
+				args = selection.Selected
+				removed = selection.Removed
+			}
+			removedResults, err := removeMCPAgents(commandContext(cmd), runtime, configure, removed)
+			if err != nil {
+				return err
 			}
 			results, err := configureMCPAgents(commandContext(cmd), runtime, opts, configure, args)
 			if err != nil {
 				return err
+			}
+			for _, result := range removedResults {
+				if configure.DryRun {
+					for _, command := range result.Commands {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", result.Agent, command.String())
+					}
+					continue
+				}
+				detail := ""
+				if result.Scope != "" {
+					detail = " (" + result.Scope + ")"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "removed %s MCP server %s%s\n", result.Agent, result.ServerName, detail)
 			}
 			for _, result := range results {
 				if configure.DryRun {
@@ -136,12 +170,112 @@ func mcpConfigureCommand(opts *options) *cobra.Command {
 		},
 	}
 	addMCPToolSelectionFlags(cmd, &configure.mcpToolSelection)
+	addMCPAgentConfigureFlags(cmd, &configure)
+	return cmd
+}
+
+func mcpEnableCommand(opts *options) *cobra.Command {
+	enable := mcpConfigureOptions{
+		Command:    "toolmux",
+		AgentScope: "user",
+	}
+	cmd := &cobra.Command{
+		Use:   "enable [agent...]",
+		Short: "Enable Toolmux MCP for agents",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolved, err := resolveMCPToolSelection(enable.mcpToolSelection)
+			if err != nil {
+				return err
+			}
+			if _, err := newMCPToolSelector(resolved); err != nil {
+				return err
+			}
+			if err := authorize(cmd, opts, mcpEnableSpec(), args); err != nil {
+				return err
+			}
+			runtime := mcpAgentRuntime{
+				lookPath: exec.LookPath,
+				run:      runMCPAgentCommand,
+				inspect:  inspectMCPAgent,
+			}
+			results, err := configureMCPAgents(commandContext(cmd), runtime, opts, enable, args)
+			if err != nil {
+				return err
+			}
+			for _, result := range results {
+				if enable.DryRun {
+					for _, command := range result.Commands {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", result.Agent, command.String())
+					}
+					continue
+				}
+				detail := ""
+				if result.Scope != "" {
+					detail = " (" + result.Scope + ")"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "enabled %s MCP server %s%s\n", result.Agent, result.ServerName, detail)
+			}
+			return nil
+		},
+	}
+	addMCPToolSelectionFlags(cmd, &enable.mcpToolSelection)
+	addMCPAgentConfigureFlags(cmd, &enable)
+	return cmd
+}
+
+func mcpDisableCommand(opts *options) *cobra.Command {
+	disable := mcpConfigureOptions{}
+	cmd := &cobra.Command{
+		Use:   "disable [agent...]",
+		Short: "Disable Toolmux MCP for agents",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := authorize(cmd, opts, mcpDisableSpec(), args); err != nil {
+				return err
+			}
+			runtime := mcpAgentRuntime{
+				lookPath: exec.LookPath,
+				run:      runMCPAgentCommand,
+				inspect:  inspectMCPAgent,
+			}
+			selected, err := selectMCPAgents(runtime, args, disable.DryRun)
+			if err != nil {
+				return err
+			}
+			results, err := removeMCPAgents(commandContext(cmd), runtime, disable, selected)
+			if err != nil {
+				return err
+			}
+			for _, result := range results {
+				if disable.DryRun {
+					for _, command := range result.Commands {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", result.Agent, command.String())
+					}
+					continue
+				}
+				detail := ""
+				if result.Scope != "" {
+					detail = " (" + result.Scope + ")"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "disabled %s MCP server %s%s\n", result.Agent, result.ServerName, detail)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&disable.ServerName, "server-name", "", "MCP server name removed from agents")
+	cmd.Flags().StringVar(&disable.Profile, "mcp-profile", "", "MCP profile name used to derive the server name")
+	cmd.Flags().BoolVar(&disable.DryRun, "dry-run", false, "print agent configuration commands without running them")
+	return cmd
+}
+
+func addMCPAgentConfigureFlags(cmd *cobra.Command, configure *mcpConfigureOptions) {
 	cmd.Flags().StringVar(&configure.Command, "command", "toolmux", "toolmux executable configured for agent MCP launches")
 	cmd.Flags().StringVar(&configure.ServerName, "server-name", "", "MCP server name configured in agents")
-	cmd.Flags().StringVar(&configure.ClaudeScope, "claude-scope", "local", "Claude Code MCP scope: local, user, or project")
-	cmd.Flags().StringVar(&configure.GeminiScope, "gemini-scope", "project", "Gemini CLI MCP scope: user or project")
+	cmd.Flags().StringVar(&configure.AgentScope, "scope", "user", "agent MCP config scope: user or project")
+	cmd.Flags().StringVar(&configure.ClaudeScope, "claude-scope", "", "Claude Code MCP scope override: local, user, or project")
+	cmd.Flags().StringVar(&configure.GeminiScope, "gemini-scope", "", "Gemini CLI MCP scope override: user or project")
 	cmd.Flags().BoolVar(&configure.DryRun, "dry-run", false, "print agent configuration commands without running them")
-	return cmd
 }
 
 func mcpProfileCommand(opts *options) *cobra.Command {
@@ -172,16 +306,16 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			config, err := readMCPProfileFile(configPath)
+			config, err := readToolmuxConfigFile(configPath)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			if config.Profiles == nil {
-				config.Profiles = map[string]mcpProfileConfig{}
+			if config.MCP.Profiles == nil {
+				config.MCP.Profiles = map[string]mcpProfileConfig{}
 			}
 			config.Version = 1
-			config.Profiles[name] = mcpProfileConfigFromSelection(setSelection)
-			if err := writeMCPProfileFile(configPath, config); err != nil {
+			config.MCP.Profiles[name] = mcpProfileConfigFromSelection(setSelection)
+			if err := writeToolmuxConfigFile(configPath, config); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "saved %s MCP profile %s in %s\n", scope, name, configPath)
@@ -209,19 +343,19 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			config, err := readMCPProfileFile(configPath)
+			config, err := readToolmuxConfigFile(configPath)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			if config.Profiles == nil {
-				config.Profiles = map[string]mcpProfileConfig{}
+			if config.MCP.Profiles == nil {
+				config.MCP.Profiles = map[string]mcpProfileConfig{}
 			}
 			if scope == "global" {
-				if _, ok := config.Profiles[name]; !ok {
+				if _, ok := config.MCP.Profiles[name]; !ok {
 					return fmt.Errorf("MCP profile %q not found in %s", name, configPath)
 				}
 			} else {
-				if _, ok := config.Profiles[name]; !ok {
+				if _, ok := config.MCP.Profiles[name]; !ok {
 					if _, ok, err := lookupMCPProfile(name, ""); err != nil {
 						return err
 					} else if !ok {
@@ -230,8 +364,8 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 				}
 			}
 			config.Version = 1
-			config.DefaultProfile = name
-			if err := writeMCPProfileFile(configPath, config); err != nil {
+			config.MCP.DefaultProfile = name
+			if err := writeToolmuxConfigFile(configPath, config); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "set %s default MCP profile to %s in %s\n", scope, name, configPath)
@@ -286,6 +420,24 @@ func mcpConfigureSpec() actions.Spec {
 	return actions.Command("toolmux.mcp.configure", "configure",
 		actions.Use("mcp configure [agent...]"),
 		actions.Short("Configure agent MCP settings"),
+		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
+		actions.Risks("agent-config"),
+	)
+}
+
+func mcpEnableSpec() actions.Spec {
+	return actions.Command("toolmux.mcp.enable", "enable",
+		actions.Use("mcp enable [agent...]"),
+		actions.Short("Enable Toolmux MCP for agents"),
+		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
+		actions.Risks("agent-config"),
+	)
+}
+
+func mcpDisableSpec() actions.Spec {
+	return actions.Command("toolmux.mcp.disable", "disable",
+		actions.Use("mcp disable [agent...]"),
+		actions.Short("Disable Toolmux MCP for agents"),
 		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
 		actions.Risks("agent-config"),
 	)
@@ -453,10 +605,14 @@ func compactStrings(values []string) []string {
 	return compact
 }
 
-type mcpProfileFile struct {
-	Version        int                         `json:"version" yaml:"version"`
+type toolmuxConfigFile struct {
+	Version int       `json:"version" yaml:"version"`
+	MCP     mcpConfig `json:"mcp,omitzero" yaml:"mcp,omitempty"`
+}
+
+type mcpConfig struct {
 	DefaultProfile string                      `json:"default_profile,omitempty" yaml:"default_profile,omitempty"`
-	Profiles       map[string]mcpProfileConfig `json:"profiles" yaml:"profiles"`
+	Profiles       map[string]mcpProfileConfig `json:"profiles,omitempty" yaml:"profiles,omitempty"`
 }
 
 type mcpProfileConfig struct {
@@ -484,7 +640,7 @@ func resolveMCPToolSelection(selection mcpToolSelection) (mcpToolSelection, erro
 }
 
 func resolveMCPToolSelectionFromDir(selection mcpToolSelection, startDir string) (mcpToolSelection, error) {
-	globalPath, err := globalMCPProfilePath()
+	globalPath, err := globalToolmuxConfigPath()
 	if err != nil {
 		return mcpToolSelection{}, err
 	}
@@ -538,8 +694,8 @@ func effectiveMCPProfileConfig(startDir, globalPath string) (mcpEffectiveProfile
 	}
 	config := mcpEffectiveProfileConfig{Sources: sources}
 	for _, source := range sources {
-		if source.config.DefaultProfile != "" {
-			config.DefaultProfile = source.config.DefaultProfile
+		if source.config.MCP.DefaultProfile != "" {
+			config.DefaultProfile = source.config.MCP.DefaultProfile
 		}
 	}
 	return config, nil
@@ -549,7 +705,7 @@ func (config mcpEffectiveProfileConfig) lookup(name string) (mcpProfileEntry, bo
 	var found mcpProfileEntry
 	ok := false
 	for _, source := range config.Sources {
-		profile, exists := source.config.Profiles[name]
+		profile, exists := source.config.MCP.Profiles[name]
 		if !exists {
 			continue
 		}
@@ -600,14 +756,19 @@ func mcpProfileWritePath(scope mcpProfileScopeOptions) (string, string, error) {
 		return "", "", fmt.Errorf("use only one of --global or --local")
 	}
 	if scope.Global {
-		path, err := globalMCPProfilePath()
+		path, err := globalToolmuxConfigPath()
 		return path, "global", err
 	}
-	return filepath.Join(".toolmux", "mcp-profiles.yaml"), "local", nil
+	if path, ok, err := discoverToolmuxConfigFile(""); err != nil {
+		return "", "", err
+	} else if ok {
+		return path, "local", nil
+	}
+	return toolmuxConfigRelPath, "local", nil
 }
 
 func lookupMCPProfile(name, startDir string) (mcpProfileEntry, bool, error) {
-	globalPath, err := globalMCPProfilePath()
+	globalPath, err := globalToolmuxConfigPath()
 	if err != nil {
 		return mcpProfileEntry{}, false, err
 	}
@@ -628,7 +789,7 @@ func lookupMCPProfileFromPaths(name, startDir, globalPath string) (mcpProfileEnt
 }
 
 func effectiveMCPProfileEntries(startDir string) ([]mcpProfileEntry, error) {
-	globalPath, err := globalMCPProfilePath()
+	globalPath, err := globalToolmuxConfigPath()
 	if err != nil {
 		return nil, err
 	}
@@ -642,13 +803,13 @@ func effectiveMCPProfileEntriesFromPaths(startDir, globalPath string) ([]mcpProf
 	}
 	byName := map[string]mcpProfileEntry{}
 	for _, source := range sources {
-		names := make([]string, 0, len(source.config.Profiles))
-		for name := range source.config.Profiles {
+		names := make([]string, 0, len(source.config.MCP.Profiles))
+		for name := range source.config.MCP.Profiles {
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			profile := source.config.Profiles[name]
+			profile := source.config.MCP.Profiles[name]
 			existing, exists := byName[name]
 			scopes := []string{source.Scope}
 			if exists {
@@ -676,22 +837,22 @@ func effectiveMCPProfileEntriesFromPaths(startDir, globalPath string) ([]mcpProf
 type mcpProfileSource struct {
 	Scope  string `json:"scope" yaml:"scope"`
 	Path   string `json:"path" yaml:"path"`
-	config mcpProfileFile
+	config toolmuxConfigFile
 }
 
 func loadMCPProfileSources(startDir, globalPath string) ([]mcpProfileSource, error) {
 	var sources []mcpProfileSource
 	if globalPath != "" {
-		if config, ok, err := readMCPProfileFileIfExists(globalPath); err != nil {
+		if config, ok, err := readToolmuxConfigFileIfExists(globalPath); err != nil {
 			return nil, err
 		} else if ok {
 			sources = append(sources, mcpProfileSource{Scope: "global", Path: globalPath, config: config})
 		}
 	}
-	if localPath, ok, err := discoverMCPProfileFile(startDir); err != nil {
+	if localPath, ok, err := discoverToolmuxConfigFile(startDir); err != nil {
 		return nil, err
 	} else if ok {
-		config, err := readMCPProfileFile(localPath)
+		config, err := readToolmuxConfigFile(localPath)
 		if err != nil {
 			return nil, err
 		}
@@ -700,15 +861,15 @@ func loadMCPProfileSources(startDir, globalPath string) ([]mcpProfileSource, err
 	return sources, nil
 }
 
-func globalMCPProfilePath() (string, error) {
+func globalToolmuxConfigPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "toolmux", "mcp-profiles.yaml"), nil
+	return filepath.Join(dir, "toolmux", "config.yaml"), nil
 }
 
-func discoverMCPProfileFile(startDir string) (string, bool, error) {
+func discoverToolmuxConfigFile(startDir string) (string, bool, error) {
 	if startDir == "" {
 		var err error
 		startDir, err = os.Getwd()
@@ -721,7 +882,7 @@ func discoverMCPProfileFile(startDir string) (string, bool, error) {
 		return "", false, err
 	}
 	for {
-		candidate := filepath.Join(dir, mcpProfilesRelPath)
+		candidate := filepath.Join(dir, toolmuxConfigRelPath)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, true, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -736,42 +897,42 @@ func discoverMCPProfileFile(startDir string) (string, bool, error) {
 	return "", false, nil
 }
 
-func readMCPProfileFile(path string) (mcpProfileFile, error) {
-	// #nosec G304 -- MCP profile paths are explicit local configuration.
+func readToolmuxConfigFile(path string) (toolmuxConfigFile, error) {
+	// #nosec G304 -- Toolmux config paths are explicit local configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return mcpProfileFile{}, err
+		return toolmuxConfigFile{}, err
 	}
-	var config mcpProfileFile
+	var config toolmuxConfigFile
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return mcpProfileFile{}, err
+		return toolmuxConfigFile{}, err
 	}
 	if config.Version == 0 {
 		config.Version = 1
 	}
-	if config.Profiles == nil {
-		config.Profiles = map[string]mcpProfileConfig{}
+	if config.MCP.Profiles == nil {
+		config.MCP.Profiles = map[string]mcpProfileConfig{}
 	}
 	return config, nil
 }
 
-func readMCPProfileFileIfExists(path string) (mcpProfileFile, bool, error) {
-	config, err := readMCPProfileFile(path)
+func readToolmuxConfigFileIfExists(path string) (toolmuxConfigFile, bool, error) {
+	config, err := readToolmuxConfigFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return mcpProfileFile{}, false, nil
+			return toolmuxConfigFile{}, false, nil
 		}
-		return mcpProfileFile{}, false, err
+		return toolmuxConfigFile{}, false, err
 	}
 	return config, true, nil
 }
 
-func writeMCPProfileFile(path string, config mcpProfileFile) error {
+func writeToolmuxConfigFile(path string, config toolmuxConfigFile) error {
 	if config.Version == 0 {
 		config.Version = 1
 	}
-	if config.Profiles == nil {
-		config.Profiles = map[string]mcpProfileConfig{}
+	if config.MCP.Profiles == nil {
+		config.MCP.Profiles = map[string]mcpProfileConfig{}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -780,7 +941,7 @@ func writeMCPProfileFile(path string, config mcpProfileFile) error {
 	if err != nil {
 		return err
 	}
-	// #nosec G306 -- MCP profiles are non-secret tool selection config.
+	// #nosec G306 -- Toolmux config is non-secret local tool configuration.
 	return os.WriteFile(path, data, 0o644)
 }
 
@@ -1266,6 +1427,7 @@ func decodeMCPParams(raw json.RawMessage, out any) error {
 type mcpAgentRuntime struct {
 	lookPath func(string) (string, error)
 	run      func(context.Context, string, []string) error
+	inspect  func(context.Context, string, string, mcpConfigureOptions) mcpAgentStatus
 }
 
 type mcpAgentResult struct {
@@ -1276,8 +1438,25 @@ type mcpAgentResult struct {
 }
 
 type mcpExternalCommand struct {
-	Name string
-	Args []string
+	Name        string
+	Args        []string
+	IgnoreError bool
+}
+
+type mcpAgentStatus struct {
+	Configured bool
+	Enabled    bool
+	Scope      string
+	Scopes     []string
+	Command    string
+	Args       string
+	Transport  string
+	Path       string
+}
+
+type mcpAgentInteractiveSelection struct {
+	Selected []string
+	Removed  []string
 }
 
 func (command mcpExternalCommand) String() string {
@@ -1306,32 +1485,126 @@ func configureMCPAgents(ctx context.Context, runtime mcpAgentRuntime, opts *opti
 		if configure.DryRun {
 			continue
 		}
-		for i, command := range result.Commands {
-			if i == 0 {
-				_ = runtime.run(ctx, command.Name, command.Args)
-				continue
-			}
-			if err := runtime.run(ctx, command.Name, command.Args); err != nil {
-				return nil, err
-			}
+		if err := runMCPExternalCommands(ctx, runtime, result.Commands); err != nil {
+			return nil, err
 		}
 	}
 	return results, nil
 }
 
+func removeMCPAgents(ctx context.Context, runtime mcpAgentRuntime, configure mcpConfigureOptions, names []string) ([]mcpAgentResult, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	serverName := mcpConfiguredServerName(configure)
+	results := make([]mcpAgentResult, 0, len(names))
+	for _, agent := range orderMCPAgents(names) {
+		result, err := mcpAgentRemoveCommands(agent, serverName)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+		if configure.DryRun {
+			continue
+		}
+		if err := runMCPExternalCommands(ctx, runtime, result.Commands); err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
+}
+
+func runMCPExternalCommands(ctx context.Context, runtime mcpAgentRuntime, commands []mcpExternalCommand) error {
+	for _, command := range commands {
+		if err := runtime.run(ctx, command.Name, command.Args); err != nil && !command.IgnoreError {
+			return err
+		}
+	}
+	return nil
+}
+
+func selectMCPAgentsInteractive(cmd *cobra.Command, runtime mcpAgentRuntime, serverName string, configure mcpConfigureOptions) (mcpAgentInteractiveSelection, error) {
+	detected, err := detectMCPAgents(runtime)
+	if err != nil {
+		return mcpAgentInteractiveSelection{}, err
+	}
+	ctx := commandContext(cmd)
+	statuses := inspectMCPAgents(ctx, runtime, detected, serverName, configure)
+	selected := selectedEnabledMCPAgents(statuses, detected)
+	selectedSet := make(map[string]bool, len(selected))
+	for _, agent := range selected {
+		selectedSet[agent] = true
+	}
+	options := make([]huh.Option[string], 0, len(detected))
+	for _, agent := range detected {
+		option := huh.NewOption(mcpAgentOptionTitle(agent, statuses[agent]), agent)
+		if selectedSet[agent] {
+			option = option.Selected(true)
+		}
+		options = append(options, option)
+	}
+	height := min(len(options)+4, 10)
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().
+			Title("Configure MCP agents").
+			Description("Selected agents will be updated to run `toolmux mcp serve`.").
+			Options(options...).
+			Value(&selected).
+			Height(height).
+			Filterable(false),
+	)).
+		WithTheme(huh.ThemeCharm()).
+		WithInput(cmd.InOrStdin()).
+		WithOutput(cmd.ErrOrStderr()).
+		WithWidth(terminalWidth(cmd.ErrOrStderr())).
+		WithHeight(height + 7)
+	if err := form.RunWithContext(commandContext(cmd)); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return mcpAgentInteractiveSelection{}, nil
+		}
+		return mcpAgentInteractiveSelection{}, err
+	}
+	selected = orderMCPAgents(selected)
+	selectedSet = make(map[string]bool, len(selected))
+	for _, agent := range selected {
+		selectedSet[agent] = true
+	}
+	var removed []string
+	for _, agent := range detected {
+		status := statuses[agent]
+		if status.Configured && !selectedSet[agent] {
+			removed = append(removed, agent)
+		}
+	}
+	return mcpAgentInteractiveSelection{Selected: selected, Removed: orderMCPAgents(removed)}, nil
+}
+
+func inspectMCPAgents(ctx context.Context, runtime mcpAgentRuntime, agents []string, serverName string, configure mcpConfigureOptions) map[string]mcpAgentStatus {
+	statuses := make(map[string]mcpAgentStatus, len(agents))
+	for _, agent := range agents {
+		var status mcpAgentStatus
+		if runtime.inspect != nil {
+			status = runtime.inspect(ctx, agent, serverName, configure)
+		}
+		statuses[agent] = status
+	}
+	return statuses
+}
+
+func selectedEnabledMCPAgents(statuses map[string]mcpAgentStatus, agents []string) []string {
+	selected := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		status := statuses[agent]
+		if status.Configured && status.Enabled {
+			selected = append(selected, agent)
+		}
+	}
+	return selected
+}
+
 func selectMCPAgents(runtime mcpAgentRuntime, names []string, dryRun bool) ([]string, error) {
 	if len(names) == 0 {
-		var detected []string
-		for _, agent := range supportedMCPAgents() {
-			definition, _ := mcpAgentDefinition(agent)
-			if _, err := runtime.lookPath(definition.command); err == nil {
-				detected = append(detected, agent)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no supported MCP agents detected; pass one of: %s", strings.Join(supportedMCPAgents(), ", "))
-		}
-		return detected, nil
+		return detectMCPAgents(runtime)
 	}
 	var selected []string
 	seen := map[string]bool{}
@@ -1353,6 +1626,34 @@ func selectMCPAgents(runtime mcpAgentRuntime, names []string, dryRun bool) ([]st
 		seen[agent] = true
 	}
 	return selected, nil
+}
+
+func detectMCPAgents(runtime mcpAgentRuntime) ([]string, error) {
+	var detected []string
+	for _, agent := range supportedMCPAgents() {
+		definition, _ := mcpAgentDefinition(agent)
+		if _, err := runtime.lookPath(definition.command); err == nil {
+			detected = append(detected, agent)
+		}
+	}
+	if len(detected) == 0 {
+		return nil, fmt.Errorf("no supported MCP agents detected; pass one of: %s", strings.Join(supportedMCPAgents(), ", "))
+	}
+	return detected, nil
+}
+
+func orderMCPAgents(agents []string) []string {
+	selected := make(map[string]bool, len(agents))
+	for _, agent := range agents {
+		selected[agent] = true
+	}
+	ordered := make([]string, 0, len(agents))
+	for _, agent := range supportedMCPAgents() {
+		if selected[agent] {
+			ordered = append(ordered, agent)
+		}
+	}
+	return ordered
 }
 
 type mcpAgentDefinitionValue struct {
@@ -1389,6 +1690,51 @@ func mcpAgentDefinition(agent string) (mcpAgentDefinitionValue, bool) {
 	}
 }
 
+func mcpAgentDisplayName(agent string) string {
+	switch agent {
+	case "codex":
+		return "Codex"
+	case "claude":
+		return "Claude Code"
+	case "gemini":
+		return "Gemini CLI"
+	default:
+		return agent
+	}
+}
+
+func mcpAgentOptionTitle(agent string, status mcpAgentStatus) string {
+	display := mcpAgentDisplayName(agent)
+	if !status.Configured {
+		return display + " - not configured"
+	}
+	return display + " - " + status.summary()
+}
+
+func (status mcpAgentStatus) summary() string {
+	state := "enabled"
+	if !status.Enabled {
+		state = "disabled"
+	}
+	parts := []string{state}
+	if status.Scope != "" {
+		parts = append(parts, status.Scope)
+	} else if len(status.Scopes) > 0 {
+		parts = append(parts, "scopes="+strings.Join(status.Scopes, ","))
+	}
+	if status.Transport != "" {
+		parts = append(parts, "transport="+status.Transport)
+	}
+	command := strings.TrimSpace(strings.Join(compactStrings([]string{status.Command, status.Args}), " "))
+	if command != "" {
+		parts = append(parts, command)
+	}
+	if status.Path != "" {
+		parts = append(parts, status.Path)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func mcpAgentConfigureCommands(agent, serverName string, configure mcpConfigureOptions, serveArgs []string) (mcpAgentResult, error) {
 	switch agent {
 	case "codex":
@@ -1396,47 +1742,102 @@ func mcpAgentConfigureCommands(agent, serverName string, configure mcpConfigureO
 			Agent:      "codex",
 			ServerName: serverName,
 			Commands: []mcpExternalCommand{
-				{Name: "codex", Args: []string{"mcp", "remove", serverName}},
+				{Name: "codex", Args: []string{"mcp", "remove", serverName}, IgnoreError: true},
 				{Name: "codex", Args: append([]string{"mcp", "add", serverName, "--", configure.Command}, serveArgs...)},
 			},
 		}, nil
 	case "claude":
-		scope := strings.TrimSpace(configure.ClaudeScope)
-		if scope == "" {
-			scope = "local"
-		}
+		scope, flag := configure.claudeAgentScope()
 		if scope != "local" && scope != "user" && scope != "project" {
-			return mcpAgentResult{}, fmt.Errorf("--claude-scope must be local, user, or project")
+			return mcpAgentResult{}, fmt.Errorf("%s must be local, user, or project", flag)
 		}
 		return mcpAgentResult{
 			Agent:      "claude",
 			ServerName: serverName,
 			Scope:      "scope=" + scope,
 			Commands: []mcpExternalCommand{
-				{Name: "claude", Args: []string{"mcp", "remove", "--scope", scope, serverName}},
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "local", serverName}, IgnoreError: true},
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
 				{Name: "claude", Args: append([]string{"mcp", "add", "--scope", scope, "--transport", "stdio", serverName, "--", configure.Command}, serveArgs...)},
 			},
 		}, nil
 	case "gemini":
-		scope := strings.TrimSpace(configure.GeminiScope)
-		if scope == "" {
-			scope = "project"
-		}
+		scope, flag := configure.geminiAgentScope()
 		if scope != "user" && scope != "project" {
-			return mcpAgentResult{}, fmt.Errorf("--gemini-scope must be user or project")
+			return mcpAgentResult{}, fmt.Errorf("%s must be user or project", flag)
 		}
 		return mcpAgentResult{
 			Agent:      "gemini",
 			ServerName: serverName,
 			Scope:      "scope=" + scope,
 			Commands: []mcpExternalCommand{
-				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", scope, serverName}},
+				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
+				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
 				{Name: "gemini", Args: append([]string{"mcp", "add", "--scope", scope, "--transport", "stdio", serverName, configure.Command}, serveArgs...)},
 			},
 		}, nil
 	default:
 		return mcpAgentResult{}, fmt.Errorf("unknown MCP agent %q", agent)
 	}
+}
+
+func mcpAgentRemoveCommands(agent, serverName string) (mcpAgentResult, error) {
+	switch agent {
+	case "codex":
+		return mcpAgentResult{
+			Agent:      "codex",
+			ServerName: serverName,
+			Commands: []mcpExternalCommand{
+				{Name: "codex", Args: []string{"mcp", "remove", serverName}, IgnoreError: true},
+			},
+		}, nil
+	case "claude":
+		return mcpAgentResult{
+			Agent:      "claude",
+			ServerName: serverName,
+			Scope:      "all scopes",
+			Commands: []mcpExternalCommand{
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "local", serverName}, IgnoreError: true},
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
+				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
+			},
+		}, nil
+	case "gemini":
+		return mcpAgentResult{
+			Agent:      "gemini",
+			ServerName: serverName,
+			Scope:      "all scopes",
+			Commands: []mcpExternalCommand{
+				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
+				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
+			},
+		}, nil
+	default:
+		return mcpAgentResult{}, fmt.Errorf("unknown MCP agent %q", agent)
+	}
+}
+
+func (configure mcpConfigureOptions) claudeAgentScope() (string, string) {
+	if scope := strings.TrimSpace(configure.ClaudeScope); scope != "" {
+		return scope, "--claude-scope"
+	}
+	return configure.commonAgentScope(), "--scope"
+}
+
+func (configure mcpConfigureOptions) geminiAgentScope() (string, string) {
+	if scope := strings.TrimSpace(configure.GeminiScope); scope != "" {
+		return scope, "--gemini-scope"
+	}
+	return configure.commonAgentScope(), "--scope"
+}
+
+func (configure mcpConfigureOptions) commonAgentScope() string {
+	scope := strings.TrimSpace(configure.AgentScope)
+	if scope == "" {
+		return "user"
+	}
+	return scope
 }
 
 func mcpConfiguredServerName(configure mcpConfigureOptions) string {
@@ -1487,17 +1888,193 @@ func mcpConfiguredServeArgs(opts *options, configure mcpConfigureOptions) []stri
 }
 
 func runMCPAgentCommand(ctx context.Context, name string, args []string) error {
+	_, err := outputMCPAgentCommand(ctx, name, args)
+	return err
+}
+
+func outputMCPAgentCommand(ctx context.Context, name string, args []string) (string, error) {
 	// #nosec G204 -- agent commands are selected from supported local CLIs.
 	command := exec.CommandContext(ctx, name, args...)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail != "" {
-			return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)
+			return string(output), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)
 		}
-		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		return string(output), fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
-	return nil
+	return string(output), nil
+}
+
+func inspectMCPAgent(ctx context.Context, agent, serverName string, configure mcpConfigureOptions) mcpAgentStatus {
+	switch agent {
+	case "codex":
+		return inspectCommandMCPAgent(ctx, "codex", []string{"mcp", "get", serverName})
+	case "claude":
+		return inspectCommandMCPAgent(ctx, "claude", []string{"mcp", "get", serverName})
+	case "gemini":
+		return inspectGeminiMCPAgent(serverName)
+	default:
+		return mcpAgentStatus{}
+	}
+}
+
+func inspectCommandMCPAgent(ctx context.Context, command string, args []string) mcpAgentStatus {
+	output, err := outputMCPAgentCommand(ctx, command, args)
+	if err != nil {
+		return mcpAgentStatus{}
+	}
+	status := mcpAgentStatus{
+		Configured: true,
+		Enabled:    true,
+	}
+	fields := parseMCPAgentFields(output)
+	if enabled, ok := fields["enabled"]; ok {
+		status.Enabled = !strings.EqualFold(enabled, "false")
+	}
+	status.Transport = fields["transport"]
+	status.Command = fields["command"]
+	status.Args = fields["args"]
+	if scope := fields["scope"]; scope != "" {
+		status.Scope = simplifyMCPAgentScope(scope)
+	}
+	return status
+}
+
+func parseMCPAgentFields(output string) map[string]string {
+	fields := map[string]string{}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			fields[key] = value
+		}
+	}
+	return fields
+}
+
+func simplifyMCPAgentScope(scope string) string {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	switch {
+	case strings.Contains(scope, "local"):
+		return "scope=local"
+	case strings.Contains(scope, "user"):
+		return "scope=user"
+	case strings.Contains(scope, "project"):
+		return "scope=project"
+	default:
+		return strings.TrimSpace(scope)
+	}
+}
+
+func inspectGeminiMCPAgent(serverName string) mcpAgentStatus {
+	status := mcpAgentStatus{
+		Enabled: !geminiMCPServerDisabled(serverName),
+	}
+	records := geminiMCPServerRecords(serverName)
+	if len(records) == 0 {
+		return status
+	}
+	status.Configured = true
+	for _, record := range records {
+		status.Scopes = append(status.Scopes, record.Scope)
+	}
+	last := records[len(records)-1]
+	status.Command = last.Command
+	status.Args = strings.Join(last.Args, " ")
+	status.Path = last.Path
+	return status
+}
+
+type geminiMCPServerRecord struct {
+	Scope   string
+	Path    string
+	Command string
+	Args    []string
+}
+
+type geminiMCPServerConfig struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+func geminiMCPServerRecords(serverName string) []geminiMCPServerRecord {
+	var records []geminiMCPServerRecord
+	for _, candidate := range geminiMCPConfigPaths() {
+		server, ok := geminiMCPServerConfigAtPath(candidate.Path, serverName)
+		if !ok {
+			continue
+		}
+		records = append(records, geminiMCPServerRecord{
+			Scope:   candidate.Scope,
+			Path:    candidate.Path,
+			Command: server.Command,
+			Args:    server.Args,
+		})
+	}
+	return records
+}
+
+type geminiMCPConfigPath struct {
+	Scope string
+	Path  string
+}
+
+func geminiMCPConfigPaths() []geminiMCPConfigPath {
+	var paths []geminiMCPConfigPath
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, geminiMCPConfigPath{Scope: "user", Path: filepath.Join(home, ".gemini", "settings.json")})
+	}
+	paths = append(paths, geminiMCPConfigPath{Scope: "project", Path: filepath.Join(".gemini", "settings.json")})
+	return paths
+}
+
+func mcpConfigHasServer(path, serverName string) bool {
+	_, ok := geminiMCPServerConfigAtPath(path, serverName)
+	return ok
+}
+
+func geminiMCPServerConfigAtPath(path, serverName string) (geminiMCPServerConfig, bool) {
+	// #nosec G304 -- paths are local agent configuration locations.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return geminiMCPServerConfig{}, false
+	}
+	var config struct {
+		MCPServers map[string]geminiMCPServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return geminiMCPServerConfig{}, false
+	}
+	server, ok := config.MCPServers[serverName]
+	return server, ok
+}
+
+func geminiMCPServerDisabled(serverName string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	path := filepath.Join(home, ".gemini", "mcp-server-enablement.json")
+	// #nosec G304 -- path is Gemini CLI's documented local enablement state.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var states map[string]struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &states); err != nil {
+		return false
+	}
+	state, ok := states[strings.ToLower(strings.TrimSpace(serverName))]
+	return ok && !state.Enabled
 }
 
 func shellQuote(value string) string {
