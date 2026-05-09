@@ -1,0 +1,94 @@
+version: 2
+
+project_name: toolmux
+
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
+builds:
+  - id: toolmux
+    main: ./cmd/toolmux
+    binary: toolmux
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/fiam/toolmux/internal/version.Version={{ .Version }}
+        -X github.com/fiam/toolmux/internal/version.Commit={{ .Commit }}
+        -X github.com/fiam/toolmux/internal/version.Date={{ .Date }}
+  - id: toolmuxd
+    main: ./cmd/toolmuxd
+    binary: toolmuxd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/fiam/toolmux/internal/version.Version={{ .Version }}
+        -X github.com/fiam/toolmux/internal/version.Commit={{ .Commit }}
+        -X github.com/fiam/toolmux/internal/version.Date={{ .Date }}
+
+archives:
+  - id: toolmux
+    ids:
+      - toolmux
+      - toolmuxd
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: fiam
+    name: toolmux
+  mode: keep-existing
+  replace_existing_artifacts: true
+
+brews:
+  - name: toolmux
+    ids:
+      - toolmux
+    repository:
+      owner: fiam
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/fiam/toolmux"
+    description: "Local-first CLI for working with SaaS tools from one policy-aware command surface."
+    license: MIT
+    commit_msg_template: "brew: update toolmux to {{ .Tag }}"
+    install: |
+      bin.install "toolmux"
+      bin.install "toolmuxd"
+    test: |
+      system "#{bin}/toolmux", "version"

@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26.3"
+  GOFLAGS: -mod=readonly
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: release-please
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out release tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.tag_name }}
+
+      - name: Set up Go
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Check Homebrew tap token
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]]; then
+            echo "HOMEBREW_TAP_GITHUB_TOKEN is required to update fiam/homebrew-tap" >&2
+            exit 1
+          fi
+
+      - name: Publish release artifacts
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
