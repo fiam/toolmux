@@ -175,6 +175,68 @@ Global output controls:
 Interactive features are disabled automatically when Supacli is not attached
 to a terminal.
 
+## MCP
+
+Supacli can expose implemented provider actions as Model Context Protocol
+tools over stdio:
+
+```bash
+supacli mcp serve
+```
+
+Configure installed agents automatically:
+
+```bash
+supacli mcp configure
+```
+
+When no agent is named, Supacli autodetects supported installed CLIs. You can
+also configure specific agents:
+
+```bash
+supacli mcp configure codex claude gemini
+```
+
+Supported agent targets are Codex, Claude Code, and Gemini CLI. The configured
+command is `supacli mcp serve`, so MCP tools use the same provider metadata,
+local policy checks, `--read-only` guard, credential profiles, and provider
+tokens as the regular CLI.
+
+Use MCP profiles to expose only selected tools. Profiles can be global in
+your user config or project-local in `.supacli/mcp-profiles.yaml`; project
+profiles override global profiles with the same name.
+
+```bash
+supacli mcp profile set notion-read \
+  --tool 'notion.*' \
+  --exclude-tool '*.create' \
+  --exclude-tool '*.update' \
+  --exclude-tool '*.delete'
+
+supacli mcp configure codex --mcp-profile notion-read
+```
+
+Set a default profile so `supacli mcp serve` uses it even when no
+`--mcp-profile` is passed:
+
+```bash
+supacli mcp profile default notion-read
+```
+
+Use `--global` to write global profile config. Without `--global`, profile
+commands write project-local config, like Git.
+
+Filters support shell-style globs through `--tool` and `--exclude-tool`, and
+regular expressions through `--tool-regex` and `--exclude-tool-regex`. You can
+also pass filters directly during configuration:
+
+```bash
+supacli mcp configure claude gemini \
+  --mcp-profile notion-pages \
+  --tool 'notion.page.*' \
+  --exclude-tool '*.delete'
+```
+
 ## Local Policy
 
 Supacli can enforce local command policy before it reads provider credentials

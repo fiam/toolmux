@@ -1,0 +1,329 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/fiam/supacli/internal/credentials"
+	_ "github.com/fiam/supacli/internal/providers/all"
+)
+
+type mcpTestResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *mcpError       `json:"error"`
+}
+
+func TestMCPToolsListUsesProfileFilters(t *testing.T) {
+	t.Parallel()
+
+	output := runMCPServe(t,
+		[]string{"mcp", "serve", "--tool", "notion.page.*", "--exclude-tool", "*.delete"},
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+	response := decodeMCPTestResponse(t, output)
+	if response.Error != nil {
+		t.Fatalf("unexpected MCP error: %+v", response.Error)
+	}
+	var result struct {
+		Tools []mcpTool `json:"tools"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	for _, want := range []string{"notion.page.read", "notion.page.create"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("expected MCP tools to include %q, got %v", want, names)
+		}
+	}
+	for _, unwanted := range []string{"notion.search", "notion.page.delete"} {
+		if slices.Contains(names, unwanted) {
+			t.Fatalf("expected MCP tools to exclude %q, got %v", unwanted, names)
+		}
+	}
+}
+
+func TestMCPToolCallReturnsStructuredText(t *testing.T) {
+	t.Parallel()
+
+	output := runMCPServe(t,
+		[]string{"mcp", "serve"},
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notion.page.create","arguments":{"parent-type":"workspace","title":"Draft","markdown":"# Draft","dry-run":true}}}`,
+	)
+	result := decodeMCPCallResult(t, output)
+	if result.IsError {
+		t.Fatalf("unexpected MCP tool error: %+v", result.Content)
+	}
+	if len(result.Content) != 1 || result.Content[0].Type != "text" {
+		t.Fatalf("unexpected MCP content: %+v", result.Content)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, `"dry_run": true`) || !strings.Contains(text, `"action": "notion.page.create"`) {
+		t.Fatalf("expected dry-run JSON text, got %q", text)
+	}
+}
+
+func TestMCPToolCallHonorsReadOnlyMode(t *testing.T) {
+	t.Parallel()
+
+	output := runMCPServe(t,
+		[]string{"--read-only", "mcp", "serve"},
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notion.page.create","arguments":{"parent-type":"workspace","title":"Draft","markdown":"# Draft","dry-run":true}}}`,
+	)
+	result := decodeMCPCallResult(t, output)
+	if !result.IsError {
+		t.Fatalf("expected MCP tool error, got %+v", result)
+	}
+	if len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "read-only mode blocks command notion.page.create") {
+		t.Fatalf("expected read-only denial, got %+v", result.Content)
+	}
+}
+
+func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{
+		"mcp", "configure", "codex", "claude-code", "gemini-cli",
+		"--dry-run",
+		"--command", "/opt/supacli/bin/supacli",
+		"--mcp-profile", "notion read",
+		"--tool", "notion.page.*",
+		"--exclude-tool", "*.delete",
+		"--claude-scope", "user",
+		"--gemini-scope", "user",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	for _, want := range []string{
+		"codex: codex mcp add supacli-notion-read -- /opt/supacli/bin/supacli mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+		"claude: claude mcp add --scope user --transport stdio supacli-notion-read -- /opt/supacli/bin/supacli mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+		"gemini: gemini mcp add --scope user --transport stdio supacli-notion-read /opt/supacli/bin/supacli mcp serve --mcp-profile 'notion read' --tool 'notion.page.*' --exclude-tool '*.delete'",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestMCPProfileSetWritesLocalProfile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	profilePath := filepath.Join(dir, ".supacli", "mcp-profiles.yaml")
+	profile := mcpProfileConfigFromSelection(mcpToolSelection{
+		Tools:        []string{"notion.page.*"},
+		ExcludeTools: []string{"*.delete"},
+	})
+	if err := writeMCPProfileFile(profilePath, mcpProfileFile{
+		Version:  1,
+		Profiles: map[string]mcpProfileConfig{"readonly": profile},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := resolveMCPToolSelectionFromPaths(mcpToolSelection{Profile: "readonly"}, dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector, err := newMCPToolSelector(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := mcpServer{selector: selector}
+	names := make([]string, 0, len(server.mcpSpecs()))
+	for _, spec := range server.mcpSpecs() {
+		names = append(names, spec.ID)
+	}
+	if !slices.Contains(names, "notion.page.read") || slices.Contains(names, "notion.page.delete") {
+		t.Fatalf("profile filters were not applied: %v", names)
+	}
+}
+
+func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(t.TempDir(), "mcp-profiles.yaml")
+	if err := writeMCPProfileFile(globalPath, mcpProfileFile{
+		Version:        1,
+		DefaultProfile: "global",
+		Profiles: map[string]mcpProfileConfig{
+			"global": {Tools: []string{"notion.*"}},
+			"shared": {Tools: []string{"notion.*"}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMCPProfileFile(filepath.Join(dir, ".supacli", "mcp-profiles.yaml"), mcpProfileFile{
+		Version:        1,
+		DefaultProfile: "project",
+		Profiles: map[string]mcpProfileConfig{
+			"project": {Tools: []string{"notion.page.*"}},
+			"shared":  {Tools: []string{"notion.data_source.*"}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := resolveMCPToolSelectionFromPaths(mcpToolSelection{}, dir, globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Profile != "project" || !slices.Equal(resolved.Tools, []string{"notion.page.*"}) {
+		t.Fatalf("expected project default profile, got %+v", resolved)
+	}
+
+	resolved, err = resolveMCPToolSelectionFromPaths(mcpToolSelection{Profile: "shared"}, dir, globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(resolved.Tools, []string{"notion.data_source.*"}) {
+		t.Fatalf("expected project profile to override global profile, got %+v", resolved)
+	}
+
+	entries, err := effectiveMCPProfileEntriesFromPaths(dir, globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name == "shared" && !slices.Equal(entry.Scopes, []string{"global", "local"}) {
+			t.Fatalf("expected shared profile to report both scopes, got %+v", entry)
+		}
+	}
+}
+
+func TestMCPConfiguredDefaultMustExist(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := writeMCPProfileFile(filepath.Join(dir, ".supacli", "mcp-profiles.yaml"), mcpProfileFile{
+		Version:        1,
+		DefaultProfile: "missing",
+		Profiles:       map[string]mcpProfileConfig{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolveMCPToolSelectionFromPaths(mcpToolSelection{}, dir, "")
+	if err == nil || !strings.Contains(err.Error(), `default MCP profile "missing" not found`) {
+		t.Fatalf("expected missing default profile error, got %v", err)
+	}
+}
+
+func TestSelectMCPAgentsAutodetectsSupportedCLIs(t *testing.T) {
+	t.Parallel()
+
+	runtime := mcpAgentRuntime{
+		lookPath: func(name string) (string, error) {
+			switch name {
+			case "codex", "gemini":
+				return "/bin/" + name, nil
+			default:
+				return "", errors.New("not found")
+			}
+		},
+	}
+	agents, err := selectMCPAgents(runtime, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(agents, []string{"codex", "gemini"}) {
+		t.Fatalf("unexpected agents: %v", agents)
+	}
+}
+
+func runMCPServe(t *testing.T, args []string, request string) string {
+	t.Helper()
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetIn(strings.NewReader(request + "\n"))
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+func decodeMCPCallResult(t *testing.T, output string) mcpCallToolResult {
+	t.Helper()
+	response := decodeMCPTestResponse(t, output)
+	if response.Error != nil {
+		t.Fatalf("unexpected MCP error: %+v", response.Error)
+	}
+	var result mcpCallToolResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func decodeMCPTestResponse(t *testing.T, output string) mcpTestResponse {
+	t.Helper()
+	var response mcpTestResponse
+	decoder := json.NewDecoder(strings.NewReader(output))
+	if err := decoder.Decode(&response); err != nil {
+		t.Fatalf("decode MCP response from %q: %v", output, err)
+	}
+	if response.JSONRPC != "2.0" {
+		t.Fatalf("unexpected JSON-RPC version %q", response.JSONRPC)
+	}
+	var extra mcpTestResponse
+	err := decoder.Decode(&extra)
+	if err == nil {
+		t.Fatalf("expected one MCP response, got multiple in %q", output)
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("unexpected trailing MCP response data in %q", output)
+	}
+	return response
+}
+
+func TestMCPAgentConfigureCommandsRejectInvalidScopes(t *testing.T) {
+	t.Parallel()
+
+	_, err := mcpAgentConfigureCommands("gemini", "supacli", mcpConfigureOptions{GeminiScope: "local"}, []string{"mcp", "serve"})
+	if err == nil || !strings.Contains(err.Error(), "--gemini-scope") {
+		t.Fatalf("expected Gemini scope error, got %v", err)
+	}
+	_, err = mcpAgentConfigureCommands("claude", "supacli", mcpConfigureOptions{ClaudeScope: "global"}, []string{"mcp", "serve"})
+	if err == nil || !strings.Contains(err.Error(), "--claude-scope") {
+		t.Fatalf("expected Claude scope error, got %v", err)
+	}
+}
+
+func Example_mcpConfiguredServeArgs() {
+	opts := &options{profile: "work", account: "default", readOnly: true}
+	configure := mcpConfigureOptions{
+		mcpToolSelection: mcpToolSelection{
+			Profile:      "readonly",
+			Tools:        []string{"notion.*"},
+			ExcludeTools: []string{"*.delete"},
+		},
+	}
+	fmt.Println(strings.Join(mcpConfiguredServeArgs(opts, configure), " "))
+	// Output: mcp serve --profile work --account default --read-only --mcp-profile readonly --tool notion.* --exclude-tool *.delete
+}

@@ -189,6 +189,26 @@ hyperlinks, markdown rendering, compact tables, and pagers when stdout is a TTY.
 JSON/YAML output must stay stable and undecorated: no ANSI escape sequences, no
 pagers, no prompts, no progress animation, and no browser opens.
 
+MCP support is exposed through `supacli mcp serve` over stdio. The MCP server
+must write only valid JSON-RPC messages to stdout; diagnostics belong on
+stderr. MCP tools must be generated from provider-owned `actions.Spec`
+metadata and must run the same policy and `--read-only` checks before provider
+credentials are read. Do not add separate MCP-only provider command trees.
+
+`supacli mcp configure` manages supported agent CLIs: Codex, Claude Code, and
+Gemini CLI. With no agent argument it autodetects installed supported CLIs; with
+arguments it accepts known agent names and aliases such as `claude-code` and
+`gemini-cli`. It configures agents to launch `supacli mcp serve`.
+
+MCP tool profiles are non-secret configuration. Global profiles live under the
+user config directory; project profiles live in `.supacli/mcp-profiles.yaml`.
+Manage both through `supacli mcp profile`. Project config overrides global
+config for matching profile names and default profile selection, similar to Git
+config layering. Profiles select tools with shell-style globs (`--tool`,
+`--exclude-tool`) and regular expressions (`--tool-regex`,
+`--exclude-tool-regex`). Keep profile docs and tests in sync when changing
+selection behavior.
+
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output
 plain and stable for agents.
