@@ -60,11 +60,16 @@ Live-provider tests stay opt-in and are not part of default CI.
 
 MCP support is served by the CLI over stdio. Use `supacli mcp serve` for
 manual protocol testing and `supacli mcp configure` to register the server with
-Codex, Claude Code, or Gemini CLI. Project MCP tool profiles are stored in
-`.supacli/mcp-profiles.yaml`, global profiles are stored under the user config
-directory, and both can be managed with `supacli mcp profile`. Project config
-overrides global config for matching profile names and default profile
-selection.
+Codex, Claude Code, or Gemini CLI. Interactive no-argument configuration shows
+detected agents as checkboxes, shows how the target MCP server is currently
+configured, preselects agents where Supacli MCP is enabled, and removes the
+Supacli MCP server from agents that are unchecked. Use `supacli mcp enable`
+and `supacli mcp disable` for non-interactive agent setup and teardown. MCP
+tool profiles are stored in the general Supacli config under the `mcp` key.
+Project config is `.supacli/config.yaml`; global config is `supacli/config.yaml`
+under the user config directory. Manage both with `supacli mcp profile`.
+Project config overrides global config for matching profile names and default
+profile selection.
 
 ## Common Targets
 
