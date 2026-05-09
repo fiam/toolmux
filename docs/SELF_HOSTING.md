@@ -57,6 +57,13 @@ Health check:
 curl http://127.0.0.1:8080/healthz
 ```
 
+Build info:
+
+```bash
+curl http://127.0.0.1:8080/build
+curl -H 'Accept: text/plain' http://127.0.0.1:8080/build
+```
+
 ## Run With Docker
 
 Released `supaclid` images are published for Linux amd64 and arm64:
@@ -81,6 +88,12 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8080/healthz
+```
+
+Build info:
+
+```bash
+curl http://127.0.0.1:8080/build
 ```
 
 ## HTTPS and Domains
