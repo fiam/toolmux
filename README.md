@@ -86,6 +86,8 @@ toolmux disconnect notion --yes
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 Notion app setup notes are in
 [docs/providers/notion-app.md](docs/providers/notion-app.md).
+Self-hosted `toolmuxd` exposes `/healthz` for health checks and `/build` for
+JSON or plaintext build metadata.
 
 ## Notion Examples
 

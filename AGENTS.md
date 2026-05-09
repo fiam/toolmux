@@ -213,6 +213,13 @@ The CLI defaults to `https://api.toolmux.com` for brokered OAuth flows. Use
 `TOOLMUX_TOOLMUXD_URL` for local development and self-hosted deployments. Do not
 add provider-specific server URL flags unless the product contract changes.
 
+`toolmuxd` exposes unauthenticated operational endpoints for deployment checks:
+`GET /healthz` returns JSON health status, and `GET /build` returns Toolmux
+server daemon build metadata as JSON by default or plaintext when requested
+with `Accept: text/plain` or `?format=text`. Do not include secrets,
+environment values, provider configuration, tokens, or deployment-specific
+infrastructure details in these responses.
+
 ## Local Provider Harnesses
 
 `make dev-server-tunnel` starts the local server and exposes it through
