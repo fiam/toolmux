@@ -13,7 +13,7 @@ The first release optimizes for a simple connection experience without asking us
 1. Let users connect each initial provider with a browser-based OAuth flow.
 2. Store long-lived provider credentials locally, protected by the user's operating system.
 3. Provide a consistent command model across providers for auth, listing, reading, creating, and updating common resources.
-4. Keep the hosted Toolmux server daemon, `toolmuxd`, open-source and minimized: its OAuth broker component may exchange/refresh tokens when provider client secrets are required, but it must not persist provider tokens.
+4. Keep the hosted Toolmux server daemon, `toolmuxd`, open-source and minimized: its provider connection component may exchange/refresh tokens when provider client secrets are required, but it must not persist provider tokens.
 5. Make provider capability and scope limits explicit so users understand why some actions require reauthorization or are deferred.
 6. Keep Toolmux's production deployment infrastructure and provider secrets out of the OSS repo while publishing portable source and artifacts for CLI and server users.
 
@@ -49,7 +49,7 @@ The OSS repository contains:
 2. `toolmuxd` server daemon source.
 3. Generic self-hosting documentation.
 4. Generic `toolmuxd` container build files.
-5. Release automation for CLI binaries, Homebrew tap artifacts, and generic server images.
+5. Release automation for CLI binaries, Homebrew tap artifacts, and generic Linux server images.
 
 The OSS repository must not contain:
 
@@ -675,7 +675,7 @@ MVP success:
 8. CI blocks unformatted code, failing linters, broken fake-provider integration tests, detected vulnerabilities, token leaks, and invalid commit messages.
 9. Non-interactive command runs never hang on prompts and always produce stable machine-readable output when `--output json` or `--output yaml` is used.
 10. Human default output is readable enough that users can complete common read/create/update flows without consulting raw JSON.
-11. The OSS repo publishes generic CLI/server artifacts without exposing Toolmux production infrastructure or provider secrets.
+11. The OSS repo publishes generic CLI archives and server images without exposing Toolmux production infrastructure or provider secrets.
 
 ## Risks
 

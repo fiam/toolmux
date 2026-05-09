@@ -739,8 +739,8 @@ toolmuxd should be deployable without Postgres for the initial release. A single
 
 Toolmux's production AWS/Lambda deployment should live outside this OSS repo.
 The private infrastructure repo should consume public `toolmuxd` release images
-or binaries and adapt them for Lambda, API Gateway, Function URLs, Secrets
-Manager, DNS, and monitoring.
+and adapt them for Lambda, API Gateway, Function URLs, Secrets Manager, DNS,
+and monitoring.
 
 ## Initial Build Order
 

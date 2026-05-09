@@ -129,7 +129,7 @@ func versionCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "toolmux %s (%s, %s)\n", version.Version, version.Commit, version.Date)
+			fmt.Fprintf(cmd.OutOrStdout(), "toolmux %s\n", version.Version)
 		},
 	}
 }

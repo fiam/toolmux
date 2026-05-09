@@ -1,6 +1,6 @@
 # Self-Hosting toolmuxd
 
-Last updated: 2026-05-07
+Last updated: 2026-05-09
 
 `toolmuxd` is the open-source Toolmux server daemon. It exists so OAuth
 providers that require confidential client secrets can still support a
@@ -58,6 +58,12 @@ curl http://127.0.0.1:8080/healthz
 ```
 
 ## Run With Docker
+
+Released `toolmuxd` images are published for Linux amd64 and arm64:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/fiam/toolmuxd:<tag>
+```
 
 Build the generic image:
 

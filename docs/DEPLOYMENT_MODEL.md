@@ -1,6 +1,6 @@
 # Deployment Model
 
-Last updated: 2026-05-07
+Last updated: 2026-05-09
 
 Toolmux uses a split between the public OSS product repository and private
 deployment infrastructure.
@@ -21,7 +21,7 @@ The public repo should publish:
 
 1. Signed `toolmux` CLI binaries through GitHub Releases.
 2. A Homebrew tap for the CLI.
-3. Generic `toolmuxd` container images, for example GHCR images.
+3. Generic Ko-built `toolmuxd` Linux amd64/arm64 images through GHCR.
 4. SBOMs, checksums, signatures, and provenance for release artifacts.
 5. Generic self-hosting instructions for users who bring their own provider
    OAuth apps.
@@ -66,13 +66,14 @@ The private repo consumes public artifacts from this repo:
 
 ```text
 toolmux CLI release -> Homebrew tap / GitHub Release
-toolmuxd image      -> private AWS deployment
+toolmuxd GHCR image -> private AWS deployment
 ```
 
-The public `toolmuxd` image is a generic HTTP server image. The private
-deployment may adapt it for AWS Lambda with an AWS-specific wrapper, Lambda Web
-Adapter, Lambda Function URL, or API Gateway. That adaptation belongs in the
-private repo because it is deployment-specific rather than product source.
+The public `toolmuxd` image is a generic Linux HTTP server image published as
+`ghcr.io/fiam/toolmuxd:<tag>` for amd64 and arm64. The private deployment may
+adapt it for AWS Lambda with an AWS-specific wrapper, Lambda Web Adapter,
+Lambda Function URL, or API Gateway. That adaptation belongs in the private
+repo because it is deployment-specific rather than product source.
 
 ## Secret Boundary
 

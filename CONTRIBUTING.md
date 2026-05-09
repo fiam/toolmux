@@ -54,9 +54,9 @@ pass also checks Go formatting and import order through `golangci-lint fmt`.
 GitHub Actions runs these checks for pull requests and pushes to `main`, plus
 race tests, fake-upstream integration tests, coverage generation, binary
 builds, commit-message validation, and the generic `toolmuxd` container image
-build. CI also runs a GoReleaser snapshot build so the release build matrix is
-validated before a release. Live-provider tests stay opt-in and are not part of
-default CI.
+build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
+Ko-built `toolmuxd` image manifest are validated before a release.
+Live-provider tests stay opt-in and are not part of default CI.
 
 ## Common Targets
 
@@ -88,10 +88,12 @@ Releases are managed by release-please and GoReleaser.
 1. Push conventional commits to `main`.
 2. The `release` workflow opens or updates a release-please PR.
 3. Merge the release PR to create the GitHub release and tag.
-4. GoReleaser builds `toolmux` and `toolmuxd` archives for macOS, Linux, and
-   Windows on amd64 and arm64.
-5. GoReleaser uploads release artifacts and checksums to GitHub Releases.
-6. GoReleaser publishes the `toolmux` Homebrew formula to
+4. GoReleaser builds `toolmux` archives for macOS, Linux, and Windows on amd64
+   and arm64.
+5. GoReleaser publishes a Ko-built `toolmuxd` Linux image for amd64 and arm64
+   to `ghcr.io/fiam/toolmuxd:<tag>`.
+6. GoReleaser uploads CLI release artifacts and checksums to GitHub Releases.
+7. GoReleaser publishes the `toolmux` Homebrew formula to
    `fiam/homebrew-tap`.
 
 Required repository secrets:

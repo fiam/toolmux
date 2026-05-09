@@ -22,32 +22,10 @@ builds:
       - >-
         -s -w
         -X github.com/fiam/toolmux/internal/version.Version={{ .Version }}
-        -X github.com/fiam/toolmux/internal/version.Commit={{ .Commit }}
-        -X github.com/fiam/toolmux/internal/version.Date={{ .Date }}
-  - id: toolmuxd
-    main: ./cmd/toolmuxd
-    binary: toolmuxd
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - darwin
-      - linux
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - >-
-        -s -w
-        -X github.com/fiam/toolmux/internal/version.Version={{ .Version }}
-        -X github.com/fiam/toolmux/internal/version.Commit={{ .Commit }}
-        -X github.com/fiam/toolmux/internal/version.Date={{ .Date }}
-
 archives:
   - id: toolmux
     ids:
       - toolmux
-      - toolmuxd
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -55,6 +33,31 @@ archives:
       - goos: windows
         formats:
           - zip
+
+kos:
+  - id: toolmuxd
+    build: toolmux
+    main: ./cmd/toolmuxd
+    repositories:
+      - ghcr.io/fiam/toolmuxd
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{ .Tag }}"
+    bare: true
+    preserve_import_paths: false
+    sbom: none
+    labels:
+      org.opencontainers.image.source: "https://github.com/fiam/toolmux"
+      org.opencontainers.image.licenses: MIT
+    annotations:
+      org.opencontainers.image.source: "https://github.com/fiam/toolmux"
+      org.opencontainers.image.description: "Toolmux server daemon."
+      org.opencontainers.image.licenses: MIT
+    env:
+      - CGO_ENABLED=0
+    creation_time: "{{ .CommitTimestamp }}"
 
 checksum:
   name_template: checksums.txt
@@ -89,6 +92,5 @@ brews:
     commit_msg_template: "brew: update toolmux to {{ .Tag }}"
     install: |
       bin.install "toolmux"
-      bin.install "toolmuxd"
     test: |
       system "#{bin}/toolmux", "version"

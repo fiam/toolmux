@@ -121,7 +121,8 @@ CI should run at least:
 8. Commit-message validation.
 9. Generic `toolmuxd` container image build validation.
 10. Coverage generation with `make coverage`.
-11. GoReleaser snapshot build validation for the release artifact matrix.
+11. GoReleaser snapshot release validation for the CLI archive matrix and
+    Ko-built `toolmuxd` image manifest.
 
 ## Releases
 
@@ -129,14 +130,17 @@ Release automation uses release-please and GoReleaser.
 
 1. `release-please-config.json` and `.release-please-manifest.json` control
    release PRs, changelog generation, GitHub releases, and tags.
-2. `.goreleaser.yaml` controls release builds for `toolmux` and `toolmuxd`.
-3. Release artifacts must cover macOS, Linux, and Windows on amd64 and arm64
-   unless release support is intentionally changed and documented.
-4. The release workflow publishes a Homebrew formula to `fiam/homebrew-tap`.
-5. Keep the Homebrew formula install block aligned with released binary names.
-6. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
+2. `.goreleaser.yaml` controls CLI archives for `toolmux` and the Ko-built
+   `toolmuxd` container image.
+3. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
+   and arm64 unless release support is intentionally changed and documented.
+4. `toolmuxd` must not be released as a binary archive. Release it only as a
+   Linux amd64/arm64 image at `ghcr.io/fiam/toolmuxd:<tag>`.
+5. The release workflow publishes a Homebrew formula to `fiam/homebrew-tap`.
+6. Keep the Homebrew formula install block aligned with released binary names.
+7. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
    `fiam/homebrew-tap`.
-7. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
+8. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
    branch protection; otherwise the workflow falls back to `GITHUB_TOKEN`.
 
 ## Integration Tests
