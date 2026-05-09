@@ -22,32 +22,10 @@ builds:
       - >-
         -s -w
         -X github.com/fiam/supacli/internal/version.Version={{ .Version }}
-        -X github.com/fiam/supacli/internal/version.Commit={{ .Commit }}
-        -X github.com/fiam/supacli/internal/version.Date={{ .Date }}
-  - id: supaclid
-    main: ./cmd/supaclid
-    binary: supaclid
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - darwin
-      - linux
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - >-
-        -s -w
-        -X github.com/fiam/supacli/internal/version.Version={{ .Version }}
-        -X github.com/fiam/supacli/internal/version.Commit={{ .Commit }}
-        -X github.com/fiam/supacli/internal/version.Date={{ .Date }}
-
 archives:
   - id: supacli
     ids:
       - supacli
-      - supaclid
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -55,6 +33,31 @@ archives:
       - goos: windows
         formats:
           - zip
+
+kos:
+  - id: supaclid
+    build: supacli
+    main: ./cmd/supaclid
+    repositories:
+      - ghcr.io/fiam/supaclid
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{ .Tag }}"
+    bare: true
+    preserve_import_paths: false
+    sbom: none
+    labels:
+      org.opencontainers.image.source: "https://github.com/fiam/supacli"
+      org.opencontainers.image.licenses: MIT
+    annotations:
+      org.opencontainers.image.source: "https://github.com/fiam/supacli"
+      org.opencontainers.image.description: "Supacli server daemon."
+      org.opencontainers.image.licenses: MIT
+    env:
+      - CGO_ENABLED=0
+    creation_time: "{{ .CommitTimestamp }}"
 
 checksum:
   name_template: checksums.txt
@@ -89,6 +92,5 @@ brews:
     commit_msg_template: "brew: update supacli to {{ .Tag }}"
     install: |
       bin.install "supacli"
-      bin.install "supaclid"
     test: |
       system "#{bin}/supacli", "version"

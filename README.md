@@ -11,9 +11,9 @@ It is built for both people and agents:
    spinners, pagers, browser opens, or ANSI escapes.
 
 Supacli stores provider tokens in your operating system credential store by
-default. The hosted or self-hosted `supaclid` server brokers OAuth for
-providers that require confidential client secrets, but it does not provide a
-cloud token vault in the initial design.
+default. The hosted or self-hosted `supaclid` server supports provider
+connection flows that require confidential client secrets, but it does not
+provide a cloud token vault in the initial design.
 
 ## Status
 
@@ -48,10 +48,11 @@ make dev-cli
 supacli version
 ```
 
-Released archives include `supacli` and `supaclid` binaries for macOS, Linux,
-and Windows on amd64 and arm64. Use Go 1.26.3 or newer on the Go 1.26 line
-when building from source. Docker is only required for the full linter pass and
-container image builds.
+Released archives include only the `supacli` CLI for macOS, Linux, and
+Windows on amd64 and arm64. The `supaclid` server daemon is released only as a
+Linux amd64/arm64 container image at `ghcr.io/fiam/supaclid:<tag>`. Use Go
+1.26.3 or newer on the Go 1.26 line when building from source. Docker is only
+required for the full linter pass and container image builds.
 
 ## Connect Notion
 
