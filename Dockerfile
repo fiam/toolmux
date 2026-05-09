@@ -27,7 +27,7 @@ RUN go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} && \
 FROM lint-tools AS lint
 COPY . .
 
-RUN test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
+RUN golangci-lint fmt --config .golangci.yaml --diff
 RUN find .github/workflows -name '*.yaml' -print0 | \
     xargs -0 actionlint
 RUN find . -name '*.yaml' -not -path './.git/*' -print0 | \

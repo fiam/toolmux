@@ -22,12 +22,12 @@ Supacli is early software. The first usable provider is Notion.
 | Provider | Status | Notes |
 | --- | --- | --- |
 | Notion | Active | OAuth connect, search, page reads/writes, links, page tree, and data sources. |
-| Linear | Planned | Provider metadata and early integration work exist. |
-| Jira | Planned | Command catalog exists. |
-| Slack | Planned | Command catalog exists. |
-| Google Docs | Planned | Command catalog exists. |
-| Google Drive | Planned | Command catalog exists. |
-| Gmail | Planned | Command catalog exists. |
+| Linear | Planned | No command surface is registered yet. |
+| Jira | Planned | No command surface is registered yet. |
+| Slack | Planned | No command surface is registered yet. |
+| Google Docs | Planned | No command surface is registered yet. |
+| Google Drive | Planned | No command surface is registered yet. |
+| Gmail | Planned | No command surface is registered yet. |
 
 ## Install
 
@@ -156,6 +156,7 @@ Global output controls:
 --output table|json|yaml
 --color auto|always|never
 --pager auto|always|never
+--read-only
 ```
 
 Interactive features are disabled automatically when Supacli is not attached
@@ -177,6 +178,9 @@ Inspect available policy-aware commands:
 ```bash
 supacli policy catalog
 ```
+
+The catalog lists implemented provider actions and their remote/local effects.
+Use `--read-only` to block actions with remote or local write effects.
 
 Check a command:
 

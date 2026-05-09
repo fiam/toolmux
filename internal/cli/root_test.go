@@ -3,17 +3,17 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/fiam/supacli/internal/credentials"
-	"github.com/fiam/supacli/internal/providers/notion"
+	_ "github.com/fiam/supacli/internal/providers/all"
 )
 
 func TestVersionCommand(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCommand()
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -29,6 +29,7 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestPolicyCatalog(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCommand()
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -38,12 +39,17 @@ func TestPolicyCatalog(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(out.Bytes(), []byte("gmail.send")) {
-		t.Fatalf("expected gmail.send in catalog, got %q", out.String())
+	rendered := out.String()
+	if !strings.Contains(rendered, "notion.page.read") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
+		t.Fatalf("expected action effects in catalog, got %q", rendered)
+	}
+	if strings.Contains(rendered, "gmail.send") {
+		t.Fatalf("catalog should not list unimplemented provider commands, got %q", rendered)
 	}
 }
 
 func TestColorAlwaysColorsTableOutput(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCommand()
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -58,7 +64,82 @@ func TestColorAlwaysColorsTableOutput(t *testing.T) {
 	}
 }
 
+func TestProviderHelpComesFromActionMetadata(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommand()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"notion", "data-source", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "Operate Notion data sources") || !strings.Contains(rendered, "Aliases:") {
+		t.Fatalf("expected generated provider help from metadata, got %q", rendered)
+	}
+}
+
+func TestProviderCommandFlagsComeFromActionMetadata(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommand()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"notion", "data-source", "query", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	for _, want := range []string{"--filter-json", "--filter-property", "--limit", "--result-type", "--sorts-json"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected generated provider help to contain %q, got %q", want, rendered)
+		}
+	}
+}
+
+func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommand()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	for _, provider := range []string{"jira", "slack", "google"} {
+		if strings.Contains(rendered, provider) {
+			t.Fatalf("unimplemented provider command %q should not appear in help: %q", provider, rendered)
+		}
+	}
+}
+
+func TestReadOnlyModeBlocksMutatingProviderCommand(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--read-only", "notion", "page", "create", "--title", "Draft", "--parent", "workspace", "--dry-run"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected read-only denial")
+	}
+	if !strings.Contains(err.Error(), "read-only mode blocks command notion.page.create") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"NOTION_CLIENT_ID is required"}`))
@@ -87,15 +168,16 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 }
 
 func TestStatusTableShowsProviderPermissions(t *testing.T) {
+	t.Parallel()
 	store := credentials.NewMemoryStore()
 	err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
-		Provider:  "linear",
+		Provider:  "notion",
 		AccountID: "default",
 	}, credentials.OAuthTokens{
-		AccessToken: "linear-access-token",
+		AccessToken: "notion-access-token",
 		TokenType:   "bearer",
-		Scopes:      []string{"read", "issues:create"},
+		Scopes:      []string{"read_content", "insert_content"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -104,13 +186,13 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"status", "linear"})
+	cmd.SetArgs([]string{"status", "notion"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "issues:create") {
+	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "insert_content") {
 		t.Fatalf("expected connected status table with permissions, got %q", rendered)
 	}
 	if strings.Contains(rendered, "\x1b[") {
@@ -119,12 +201,13 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 }
 
 func TestDoctorTableRunsCoreAndProviderDiagnostics(t *testing.T) {
+	t.Parallel()
 	store := credentials.NewMemoryStore()
 	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"doctor", "linear"})
+	cmd.SetArgs([]string{"doctor", "jira"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
@@ -138,178 +221,8 @@ func TestDoctorTableRunsCoreAndProviderDiagnostics(t *testing.T) {
 	}
 }
 
-func TestWritePageUsesResourceColumns(t *testing.T) {
-	cmd := NewRootCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	opts := &options{output: "table", color: "never"}
-
-	err := writePage(cmd, opts, notion.Page{
-		ID:  "page-1",
-		URL: "https://notion.so/page-1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered := out.String()
-	for _, want := range []string{"Title", "ID", "URL", "Status", "active"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("expected page table to contain %q, got %q", want, rendered)
-		}
-	}
-	if strings.Contains(rendered, "Field") || strings.Contains(rendered, "Value") {
-		t.Fatalf("page table should use resource columns, got %q", rendered)
-	}
-}
-
-func TestPageReadMarkdownSourceAnnotatesLinks(t *testing.T) {
-	source := pageReadMarkdownSource(notion.Page{}, notion.PageMarkdown{
-		Markdown: "# Work Diary\n\n[April 2026](https://notion.so/april)\n[May 2026](https://notion.so/may)",
-	})
-	if !strings.Contains(source, "- **April 2026 [1]**") {
-		t.Fatalf("expected page read source to annotate links, got %q", source)
-	}
-	if !strings.Contains(source, "## Links") || !strings.Contains(source, "https://notion.so/may") {
-		t.Fatalf("expected page read source to include visible link destinations, got %q", source)
-	}
-	if !strings.Contains(source, "- **April 2026 [1]**\n- **May 2026 [2]**") {
-		t.Fatalf("expected page read source to preserve adjacent link lines, got %q", source)
-	}
-}
-
-func TestResolveNotionPageArgKeepsIDs(t *testing.T) {
-	client, closeServer := notionSearchClient(t, nil)
-	defer closeServer()
-
-	cmd := NewRootCommand()
-	id, err := resolveNotionPageArg(cmd, &options{output: "table"}, client, "11111111111141118111111111111111")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("unexpected normalized id %q", id)
-	}
-}
-
-func TestResolveNotionPageArgSingleTitleMatch(t *testing.T) {
-	client, closeServer := notionSearchClient(t, []map[string]any{{
-		"object": "page",
-		"id":     "11111111-1111-4111-8111-111111111111",
-		"title":  "Roadmap",
-	}})
-	defer closeServer()
-
-	cmd := NewRootCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	id, err := resolveNotionPageArg(cmd, &options{output: "table"}, client, "Roadmap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("unexpected resolved id %q", id)
-	}
-}
-
-func TestResolveNotionPageArgMultipleNonInteractiveFails(t *testing.T) {
-	client, closeServer := notionSearchClient(t, []map[string]any{
-		{"object": "page", "id": "11111111-1111-4111-8111-111111111111", "title": "Roadmap"},
-		{"object": "page", "id": "22222222-2222-4222-8222-222222222222", "title": "Roadmap archive"},
-	})
-	defer closeServer()
-
-	cmd := NewRootCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	_, err := resolveNotionPageArg(cmd, &options{output: "table"}, client, "Roadmap")
-	if err == nil {
-		t.Fatal("expected ambiguous title error")
-	}
-	if !strings.Contains(err.Error(), "multiple Notion pages match") || !strings.Contains(err.Error(), "Roadmap archive") {
-		t.Fatalf("unexpected ambiguous title error: %v", err)
-	}
-}
-
-func TestNotionPageSelectionLabelUsesCompactIDs(t *testing.T) {
-	label := notionPageSelectionLabel(notion.SearchResult{
-		ID:    "35650aa7-8fda-80fe-aafa-f24e69aca7a6",
-		Title: "May 2026",
-		URL:   "https://www.notion.so/35650aa78fda80feaafaf24e69aca7a6",
-	})
-	if label != "May 2026  35650aa7" {
-		t.Fatalf("unexpected selection label %q", label)
-	}
-}
-
-func TestNotionPageIDFromLinkRecognizesNotionURLs(t *testing.T) {
-	id, ok := notionPageIDFromLink("https://www.notion.so/Roadmap-11111111111141118111111111111111?pvs=4")
-	if !ok {
-		t.Fatal("expected Notion URL to be recognized")
-	}
-	if id != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("unexpected Notion page id %q", id)
-	}
-	if _, ok := notionPageIDFromLink("https://example.com/Roadmap-11111111111141118111111111111111"); ok {
-		t.Fatal("external URL with UUID should not be treated as a Notion page")
-	}
-	if _, ok := notionPageIDFromLink("mailto:11111111111141118111111111111111@example.com"); ok {
-		t.Fatal("non-HTTP URL with UUID should not be treated as a Notion page")
-	}
-}
-
-func TestNotionLinkSelectionDetailCompactsTargets(t *testing.T) {
-	notionDetail := notionLinkSelectionDetail("https://www.notion.so/Roadmap-11111111111141118111111111111111?pvs=4")
-	if notionDetail != "Notion 11111111" {
-		t.Fatalf("unexpected Notion detail %q", notionDetail)
-	}
-	externalDetail := notionLinkSelectionDetail("https://example.com/docs/setup")
-	if externalDetail != "example.com/docs/setup" {
-		t.Fatalf("unexpected external detail %q", externalDetail)
-	}
-}
-
-func TestNotionPageLinksFromMarkdownClassifiesLinks(t *testing.T) {
-	links := notionPageLinksFromMarkdown(`[Roadmap](https://www.notion.so/Roadmap-11111111111141118111111111111111)
-[External](https://example.com/docs)`)
-	if len(links) != 2 {
-		t.Fatalf("expected 2 links, got %#v", links)
-	}
-	if links[0].Kind != "notion" || links[0].NotionPageID != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("unexpected Notion link classification: %#v", links[0])
-	}
-	if links[1].Kind != "external" || links[1].NotionPageID != "" {
-		t.Fatalf("unexpected external link classification: %#v", links[1])
-	}
-}
-
-func TestNotionPageDiagnosticsWarnsOnMarkdownFidelity(t *testing.T) {
-	diagnostics := notionPageDiagnostics(notionPageRead{
-		Page: notion.Page{ID: "11111111-1111-4111-8111-111111111111"},
-		Markdown: notion.PageMarkdown{
-			ID:              "11111111-1111-4111-8111-111111111111",
-			Markdown:        "[Spec](https://example.com/spec)",
-			Truncated:       true,
-			UnknownBlockIDs: []string{"block-1"},
-		},
-	})
-	var sawTruncated, sawUnknown bool
-	for _, diagnostic := range diagnostics {
-		if diagnostic.Check == "markdown-truncation" && diagnostic.Status == "warn" {
-			sawTruncated = true
-		}
-		if diagnostic.Check == "unknown-blocks" && diagnostic.Status == "warn" {
-			sawUnknown = true
-		}
-	}
-	if !sawTruncated || !sawUnknown {
-		t.Fatalf("expected markdown fidelity warnings, got %#v", diagnostics)
-	}
-}
-
 func TestNotionPageContentReplaceRequiresYes(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -325,26 +238,5 @@ func TestNotionPageContentReplaceRequiresYes(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "without --yes") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func notionSearchClient(t *testing.T, results []map[string]any) (*notion.Client, func()) {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/search" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"object":   "list",
-			"results":  results,
-			"has_more": false,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}))
-	client := notion.NewClient("token", notion.WithBaseURL(server.URL), notion.WithHTTPClient(server.Client()))
-	return client, func() {
-		server.Close()
 	}
 }

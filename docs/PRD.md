@@ -91,23 +91,24 @@ Policy commands:
 ```bash
 supacli policy init
 supacli policy catalog
-supacli policy check --command "jira issue create --project OPS --summary test"
-supacli policy explain --command "gmail send --to user@example.com --subject test"
+supacli policy check --command "notion page read Roadmap"
+supacli policy explain --command "notion page create --title Draft"
 supacli policy doctor
 ```
 
 Each command must declare metadata that the policy engine can evaluate:
 
 ```text
-command: gmail.send
-provider: gmail
-resource: message
-action: send
-effect: write
-risk: external-send
+command: notion.page.create
+provider: notion
+resource: page
+action: create
+remote_effect: write
+local_effect: none
+risk: content-write
 account: <resolved account id>
 profile: <supacli profile>
-scopes: [https://www.googleapis.com/auth/gmail.send]
+scopes: [insert_content]
 args: provider-specific normalized arguments
 ```
 
@@ -121,21 +122,16 @@ roles:
   reader:
     allow:
       - provider: "*"
-        actions: ["read", "list", "search", "status"]
+        remote_effects: ["read", "none"]
+        local_effects: ["none"]
   operator:
     extends: ["reader"]
     allow:
-      - provider: "jira"
-        resources: ["issue", "comment"]
-        actions: ["create", "update"]
-      - provider: "linear"
-        resources: ["issue", "comment"]
-        actions: ["create", "update"]
+      - provider: "notion"
+        resources: ["page", "page_content", "data_source_row"]
+        actions: ["create", "update", "restore", "move"]
     deny:
-      - provider: "gmail"
-        actions: ["send"]
-      - provider: "google-drive"
-        actions: ["delete", "share"]
+      - risks: ["destructive"]
 
 bindings:
   - role: operator
@@ -147,13 +143,32 @@ Policy evaluation requirements:
 
 1. Evaluate policy before loading provider tokens.
 2. Deny by default when a policy file sets `default: deny`.
-3. Support provider, resource, action, command, profile, account, risk, and normalized argument matching.
+3. Support provider, resource, action, command, remote effect, local effect,
+   profile, account, risk, and normalized argument matching.
 4. Return a clear denial reason and the policy rule that caused it.
 5. Support `--policy` in all commands, including provider commands and auth commands.
 6. Support machine-readable denial errors in JSON/YAML output.
-7. Include a generated command/action catalog so users can write policies without reading source code.
-8. Treat policy files as configuration, not secrets.
-9. Avoid remote policy enforcement in the initial release; signed/team-managed policies can be added later.
+7. Include a generated provider action catalog so users can write policies
+   without reading source code. Provider command paths, argument constraints,
+   flags, help, aliases, CLI commands, MCP tools, and REST routes should derive
+   from one provider-owned action tree. Group nodes and leaf actions use the
+   same metadata type, and upper layers walk that tree instead of maintaining
+   separate group and command models. Root `connect`, `disconnect`, `status`,
+   and `doctor` remain explicit provider-aware CLI commands instead of
+   generated provider subcommands.
+8. Keep provider command execution provider-owned. Providers expose action
+   handlers and return structured results; CLI, future MCP, and future REST
+   adapters invoke those handlers and render or serialize the same result types
+   instead of carrying provider-specific command logic.
+9. Providers self-register through facet packages. A provider's
+   `client` package owns CLI/API/MCP metadata, action handlers, API client,
+   tests, and fake upstream integration tests. A provider's `broker` package
+   owns server-side OAuth/token broker behavior for `supaclid` and registers
+   through `internal/providers/brokers`. Binaries import the appropriate
+   provider bundle for side effects instead of maintaining a hardcoded provider
+   list in the registry or loading client provider code into the server.
+10. Treat policy files as configuration, not secrets.
+11. Avoid remote policy enforcement in the initial release; signed/team-managed policies can be added later.
 
 ## Agent and Human UX
 

@@ -1,4 +1,4 @@
-package notion
+package client
 
 import (
 	"bytes"
@@ -12,11 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fiam/supacli/internal/providers/notion"
 )
 
 const (
 	DefaultBaseURL = "https://api.notion.com"
-	DefaultVersion = "2026-03-11"
+	DefaultVersion = notion.DefaultVersion
 )
 
 type Client struct {
@@ -393,10 +395,7 @@ func (c *Client) SearchAll(ctx context.Context, request SearchRequest, limit int
 	var out SearchResponse
 	cursor := request.StartCursor
 	for len(out.Results) < limit {
-		pageSize := limit - len(out.Results)
-		if pageSize > 100 {
-			pageSize = 100
-		}
+		pageSize := min(limit-len(out.Results), 100)
 		request.StartCursor = cursor
 		request.PageSize = pageSize
 		page, err := c.Search(ctx, request)
@@ -634,10 +633,7 @@ func (c *Client) QueryDataSourceAll(ctx context.Context, dataSourceID string, re
 	var out QueryDataSourceResponse
 	cursor := request.StartCursor
 	for len(out.Results) < limit {
-		pageSize := limit - len(out.Results)
-		if pageSize > 100 {
-			pageSize = 100
-		}
+		pageSize := min(limit-len(out.Results), 100)
 		request.StartCursor = cursor
 		request.PageSize = pageSize
 		page, err := c.QueryDataSource(ctx, dataSourceID, request)

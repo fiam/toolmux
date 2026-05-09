@@ -8,6 +8,7 @@ import (
 )
 
 func TestNormalizeRefDefaultsProfileAndService(t *testing.T) {
+	t.Parallel()
 	ref, err := NormalizeRef(ConnectionRef{
 		Provider:  "Google",
 		Service:   "Gmail",
@@ -31,6 +32,7 @@ func TestNormalizeRefDefaultsProfileAndService(t *testing.T) {
 }
 
 func TestNormalizeRefDefaultsServiceToProvider(t *testing.T) {
+	t.Parallel()
 	ref, err := NormalizeRef(ConnectionRef{
 		Provider:  "Notion",
 		AccountID: "workspace-1",
@@ -44,6 +46,7 @@ func TestNormalizeRefDefaultsServiceToProvider(t *testing.T) {
 }
 
 func TestNormalizeRefRejectsInvalidReferences(t *testing.T) {
+	t.Parallel()
 	tests := []ConnectionRef{
 		{AccountID: "workspace-1"},
 		{Provider: "notion"},
@@ -57,6 +60,7 @@ func TestNormalizeRefRejectsInvalidReferences(t *testing.T) {
 }
 
 func TestOAuthTokensKeyEscapesComponents(t *testing.T) {
+	t.Parallel()
 	key, err := oauthTokensKey(ConnectionRef{
 		Profile:   "work profile",
 		Provider:  "google",
@@ -76,6 +80,7 @@ func TestOAuthTokensKeyEscapesComponents(t *testing.T) {
 }
 
 func TestNormalizeOAuthTokensCleansScopesAndExtra(t *testing.T) {
+	t.Parallel()
 	expiresAt := time.Date(2026, 5, 7, 10, 0, 0, 0, time.FixedZone("WEST", 3600))
 	tokens, err := NormalizeOAuthTokens(OAuthTokens{
 		AccessToken:  " access-1 ",
@@ -106,6 +111,7 @@ func TestNormalizeOAuthTokensCleansScopesAndExtra(t *testing.T) {
 }
 
 func TestNormalizeOAuthTokensRequiresAccessToken(t *testing.T) {
+	t.Parallel()
 	if _, err := NormalizeOAuthTokens(OAuthTokens{}); !errors.Is(err, ErrInvalidTokens) {
 		t.Fatalf("error = %v, want ErrInvalidTokens", err)
 	}

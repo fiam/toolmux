@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/fiam/supacli/internal/cli"
+	_ "github.com/fiam/supacli/internal/providers/all"
 )
 
 func main() {

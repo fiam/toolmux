@@ -1,16 +1,18 @@
-package server
+package server_test
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/fiam/supacli/internal/server"
+	"github.com/fiam/supacli/internal/testutil/supaclidtest"
 )
 
 func TestHealthz(t *testing.T) {
-	server := httptest.NewServer(NewHandler())
-	defer server.Close()
+	t.Parallel()
+	supaclid := supaclidtest.New(t, server.Config{})
 
-	resp, err := server.Client().Get(server.URL + "/healthz")
+	resp, err := supaclid.Client().Get(supaclid.URL + "/healthz")
 	if err != nil {
 		t.Fatal(err)
 	}

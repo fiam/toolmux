@@ -1,12 +1,10 @@
 package server
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,42 +13,43 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fiam/supacli/internal/actions"
 	"github.com/fiam/supacli/internal/credentials"
-	"github.com/fiam/supacli/internal/providers/notion"
+	"github.com/fiam/supacli/internal/providers/brokers"
 )
 
 type Config struct {
-	PublicBaseURL    string
-	NotionClientID   string
-	NotionSecret     string
-	NotionAuthURL    string
-	NotionTokenURL   string
-	NotionRevokeURL  string
-	NotionRedirect   string
-	NotionAPIVersion string
-	HTTPClient       *http.Client
-	SessionTTL       time.Duration
+	PublicBaseURL string
+	Providers     map[actions.ProviderName]brokers.Config
+	HTTPClient    *http.Client
+	SessionTTL    time.Duration
 }
 
 func ConfigFromEnv() Config {
-	return Config{
-		PublicBaseURL:    strings.TrimRight(os.Getenv("SUPACLI_PUBLIC_URL"), "/"),
-		NotionClientID:   os.Getenv("NOTION_CLIENT_ID"),
-		NotionSecret:     os.Getenv("NOTION_CLIENT_SECRET"),
-		NotionAuthURL:    firstNonEmpty(os.Getenv("NOTION_AUTH_URL"), "https://api.notion.com/v1/oauth/authorize"),
-		NotionTokenURL:   firstNonEmpty(os.Getenv("NOTION_TOKEN_URL"), "https://api.notion.com/v1/oauth/token"),
-		NotionRevokeURL:  firstNonEmpty(os.Getenv("NOTION_REVOKE_URL"), "https://api.notion.com/v1/oauth/revoke"),
-		NotionRedirect:   os.Getenv("NOTION_REDIRECT_URI"),
-		NotionAPIVersion: firstNonEmpty(os.Getenv("SUPACLI_NOTION_VERSION"), notion.DefaultVersion),
-		HTTPClient:       http.DefaultClient,
-		SessionTTL:       120 * time.Second,
+	httpClient := http.DefaultClient
+	config := Config{
+		PublicBaseURL: strings.TrimRight(os.Getenv("SUPACLI_PUBLIC_URL"), "/"),
+		Providers:     map[actions.ProviderName]brokers.Config{},
+		HTTPClient:    httpClient,
+		SessionTTL:    120 * time.Second,
 	}
+	for _, descriptor := range brokers.All() {
+		config.Providers[descriptor.ID] = descriptor.CompleteConfig(brokers.Config{}, httpClient)
+	}
+	return config
 }
 
 type oauthBroker struct {
-	config   Config
-	mu       sync.Mutex
-	sessions map[string]*oauthSession
+	config    Config
+	providers map[actions.ProviderName]oauthProvider
+	mu        sync.Mutex
+	sessions  map[string]*oauthSession
+}
+
+type oauthProvider struct {
+	descriptor brokers.Descriptor
+	config     brokers.Config
+	broker     brokers.OAuthProvider
 }
 
 type oauthSession struct {
@@ -78,13 +77,6 @@ type refreshRequest struct {
 
 type revokeRequest struct {
 	Token string `json:"token"`
-}
-
-type notionTokenRequest struct {
-	GrantType    string `json:"grant_type"`
-	Code         string `json:"code,omitempty"`
-	RedirectURI  string `json:"redirect_uri,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 type createSessionResponse struct {
@@ -117,11 +109,6 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-type revokeResponse struct {
-	RequestID string `json:"request_id,omitempty"`
-	Revoked   bool   `json:"revoked,omitempty"`
-}
-
 func registerOAuthHandlers(mux *http.ServeMux, config Config) {
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
@@ -129,19 +116,29 @@ func registerOAuthHandlers(mux *http.ServeMux, config Config) {
 	if config.SessionTTL <= 0 {
 		config.SessionTTL = 120 * time.Second
 	}
-	if config.NotionAPIVersion == "" {
-		config.NotionAPIVersion = notion.DefaultVersion
+	if config.Providers == nil {
+		config.Providers = map[actions.ProviderName]brokers.Config{}
+	}
+	registered := map[actions.ProviderName]oauthProvider{}
+	for _, descriptor := range brokers.All() {
+		providerConfig := descriptor.CompleteConfig(config.Providers[descriptor.ID], config.HTTPClient)
+		registered[descriptor.ID] = oauthProvider{
+			descriptor: descriptor,
+			config:     providerConfig,
+			broker:     descriptor.NewOAuthProvider(providerConfig),
+		}
 	}
 	broker := &oauthBroker{
-		config:   config,
-		sessions: make(map[string]*oauthSession),
+		config:    config,
+		providers: registered,
+		sessions:  make(map[string]*oauthSession),
 	}
 	mux.HandleFunc("POST /v1/oauth/sessions", broker.createSession)
 	mux.HandleFunc("GET /v1/oauth/sessions/{session_id}", broker.getSession)
-	mux.HandleFunc("GET /oauth/notion/start", broker.startNotion)
-	mux.HandleFunc("GET /oauth/notion/callback", broker.notionCallback)
-	mux.HandleFunc("POST /v1/oauth/notion/refresh", broker.refreshNotion)
-	mux.HandleFunc("POST /v1/oauth/notion/revoke", broker.revokeNotion)
+	mux.HandleFunc("GET /oauth/{provider}/start", broker.startOAuth)
+	mux.HandleFunc("GET /oauth/{provider}/callback", broker.oauthCallback)
+	mux.HandleFunc("POST /v1/oauth/{provider}/refresh", broker.refreshOAuth)
+	mux.HandleFunc("POST /v1/oauth/{provider}/revoke", broker.revokeOAuth)
 }
 
 func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
@@ -150,11 +147,12 @@ func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", "invalid session request")
 		return
 	}
-	if request.Provider != "notion" {
-		writeError(w, http.StatusBadRequest, "unsupported_provider", "only notion OAuth sessions are supported")
+	provider, ok := b.provider(actions.ProviderName(strings.TrimSpace(request.Provider)))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported_provider", "OAuth provider is not registered")
 		return
 	}
-	if err := b.requireNotionConfig(); err != nil {
+	if err := provider.broker.RequireConfig(); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "not_configured", err.Error())
 		return
 	}
@@ -171,9 +169,9 @@ func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	session := &oauthSession{
 		ID:          id,
-		Provider:    "notion",
+		Provider:    string(provider.descriptor.ID),
 		State:       state,
-		RedirectURI: b.redirectURI(r),
+		RedirectURI: b.redirectURI(r, provider),
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(b.config.SessionTTL),
 		Status:      "pending",
@@ -184,9 +182,9 @@ func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, createSessionResponse{
 		SessionID:   id,
-		Provider:    "notion",
+		Provider:    string(provider.descriptor.ID),
 		Status:      session.Status,
-		AuthURL:     b.publicURL(r) + "/oauth/notion/start?session_id=" + url.QueryEscape(id),
+		AuthURL:     b.publicURL(r) + "/oauth/" + url.PathEscape(string(provider.descriptor.ID)) + "/start?session_id=" + url.QueryEscape(id),
 		RedirectURI: session.RedirectURI,
 		ExpiresAt:   session.ExpiresAt,
 	})
@@ -225,51 +223,63 @@ func (b *oauthBroker) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (b *oauthBroker) startNotion(w http.ResponseWriter, r *http.Request) {
+func (b *oauthBroker) startOAuth(w http.ResponseWriter, r *http.Request) {
+	provider, ok := b.provider(actions.ProviderName(r.PathValue("provider")))
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "OAuth provider not found")
+		return
+	}
 	session, ok := b.session(r.URL.Query().Get("session_id"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "OAuth session not found")
+		return
+	}
+	if session.Provider != string(provider.descriptor.ID) {
+		writeError(w, http.StatusBadRequest, "provider_mismatch", "OAuth session provider does not match callback provider")
 		return
 	}
 	if time.Now().UTC().After(session.ExpiresAt) {
 		writeError(w, http.StatusGone, "expired", "OAuth session expired")
 		return
 	}
-	authURL, err := url.Parse(b.config.NotionAuthURL)
+	authURL, err := provider.broker.AuthURL(session.RedirectURI, session.State)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid_config", "invalid Notion authorization URL")
+		writeError(w, http.StatusInternalServerError, "invalid_config", "invalid authorization URL")
 		return
 	}
-	query := authURL.Query()
-	query.Set("client_id", b.config.NotionClientID)
-	query.Set("redirect_uri", session.RedirectURI)
-	query.Set("response_type", "code")
-	query.Set("owner", "user")
-	query.Set("state", session.State)
-	authURL.RawQuery = query.Encode()
 	// #nosec G107 -- redirect target is configured by the deployment operator.
-	http.Redirect(w, r, authURL.String(), http.StatusFound)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-func (b *oauthBroker) notionCallback(w http.ResponseWriter, r *http.Request) {
+func (b *oauthBroker) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	provider, ok := b.provider(actions.ProviderName(r.PathValue("provider")))
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "OAuth provider not found")
+		return
+	}
 	state := r.URL.Query().Get("state")
 	session, ok := b.sessionByState(state)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_state", "OAuth state is invalid or expired")
 		return
 	}
+	if session.Provider != string(provider.descriptor.ID) {
+		b.failSession(session, "provider mismatch")
+		writeError(w, http.StatusBadRequest, "provider_mismatch", "OAuth session provider does not match callback provider")
+		return
+	}
 	if providerErr := r.URL.Query().Get("error"); providerErr != "" {
 		b.failSession(session, providerErr)
-		writeError(w, http.StatusBadRequest, providerErr, "Notion authorization failed")
+		writeError(w, http.StatusBadRequest, providerErr, provider.descriptor.DisplayName+" authorization failed")
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		b.failSession(session, "missing code")
-		writeError(w, http.StatusBadRequest, "missing_code", "Notion callback did not include a code")
+		writeError(w, http.StatusBadRequest, "missing_code", "OAuth callback did not include a code")
 		return
 	}
-	tokens, err := b.exchangeNotionCode(r, session, code)
+	tokens, err := b.exchangeCode(r, provider, session, code)
 	if err != nil {
 		b.failSession(session, err.Error())
 		writeError(w, http.StatusBadGateway, "token_exchange_failed", err.Error())
@@ -277,12 +287,21 @@ func (b *oauthBroker) notionCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	b.completeSession(session, tokens)
 	writeOAuthSuccessPage(w, oauthSuccessPage{
-		Provider: notionOAuthProviderPage(),
+		Provider: oauthProviderPage{
+			Name: provider.descriptor.DisplayName,
+			Slug: string(provider.descriptor.ID),
+			Logo: provider.descriptor.Logo,
+		},
 	})
 }
 
-func (b *oauthBroker) refreshNotion(w http.ResponseWriter, r *http.Request) {
-	if err := b.requireNotionConfig(); err != nil {
+func (b *oauthBroker) refreshOAuth(w http.ResponseWriter, r *http.Request) {
+	provider, ok := b.provider(actions.ProviderName(r.PathValue("provider")))
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "OAuth provider not found")
+		return
+	}
+	if err := provider.broker.RequireConfig(); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "not_configured", err.Error())
 		return
 	}
@@ -295,10 +314,7 @@ func (b *oauthBroker) refreshNotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing_refresh_token", "refresh_token is required")
 		return
 	}
-	tokens, err := b.postNotionToken(r, notionTokenRequest{
-		GrantType:    "refresh_token",
-		RefreshToken: request.RefreshToken,
-	})
+	tokens, err := provider.broker.Refresh(r.Context(), request.RefreshToken)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "refresh_failed", err.Error())
 		return
@@ -306,8 +322,13 @@ func (b *oauthBroker) refreshNotion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokens)
 }
 
-func (b *oauthBroker) revokeNotion(w http.ResponseWriter, r *http.Request) {
-	if err := b.requireNotionConfig(); err != nil {
+func (b *oauthBroker) revokeOAuth(w http.ResponseWriter, r *http.Request) {
+	provider, ok := b.provider(actions.ProviderName(r.PathValue("provider")))
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "OAuth provider not found")
+		return
+	}
+	if err := provider.broker.RequireConfig(); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "not_configured", err.Error())
 		return
 	}
@@ -320,93 +341,22 @@ func (b *oauthBroker) revokeNotion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing_token", "token is required")
 		return
 	}
-	encoded, err := json.Marshal(request)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "encode_failed", err.Error())
-		return
-	}
-	// #nosec G107 -- Notion revoke URL is configured by the deployment operator.
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, b.config.NotionRevokeURL, bytes.NewReader(encoded))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "request_failed", err.Error())
-		return
-	}
-	b.setNotionAuthHeaders(req)
-	resp, err := b.config.HTTPClient.Do(req)
+	out, err := provider.broker.Revoke(r.Context(), request.Token)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "revoke_failed", err.Error())
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		writeError(w, http.StatusBadGateway, "revoke_failed", string(data))
-		return
-	}
-	var out revokeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		out = revokeResponse{Revoked: true}
-	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (b *oauthBroker) exchangeNotionCode(r *http.Request, session *oauthSession, code string) (credentials.OAuthTokens, error) {
-	return b.postNotionToken(r, notionTokenRequest{
-		GrantType:   "authorization_code",
-		Code:        code,
-		RedirectURI: session.RedirectURI,
-	})
+func (b *oauthBroker) exchangeCode(r *http.Request, provider oauthProvider, session *oauthSession, code string) (credentials.OAuthTokens, error) {
+	return provider.broker.ExchangeCode(r.Context(), code, session.RedirectURI)
 }
 
-func (b *oauthBroker) postNotionToken(r *http.Request, body notionTokenRequest) (credentials.OAuthTokens, error) {
-	// #nosec G117 -- refresh tokens must be sent to Notion's token endpoint for OAuth refresh.
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return credentials.OAuthTokens{}, err
-	}
-	// #nosec G107 -- Notion token URL is configured by the deployment operator.
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, b.config.NotionTokenURL, bytes.NewReader(encoded))
-	if err != nil {
-		return credentials.OAuthTokens{}, err
-	}
-	b.setNotionAuthHeaders(req)
-	resp, err := b.config.HTTPClient.Do(req)
-	if err != nil {
-		return credentials.OAuthTokens{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return credentials.OAuthTokens{}, fmt.Errorf("notion token endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	var token tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
-		return credentials.OAuthTokens{}, err
-	}
-	return token.credentials(), nil
-}
-
-func (b *oauthBroker) setNotionAuthHeaders(req *http.Request) {
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Notion-Version", b.config.NotionAPIVersion)
-	req.SetBasicAuth(b.config.NotionClientID, b.config.NotionSecret)
-}
-
-func (b *oauthBroker) requireNotionConfig() error {
-	if strings.TrimSpace(b.config.NotionClientID) == "" {
-		return fmt.Errorf("NOTION_CLIENT_ID is required")
-	}
-	if strings.TrimSpace(b.config.NotionSecret) == "" {
-		return fmt.Errorf("NOTION_CLIENT_SECRET is required")
-	}
-	if strings.TrimSpace(b.config.NotionAuthURL) == "" {
-		return fmt.Errorf("NOTION_AUTH_URL is required")
-	}
-	if strings.TrimSpace(b.config.NotionTokenURL) == "" {
-		return fmt.Errorf("NOTION_TOKEN_URL is required")
-	}
-	return nil
+func (b *oauthBroker) provider(id actions.ProviderName) (oauthProvider, bool) {
+	id = actions.ProviderName(strings.TrimSpace(string(id)))
+	provider, ok := b.providers[id]
+	return provider, ok
 }
 
 func (b *oauthBroker) session(id string) (*oauthSession, bool) {
@@ -459,53 +409,11 @@ func (b *oauthBroker) publicURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-func (b *oauthBroker) redirectURI(r *http.Request) string {
-	if b.config.NotionRedirect != "" {
-		return b.config.NotionRedirect
+func (b *oauthBroker) redirectURI(r *http.Request, provider oauthProvider) string {
+	if provider.config.RedirectURI != "" {
+		return provider.config.RedirectURI
 	}
-	return b.publicURL(r) + "/oauth/notion/callback"
-}
-
-type tokenResponse struct {
-	AccessToken          string `json:"access_token"`
-	RefreshToken         string `json:"refresh_token"`
-	TokenType            string `json:"token_type"`
-	ExpiresIn            int64  `json:"expires_in"`
-	BotID                string `json:"bot_id"`
-	WorkspaceID          string `json:"workspace_id"`
-	WorkspaceName        string `json:"workspace_name"`
-	WorkspaceIcon        string `json:"workspace_icon"`
-	DuplicatedTemplateID string `json:"duplicated_template_id"`
-}
-
-func (t tokenResponse) credentials() credentials.OAuthTokens {
-	extra := map[string]string{}
-	if t.BotID != "" {
-		extra["bot_id"] = t.BotID
-	}
-	if t.WorkspaceID != "" {
-		extra["workspace_id"] = t.WorkspaceID
-	}
-	if t.WorkspaceName != "" {
-		extra["workspace_name"] = t.WorkspaceName
-	}
-	if t.WorkspaceIcon != "" {
-		extra["workspace_icon"] = t.WorkspaceIcon
-	}
-	if t.DuplicatedTemplateID != "" {
-		extra["duplicated_template_id"] = t.DuplicatedTemplateID
-	}
-	tokens := credentials.OAuthTokens{
-		AccessToken:  t.AccessToken,
-		RefreshToken: t.RefreshToken,
-		TokenType:    firstNonEmpty(t.TokenType, "bearer"),
-		Scopes:       notion.DefaultCapabilities(),
-		Extra:        extra,
-	}
-	if t.ExpiresIn > 0 {
-		tokens.ExpiresAt = time.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)
-	}
-	return tokens
+	return b.publicURL(r) + "/oauth/" + url.PathEscape(string(provider.descriptor.ID)) + "/callback"
 }
 
 func randomHex(bytesLen int) (string, error) {
@@ -514,16 +422,6 @@ func randomHex(bytesLen int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

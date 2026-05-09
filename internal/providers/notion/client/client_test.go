@@ -1,4 +1,4 @@
-package notion
+package client
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 )
 
 func TestNormalizeIDAcceptsURLsAndCompactIDs(t *testing.T) {
+	t.Parallel()
 	tests := map[string]string{
 		"11111111111141118111111111111111":                                     "11111111-1111-4111-8111-111111111111",
 		"https://www.notion.so/Roadmap-11111111111141118111111111111111?pvs=4": "11111111-1111-4111-8111-111111111111",
@@ -28,6 +29,7 @@ func TestNormalizeIDAcceptsURLsAndCompactIDs(t *testing.T) {
 }
 
 func TestClientSendsNotionVersionAndBearerToken(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
 			t.Fatalf("authorization header mismatch: %q", got)
@@ -59,6 +61,7 @@ func TestClientSendsNotionVersionAndBearerToken(t *testing.T) {
 }
 
 func TestClientListsBlockChildren(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/blocks/11111111-1111-4111-8111-111111111111/children" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -95,6 +98,7 @@ func TestClientListsBlockChildren(t *testing.T) {
 }
 
 func TestClientRetrievesDataSource(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/data_sources/44444444-4444-4444-8444-444444444444" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -121,6 +125,7 @@ func TestClientRetrievesDataSource(t *testing.T) {
 }
 
 func TestClientMapsNotionErrors(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "2")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -154,6 +159,7 @@ func TestClientMapsNotionErrors(t *testing.T) {
 }
 
 func TestClientSearchAcceptsRichTextTitles(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/search" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -203,6 +209,7 @@ func TestClientSearchAcceptsRichTextTitles(t *testing.T) {
 }
 
 func TestClientSearchAllPaginatesAndSorts(t *testing.T) {
+	t.Parallel()
 	var requests []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any

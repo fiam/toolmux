@@ -1,35 +1,24 @@
-package server
+package server_test
 
 import (
 	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/fiam/supacli/internal/credentials"
-	"github.com/fiam/supacli/internal/testutil/fakeupstream"
+	"github.com/fiam/supacli/internal/providers/notion/notiontest"
+	"github.com/fiam/supacli/internal/testutil/supaclidtest"
 )
 
 func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
-	upstream := fakeupstream.New()
+	t.Parallel()
+	upstream := notiontest.NewUpstream()
 	defer upstream.Close()
-
-	handler := NewHandlerWithConfig(Config{
-		NotionClientID:   "client-id",
-		NotionSecret:     "client-secret",
-		NotionAuthURL:    upstream.URL + "/oauth/authorize",
-		NotionTokenURL:   upstream.URL + "/oauth/token",
-		NotionRevokeURL:  upstream.URL + "/oauth/revoke",
-		NotionAPIVersion: "2026-03-11",
-		HTTPClient:       upstream.Client(),
-		SessionTTL:       time.Minute,
-	})
-	supaclid := httptest.NewServer(handler)
-	defer supaclid.Close()
+	supaclid := supaclidtest.NewNotion(t, upstream.URL, upstream.Client())
 
 	session := createNotionSession(t, supaclid)
 	if session.AuthURL == "" {
@@ -109,16 +98,10 @@ func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 }
 
 func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
-	handler := NewHandlerWithConfig(Config{
-		NotionClientID:   "client-id",
-		NotionSecret:     "client-secret",
-		NotionAuthURL:    "https://notion.example.test/oauth/authorize",
-		NotionTokenURL:   "https://notion.example.test/oauth/token",
-		NotionAPIVersion: "2026-03-11",
-		SessionTTL:       time.Minute,
-	})
-	supaclid := httptest.NewServer(handler)
-	defer supaclid.Close()
+	t.Parallel()
+	config := supaclidtest.NotionConfig("https://notion.example.test", http.DefaultClient)
+	config.SessionTTL = time.Minute
+	supaclid := supaclidtest.New(t, config)
 
 	resp, err := supaclid.Client().Get(supaclid.URL + "/oauth/notion/callback?state=bad&code=code")
 	if err != nil {
@@ -130,7 +113,7 @@ func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
 	}
 }
 
-func createNotionSession(t *testing.T, server *httptest.Server) createSessionResponse {
+func createNotionSession(t *testing.T, server *supaclidtest.Server) createSessionResponse {
 	t.Helper()
 	body := bytes.NewBufferString(`{"provider":"notion"}`)
 	resp, err := server.Client().Post(server.URL+"/v1/oauth/sessions", "application/json", body)
@@ -148,7 +131,7 @@ func createNotionSession(t *testing.T, server *httptest.Server) createSessionRes
 	return session
 }
 
-func getNotionSession(t *testing.T, server *httptest.Server, sessionID string) sessionResponse {
+func getNotionSession(t *testing.T, server *supaclidtest.Server, sessionID string) sessionResponse {
 	t.Helper()
 	resp, err := server.Client().Get(server.URL + "/v1/oauth/sessions/" + sessionID)
 	if err != nil {
@@ -163,4 +146,23 @@ func getNotionSession(t *testing.T, server *httptest.Server, sessionID string) s
 		t.Fatal(err)
 	}
 	return session
+}
+
+type createSessionResponse struct {
+	SessionID   string    `json:"session_id"`
+	Provider    string    `json:"provider"`
+	Status      string    `json:"status"`
+	AuthURL     string    `json:"auth_url"`
+	RedirectURI string    `json:"redirect_uri"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+type sessionResponse struct {
+	SessionID string                   `json:"session_id"`
+	Provider  string                   `json:"provider"`
+	Status    string                   `json:"status"`
+	Error     string                   `json:"error,omitempty"`
+	ExpiresAt time.Time                `json:"expires_at"`
+	Tokens    *credentials.OAuthTokens `json:"tokens,omitempty"`
+	Extra     map[string]string        `json:"extra,omitempty"`
 }

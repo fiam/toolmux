@@ -1,102 +1,119 @@
 package providers
 
 import (
+	"maps"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 
-	"github.com/fiam/supacli/internal/policy"
-	"github.com/fiam/supacli/internal/providers/linear"
-	"github.com/fiam/supacli/internal/providers/notion"
+	"github.com/fiam/supacli/internal/actions"
 )
 
 type Provider struct {
-	ID          string
-	DisplayName string
-	AuthMode    string
-	Aliases     []string
-	Specs       []policy.CommandSpec
+	ID                 string
+	DisplayName        string
+	AuthMode           string
+	Aliases            []string
+	Tree               actions.Spec
+	Handlers           map[string]actions.Handler
+	Diagnostics        actions.DiagnosticsFunc
+	DefaultPermissions func() []string
+	BaseURLEnv         string
+	DefaultBaseURL     string
+	APIVersionEnv      string
+	DefaultAPIVersion  string
 }
 
-func Initial() []Provider {
-	return []Provider{
-		{
-			ID:          "notion",
-			DisplayName: "Notion",
-			AuthMode:    "brokered_local_custody",
-			Specs:       notion.CommandSpecs(),
-		},
-		{
-			ID:          "jira",
-			DisplayName: "Jira",
-			AuthMode:    "brokered_local_custody",
-			Specs: []policy.CommandSpec{
-				spec("jira.status", "jira", []string{"status", "jira"}, "connection", "status", "read", nil, nil),
-				spec("jira.doctor", "jira", []string{"doctor", "jira"}, "connection", "diagnose", "read", nil, nil),
-				spec("jira.sites.list", "jira", []string{"jira", "sites", "ls"}, "site", "list", "read", nil, []string{"read:jira-work"}),
-				spec("jira.issues.list", "jira", []string{"jira", "issues", "list"}, "issue", "list", "read", nil, []string{"read:jira-work"}),
-				spec("jira.issue.get", "jira", []string{"jira", "issue", "get"}, "issue", "read", "read", nil, []string{"read:jira-work"}),
-				spec("jira.issue.create", "jira", []string{"jira", "issue", "create"}, "issue", "create", "write", []string{"ticket-write"}, []string{"write:jira-work"}),
-				spec("jira.comment.add", "jira", []string{"jira", "comment", "add"}, "comment", "create", "write", []string{"comment-write"}, []string{"write:jira-work"}),
-			},
-		},
-		{
-			ID:          "slack",
-			DisplayName: "Slack",
-			AuthMode:    "native_pkce",
-			Specs: []policy.CommandSpec{
-				spec("slack.status", "slack", []string{"status", "slack"}, "connection", "status", "read", nil, nil),
-				spec("slack.doctor", "slack", []string{"doctor", "slack"}, "connection", "diagnose", "read", nil, nil),
-				spec("slack.conversations.list", "slack", []string{"slack", "conversations", "ls"}, "conversation", "list", "read", nil, []string{"channels:read"}),
-				spec("slack.message.send", "slack", []string{"slack", "message", "send"}, "message", "send", "write", []string{"external-send"}, []string{"chat:write"}),
-				spec("slack.search", "slack", []string{"slack", "search"}, "message", "search", "read", nil, []string{"search:read"}),
-			},
-		},
-		{
-			ID:          "linear",
-			DisplayName: "Linear",
-			AuthMode:    "native_pkce",
-			Specs:       linear.CommandSpecs(),
-		},
-		{
-			ID:          "google",
-			DisplayName: "Google",
-			AuthMode:    "native_pkce",
-			Aliases:     []string{"google-docs", "google-drive", "gmail"},
-			Specs: []policy.CommandSpec{
-				spec("google.status", "google", []string{"status", "google"}, "connection", "status", "read", nil, nil),
-				spec("google.doctor", "google", []string{"doctor", "google"}, "connection", "diagnose", "read", nil, nil),
-				spec("google.docs.create", "google-docs", []string{"google", "docs", "create"}, "document", "create", "write", []string{"content-write"}, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.docs.get", "google-docs", []string{"google", "docs", "get"}, "document", "read", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.docs.export", "google-docs", []string{"google", "docs", "export"}, "document", "read", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.docs.append", "google-docs", []string{"google", "docs", "append"}, "document", "update", "write", []string{"content-write"}, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.drive.upload", "google-drive", []string{"google", "drive", "upload"}, "file", "create", "write", []string{"file-write"}, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.drive.download", "google-drive", []string{"google", "drive", "download"}, "file", "read", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.drive.list", "google-drive", []string{"google", "drive", "ls"}, "file", "list", "read", nil, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("google.drive.folder.create", "google-drive", []string{"google", "drive", "folder", "create"}, "folder", "create", "write", []string{"file-write"}, []string{"https://www.googleapis.com/auth/drive.file"}),
-				spec("gmail.labels.list", "gmail", []string{"gmail", "labels", "ls"}, "label", "list", "read", nil, []string{"https://www.googleapis.com/auth/gmail.labels"}),
-				spec("gmail.labels.create", "gmail", []string{"gmail", "labels", "create"}, "label", "create", "write", []string{"mailbox-write"}, []string{"https://www.googleapis.com/auth/gmail.labels"}),
-				spec("gmail.send", "gmail", []string{"gmail", "send"}, "message", "send", "write", []string{"external-send"}, []string{"https://www.googleapis.com/auth/gmail.send"}),
-			},
-		},
+var registry = struct {
+	sync.RWMutex
+	byID  map[string]Provider
+	alias map[string]string
+}{
+	byID:  map[string]Provider{},
+	alias: map[string]string{},
+}
+
+func Register(provider Provider) {
+	provider = cloneProvider(provider)
+	provider.ID = strings.TrimSpace(provider.ID)
+	provider.DisplayName = strings.TrimSpace(provider.DisplayName)
+	provider.AuthMode = strings.TrimSpace(provider.AuthMode)
+	for i, alias := range provider.Aliases {
+		provider.Aliases[i] = strings.TrimSpace(alias)
 	}
+	provider.Aliases = slices.DeleteFunc(provider.Aliases, func(alias string) bool {
+		return alias == "" || alias == provider.ID
+	})
+	if provider.ID == "" {
+		panic("provider id is required")
+	}
+	if provider.DisplayName == "" {
+		panic("provider display name is required for " + provider.ID)
+	}
+	registry.Lock()
+	defer registry.Unlock()
+	if _, ok := registry.byID[provider.ID]; ok {
+		panic("provider already registered: " + provider.ID)
+	}
+	if owner, ok := registry.alias[provider.ID]; ok {
+		panic("provider id " + provider.ID + " conflicts with alias for " + owner)
+	}
+	for _, alias := range provider.Aliases {
+		if _, ok := registry.byID[alias]; ok {
+			panic("provider alias " + alias + " conflicts with registered provider id")
+		}
+		if owner, ok := registry.alias[alias]; ok {
+			panic("provider alias " + alias + " already registered for " + owner)
+		}
+	}
+	registry.byID[provider.ID] = provider
+	for _, alias := range provider.Aliases {
+		registry.alias[alias] = provider.ID
+	}
+}
+
+func ActionHandler(provider Provider, id string) (actions.Handler, bool) {
+	if provider.Handlers == nil {
+		return nil, false
+	}
+	handler, ok := provider.Handlers[id]
+	return handler, ok
 }
 
 func Lookup(id string) (Provider, bool) {
-	for _, provider := range Initial() {
-		if provider.ID == id {
-			return provider, true
-		}
-		if slices.Contains(provider.Aliases, id) {
-			return provider, true
-		}
+	id = strings.TrimSpace(id)
+	registry.RLock()
+	defer registry.RUnlock()
+	provider, ok := registry.byID[id]
+	if ok {
+		return cloneProvider(provider), true
 	}
-	return Provider{}, false
+	providerID, ok := registry.alias[id]
+	if !ok {
+		return Provider{}, false
+	}
+	provider, ok = registry.byID[providerID]
+	return cloneProvider(provider), ok
 }
 
-func CommandSpecs() []policy.CommandSpec {
-	var specs []policy.CommandSpec
-	for _, provider := range Initial() {
-		specs = append(specs, provider.Specs...)
+func All() []Provider {
+	registry.RLock()
+	defer registry.RUnlock()
+	providers := make([]Provider, 0, len(registry.byID))
+	for _, provider := range registry.byID {
+		providers = append(providers, cloneProvider(provider))
+	}
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].ID < providers[j].ID
+	})
+	return providers
+}
+
+func CommandSpecs() []actions.Spec {
+	var specs []actions.Spec
+	for _, provider := range All() {
+		specs = append(specs, ActionSpecs(provider)...)
 	}
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
@@ -104,15 +121,15 @@ func CommandSpecs() []policy.CommandSpec {
 	return specs
 }
 
-func spec(id, provider string, path []string, resource, action, effect string, risk, scopes []string) policy.CommandSpec {
-	return policy.CommandSpec{
-		ID:       id,
-		Path:     path,
-		Provider: provider,
-		Resource: resource,
-		Action:   action,
-		Effect:   effect,
-		Risk:     risk,
-		Scopes:   scopes,
+func ActionSpecs(provider Provider) []actions.Spec {
+	if len(provider.Tree.Children) == 0 {
+		return nil
 	}
+	return actions.LeafSpecs(actions.ProviderName(provider.ID), provider.Tree)
+}
+
+func cloneProvider(provider Provider) Provider {
+	provider.Aliases = slices.Clone(provider.Aliases)
+	provider.Handlers = maps.Clone(provider.Handlers)
+	return provider
 }

@@ -7,28 +7,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/fiam/supacli/internal/credentials"
-	"github.com/fiam/supacli/internal/output"
-	"github.com/fiam/supacli/internal/policy"
-	"github.com/fiam/supacli/internal/providers"
-	"github.com/fiam/supacli/internal/providers/notion"
-	"github.com/fiam/supacli/internal/version"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+
+	"github.com/fiam/supacli/internal/actions"
+	"github.com/fiam/supacli/internal/credentials"
+	"github.com/fiam/supacli/internal/output"
+	"github.com/fiam/supacli/internal/policy"
+	"github.com/fiam/supacli/internal/providers"
+	"github.com/fiam/supacli/internal/version"
 )
 
 type options struct {
@@ -38,17 +37,20 @@ type options struct {
 	profile     string
 	account     string
 	policy      string
+	readOnly    bool
 	credentials func() (credentials.Store, error)
 	httpClient  *http.Client
-	notionBase  string
-	notionAPI   string
+	providerURL map[string]string
+	providerAPI map[string]string
 	supaclidURL string
 }
 
 type Dependencies struct {
 	Credentials credentials.Store
 	HTTPClient  *http.Client
-	NotionURL   string
+	Env         func(string) string
+	ProviderURL map[string]string
+	ProviderAPI map[string]string
 	SupaclidURL string
 }
 
@@ -68,9 +70,20 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	if opts.httpClient == nil {
 		opts.httpClient = http.DefaultClient
 	}
-	opts.notionBase = firstNonEmpty(deps.NotionURL, os.Getenv("SUPACLI_NOTION_API_URL"), notion.DefaultBaseURL)
-	opts.notionAPI = firstNonEmpty(os.Getenv("SUPACLI_NOTION_VERSION"), notion.DefaultVersion)
-	opts.supaclidURL = strings.TrimRight(firstNonEmpty(deps.SupaclidURL, os.Getenv("SUPACLI_SUPACLID_URL"), "https://api.supacli.com"), "/")
+	env := deps.Env
+	if env == nil {
+		env = os.Getenv
+	}
+	opts.providerURL = maps.Clone(deps.ProviderURL)
+	if opts.providerURL == nil {
+		opts.providerURL = map[string]string{}
+	}
+	opts.providerAPI = maps.Clone(deps.ProviderAPI)
+	if opts.providerAPI == nil {
+		opts.providerAPI = map[string]string{}
+	}
+	opts.supaclidURL = strings.TrimRight(firstNonEmpty(deps.SupaclidURL, env("SUPACLI_SUPACLID_URL"), "https://api.supacli.com"), "/")
+	configureProviders(opts, env)
 
 	root := &cobra.Command{
 		Use:           "supacli",
@@ -86,6 +99,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.profile, "profile", "default", "Supacli profile")
 	root.PersistentFlags().StringVar(&opts.account, "account", "", "provider account or workspace")
 	root.PersistentFlags().StringVar(&opts.policy, "policy", "", "policy file path")
+	root.PersistentFlags().BoolVar(&opts.readOnly, "read-only", false, "deny actions with remote or local write effects")
 
 	root.AddCommand(versionCommand())
 	root.AddCommand(connectCommand(opts))
@@ -94,10 +108,20 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(doctorCommand(opts))
 	root.AddCommand(connectionsCommand())
 	root.AddCommand(policyCommand(opts))
-	registerNotionCommands(root, opts)
-	registerProviderCommands(root, opts)
+	registerActionCommands(root, opts)
 
 	return root
+}
+
+func configureProviders(opts *options, env func(string) string) {
+	for _, provider := range providers.All() {
+		if provider.BaseURLEnv != "" || provider.DefaultBaseURL != "" {
+			opts.providerURL[provider.ID] = firstNonEmpty(opts.providerURL[provider.ID], env(provider.BaseURLEnv), provider.DefaultBaseURL)
+		}
+		if provider.APIVersionEnv != "" || provider.DefaultAPIVersion != "" {
+			opts.providerAPI[provider.ID] = firstNonEmpty(opts.providerAPI[provider.ID], env(provider.APIVersionEnv), provider.DefaultAPIVersion)
+		}
+	}
 }
 
 func versionCommand() *cobra.Command {
@@ -108,6 +132,16 @@ func versionCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "supacli %s (%s, %s)\n", version.Version, version.Commit, version.Date)
 		},
 	}
+}
+
+type connectProviderOptions struct {
+	AuthURLOnly bool
+	NoBrowser   bool
+	Timeout     time.Duration
+}
+
+type disconnectProviderOptions struct {
+	Yes bool
 }
 
 func connectCommand(opts *options) *cobra.Command {
@@ -123,20 +157,15 @@ func connectCommand(opts *options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("unknown provider %q", args[0])
 			}
-			spec := policy.CommandSpec{
-				ID:       provider.ID + ".connect",
-				Path:     []string{"connect", args[0]},
-				Provider: provider.ID,
-				Resource: "connection",
-				Action:   "connect",
-				Effect:   "write",
-				Risk:     []string{"credential-access"},
-			}
-			if err := authorize(cmd, opts, spec, nil); err != nil {
+			if err := authorize(cmd, opts, providerConnectSpec(provider, args[0]), nil); err != nil {
 				return err
 			}
-			if provider.ID == "notion" {
-				return connectNotion(cmd, opts, opts.supaclidURL, authURLOnly, noBrowser, timeout)
+			if provider.AuthMode == "brokered_local_custody" {
+				return connectBrokeredProvider(cmd, opts, provider, connectProviderOptions{
+					AuthURLOnly: authURLOnly,
+					NoBrowser:   noBrowser,
+					Timeout:     timeout,
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "connect %s: not implemented yet\n", provider.DisplayName)
 			return nil
@@ -159,20 +188,11 @@ func disconnectCommand(opts *options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("unknown provider %q", args[0])
 			}
-			spec := policy.CommandSpec{
-				ID:       provider.ID + ".disconnect",
-				Path:     []string{"disconnect", args[0]},
-				Provider: provider.ID,
-				Resource: "connection",
-				Action:   "disconnect",
-				Effect:   "write",
-				Risk:     []string{"credential-revoke"},
-			}
-			if err := authorize(cmd, opts, spec, nil); err != nil {
+			if err := authorize(cmd, opts, providerDisconnectSpec(provider, args[0]), nil); err != nil {
 				return err
 			}
-			if provider.ID == "notion" {
-				return disconnectNotion(cmd, opts, opts.supaclidURL, yes)
+			if provider.AuthMode == "brokered_local_custody" {
+				return disconnectBrokeredProvider(cmd, opts, provider, disconnectProviderOptions{Yes: yes})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "disconnect %s: not implemented yet\n", provider.DisplayName)
 			return nil
@@ -180,6 +200,175 @@ func disconnectCommand(opts *options) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm remote token revocation and local credential deletion")
 	return cmd
+}
+
+type oauthSessionResponse struct {
+	SessionID   string                   `json:"session_id"`
+	Provider    string                   `json:"provider"`
+	Status      string                   `json:"status"`
+	AuthURL     string                   `json:"auth_url"`
+	RedirectURI string                   `json:"redirect_uri"`
+	Error       string                   `json:"error"`
+	Tokens      *credentials.OAuthTokens `json:"tokens"`
+	ExpiresAt   time.Time                `json:"expires_at"`
+}
+
+func connectBrokeredProvider(cmd *cobra.Command, opts *options, provider providers.Provider, options connectProviderOptions) error {
+	ui := newConnectUI(cmd, opts)
+	serverURL := strings.TrimRight(opts.supaclidURL, "/")
+	if serverURL == "" {
+		return fmt.Errorf("supaclid URL is required")
+	}
+	ui.status("Creating %s OAuth session", provider.DisplayName)
+	payload, err := json.Marshal(map[string]string{"provider": provider.ID, "profile": opts.profile, "account": opts.account})
+	if err != nil {
+		return err
+	}
+	// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, serverURL+"/v1/oauth/sessions", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := opts.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("create %s OAuth session: status %d: %s", provider.DisplayName, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var session oauthSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		return err
+	}
+	if session.AuthURL == "" {
+		return fmt.Errorf("supaclid did not return a %s authorization URL", provider.DisplayName)
+	}
+	ui.done("Created %s OAuth session", provider.DisplayName)
+	fmt.Fprintf(cmd.OutOrStdout(), "open this URL to connect %s:\n%s\n", provider.DisplayName, session.AuthURL)
+	if session.RedirectURI != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s redirect URI:\n%s\n", provider.DisplayName, session.RedirectURI)
+	}
+	if options.AuthURLOnly {
+		return nil
+	}
+	if ui.interactive && !options.NoBrowser {
+		if err := openURL(session.AuthURL); err != nil {
+			ui.warn("Could not open browser automatically: %v", err)
+		} else {
+			ui.status("Opened browser for %s authorization", provider.DisplayName)
+		}
+	}
+	deadline := time.Now().Add(options.Timeout)
+	for time.Now().Before(deadline) {
+		ui.spin("Waiting for " + provider.DisplayName + " authorization")
+		polled, err := pollOAuthSession(cmd.Context(), opts, serverURL, session.SessionID)
+		if err != nil {
+			ui.stop()
+			return err
+		}
+		switch polled.Status {
+		case "complete":
+			ui.done("%s authorization complete", provider.DisplayName)
+			if polled.Tokens == nil {
+				return fmt.Errorf("%s OAuth session completed without token handoff", strings.ToLower(provider.DisplayName))
+			}
+			store, err := opts.credentials()
+			if err != nil {
+				return err
+			}
+			if err := store.SaveOAuthTokens(cmd.Context(), providerCredentialRef(opts, provider.ID), *polled.Tokens); err != nil {
+				return err
+			}
+			workspace := polled.Tokens.Extra["workspace_name"]
+			if workspace == "" {
+				workspace = polled.Tokens.Extra["workspace_id"]
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "connected %s: %s\n", provider.DisplayName, firstNonEmpty(workspace, "default"))
+			return nil
+		case "failed", "expired":
+			ui.stop()
+			return fmt.Errorf("%s OAuth session %s: %s", strings.ToLower(provider.DisplayName), polled.Status, polled.Error)
+		}
+		select {
+		case <-cmd.Context().Done():
+			ui.stop()
+			return cmd.Context().Err()
+		case <-time.After(time.Second):
+		}
+	}
+	ui.stop()
+	return fmt.Errorf("timed out waiting for %s OAuth completion", provider.DisplayName)
+}
+
+func disconnectBrokeredProvider(cmd *cobra.Command, opts *options, provider providers.Provider, options disconnectProviderOptions) error {
+	if !options.Yes {
+		return fmt.Errorf("refusing to disconnect %s without --yes", provider.DisplayName)
+	}
+	store, err := opts.credentials()
+	if err != nil {
+		return err
+	}
+	ref := providerCredentialRef(opts, provider.ID)
+	tokens, err := store.LoadOAuthTokens(cmd.Context(), ref)
+	if err != nil {
+		return err
+	}
+	serverURL := strings.TrimRight(opts.supaclidURL, "/")
+	if serverURL != "" && tokens.AccessToken != "" {
+		payload, err := json.Marshal(map[string]string{"token": tokens.AccessToken})
+		if err != nil {
+			return err
+		}
+		// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
+		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, serverURL+"/v1/oauth/"+provider.ID+"/revoke", bytes.NewReader(payload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := opts.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		if err := resp.Body.Close(); err != nil {
+			return err
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("revoke %s token: status %d", provider.DisplayName, resp.StatusCode)
+		}
+	}
+	if err := store.DeleteOAuthTokens(cmd.Context(), ref); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "disconnected %s\n", provider.DisplayName)
+	return nil
+}
+
+func pollOAuthSession(ctx context.Context, opts *options, serverURL, sessionID string) (oauthSessionResponse, error) {
+	// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/v1/oauth/sessions/"+sessionID, nil)
+	if err != nil {
+		return oauthSessionResponse{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := opts.httpClient.Do(req)
+	if err != nil {
+		return oauthSessionResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return oauthSessionResponse{}, fmt.Errorf("poll OAuth session: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var session oauthSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		return oauthSessionResponse{}, err
+	}
+	return session, nil
 }
 
 func connectionsCommand() *cobra.Command {
@@ -197,21 +386,7 @@ func connectionsCommand() *cobra.Command {
 	return cmd
 }
 
-type providerStatus struct {
-	Provider      string            `json:"provider"`
-	DisplayName   string            `json:"display_name"`
-	Profile       string            `json:"profile"`
-	Account       string            `json:"account"`
-	Connected     bool              `json:"connected"`
-	TokenType     string            `json:"token_type,omitempty"`
-	ExpiresAt     time.Time         `json:"expires_at,omitzero"`
-	Scopes        []string          `json:"scopes,omitempty"`
-	Permissions   []string          `json:"permissions,omitempty"`
-	Extra         map[string]string `json:"extra,omitempty"`
-	WorkspaceID   string            `json:"workspace_id,omitempty"`
-	WorkspaceName string            `json:"workspace_name,omitempty"`
-	Message       string            `json:"message,omitempty"`
-}
+type providerStatus = actions.ConnectionStatus
 
 func statusCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
@@ -267,7 +442,7 @@ func statusCommand(opts *options) *cobra.Command {
 
 func selectedProviders(args []string) ([]providers.Provider, error) {
 	if len(args) == 0 {
-		return providers.Initial(), nil
+		return providers.All(), nil
 	}
 	selected := make([]providers.Provider, 0, len(args))
 	seen := make(map[string]bool, len(args))
@@ -285,34 +460,59 @@ func selectedProviders(args []string) ([]providers.Provider, error) {
 	return selected, nil
 }
 
-type providerDiagnostic struct {
-	Provider    string            `json:"provider,omitempty"`
-	Check       string            `json:"check"`
-	Status      string            `json:"status"`
-	Message     string            `json:"message"`
-	Remediation string            `json:"remediation,omitempty"`
-	Details     map[string]string `json:"details,omitempty"`
-}
+type providerDiagnostic = actions.Diagnostic
 
 func providerStatusSpec(provider providers.Provider) policy.CommandSpec {
 	return policy.CommandSpec{
-		ID:       provider.ID + ".status",
-		Path:     []string{"status", provider.ID},
-		Provider: provider.ID,
-		Resource: "connection",
-		Action:   "status",
-		Effect:   "read",
+		ID:           provider.ID + ".status",
+		Path:         []string{"status", provider.ID},
+		Provider:     provider.ID,
+		Resource:     string(actions.ResourceConnection),
+		Action:       string(actions.VerbStatus),
+		Effect:       string(actions.EffectRead),
+		RemoteEffect: string(actions.EffectRead),
+		LocalEffect:  string(actions.EffectNone),
 	}
 }
 
 func providerDoctorSpec(provider providers.Provider) policy.CommandSpec {
 	return policy.CommandSpec{
-		ID:       provider.ID + ".doctor",
-		Path:     []string{"doctor", provider.ID},
-		Provider: provider.ID,
-		Resource: "connection",
-		Action:   "diagnose",
-		Effect:   "read",
+		ID:           provider.ID + ".doctor",
+		Path:         []string{"doctor", provider.ID},
+		Provider:     provider.ID,
+		Resource:     string(actions.ResourceConnection),
+		Action:       string(actions.VerbDiagnose),
+		Effect:       string(actions.EffectRead),
+		RemoteEffect: string(actions.EffectRead),
+		LocalEffect:  string(actions.EffectNone),
+	}
+}
+
+func providerConnectSpec(provider providers.Provider, pathProvider string) policy.CommandSpec {
+	return policy.CommandSpec{
+		ID:           provider.ID + ".connect",
+		Path:         []string{"connect", pathProvider},
+		Provider:     provider.ID,
+		Resource:     string(actions.ResourceConnection),
+		Action:       string(actions.VerbConnect),
+		Effect:       string(actions.EffectWrite),
+		RemoteEffect: string(actions.EffectNone),
+		LocalEffect:  string(actions.EffectWrite),
+		Risk:         []string{"credential-access"},
+	}
+}
+
+func providerDisconnectSpec(provider providers.Provider, pathProvider string) policy.CommandSpec {
+	return policy.CommandSpec{
+		ID:           provider.ID + ".disconnect",
+		Path:         []string{"disconnect", pathProvider},
+		Provider:     provider.ID,
+		Resource:     string(actions.ResourceConnection),
+		Action:       string(actions.VerbDisconnect),
+		Effect:       string(actions.EffectWrite),
+		RemoteEffect: string(actions.EffectWrite),
+		LocalEffect:  string(actions.EffectWrite),
+		Risk:         []string{"credential-revoke"},
 	}
 }
 
@@ -438,8 +638,9 @@ func credentialStoreDiagnostic(ctx context.Context, store credentials.Store) pro
 
 func doctorProvider(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) []providerDiagnostic {
 	diagnostics, status := genericProviderDiagnostics(ctx, opts, store, provider)
-	if provider.ID == "notion" {
-		diagnostics = append(diagnostics, notionProviderDiagnostics(ctx, opts, status)...)
+	if provider.Diagnostics != nil {
+		actionCtx := actionExecutionContext(ctx, opts, store, provider)
+		diagnostics = append(diagnostics, provider.Diagnostics(ctx, actionCtx, status)...)
 	}
 	return diagnostics
 }
@@ -491,51 +692,12 @@ func genericProviderDiagnostics(ctx context.Context, opts *options, store creden
 	return diagnostics, status
 }
 
-func notionProviderDiagnostics(ctx context.Context, opts *options, status providerStatus) []providerDiagnostic {
-	diagnostics := []providerDiagnostic{{
-		Provider: "notion",
-		Check:    "supaclid",
-		Status:   "ok",
-		Message:  opts.supaclidURL,
-	}}
-	if !status.Connected {
-		return diagnostics
-	}
-	client, err := notionClient(ctx, opts)
-	if err != nil {
-		return append(diagnostics, providerDiagnostic{
-			Provider:    "notion",
-			Check:       "api",
-			Status:      "fail",
-			Message:     err.Error(),
-			Remediation: "Run `supacli connect notion` to refresh the local connection.",
-		})
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if _, err := client.Search(probeCtx, notion.SearchRequest{PageSize: 1}); err != nil {
-		return append(diagnostics, providerDiagnostic{
-			Provider:    "notion",
-			Check:       "api",
-			Status:      "fail",
-			Message:     err.Error(),
-			Remediation: "Check that the Notion connection still has access to at least one selected page or data source.",
-		})
-	}
-	return append(diagnostics, providerDiagnostic{
-		Provider: "notion",
-		Check:    "api",
-		Status:   "ok",
-		Message:  "search endpoint reachable",
-	})
-}
-
 func providerPermissions(provider providers.Provider, tokens credentials.OAuthTokens) []string {
 	if len(tokens.Scopes) > 0 {
 		return append([]string(nil), tokens.Scopes...)
 	}
-	if provider.ID == "notion" {
-		return notion.DefaultCapabilities()
+	if provider.DefaultPermissions != nil {
+		return provider.DefaultPermissions()
 	}
 	return nil
 }
@@ -561,7 +723,7 @@ func missingProviderPermissions(provider providers.Provider, permissions []strin
 func requiredProviderPermissions(provider providers.Provider) []string {
 	seen := map[string]bool{}
 	var required []string
-	for _, spec := range provider.Specs {
+	for _, spec := range providers.ActionSpecs(provider) {
 		for _, scope := range spec.Scopes {
 			if seen[scope] {
 				continue
@@ -681,1078 +843,195 @@ func policyCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-func registerNotionCommands(root *cobra.Command, opts *options) {
-	cmd := &cobra.Command{
-		Use:   "notion",
-		Short: "Operate Notion pages and data sources",
+func registerActionCommands(root *cobra.Command, opts *options) {
+	for _, provider := range providers.All() {
+		if len(provider.Tree.Children) == 0 {
+			continue
+		}
+		registerActionNode(root, opts, actions.ProviderName(provider.ID), provider.Tree, nil)
 	}
-	cmd.AddCommand(notionSearchCommand(opts))
-	cmd.AddCommand(notionPageCommand(opts))
-	cmd.AddCommand(notionDataSourceCommand(opts))
-	cmd.AddCommand(notionDatabaseCommand(opts))
-	root.AddCommand(cmd)
 }
 
-func notionSearchCommand(opts *options) *cobra.Command {
-	var query string
-	var objectType string
-	var limit int
-	var sortBy string
-	var direction string
+func registerActionNode(parent *cobra.Command, opts *options, provider actions.ProviderName, node actions.Spec, parentPath []string) {
+	resolved := actions.Resolve(provider, node, parentPath)
+	if len(node.Children) > 0 {
+		group := actionGroupCommand(resolved)
+		parent.AddCommand(group)
+		for _, child := range node.Children {
+			registerActionNode(group, opts, provider, child, resolved.Path)
+		}
+		return
+	}
+	if resolved.ID == "" {
+		return
+	}
+	parent.AddCommand(actionCommand(opts, resolved))
+}
+
+func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
+	use := spec.Use
+	if use == "" {
+		use = spec.Path[len(spec.Path)-1]
+	}
+	short := spec.Short
+	if short == "" {
+		short = actionShort(spec)
+	}
 	cmd := &cobra.Command{
-		Use:   "search [query]",
-		Short: "Search Notion pages and data sources shared with Supacli",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     use,
+		Aliases: spec.Aliases,
+		Short:   short,
+		Args:    actionArgs(spec),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.search"), args); err != nil {
+			if err := authorize(cmd, opts, spec, args); err != nil {
 				return err
 			}
-			effectiveQuery := query
-			if effectiveQuery == "" && len(args) > 0 {
-				effectiveQuery = args[0]
+			provider, ok := providers.Lookup(spec.Provider)
+			if !ok {
+				return fmt.Errorf("unknown provider %q for %s", spec.Provider, spec.ID)
 			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			request := notion.SearchRequest{
-				Query:      effectiveQuery,
-				ObjectType: objectType,
-			}
-			if strings.TrimSpace(sortBy) != "" && strings.TrimSpace(sortBy) != "none" {
-				request.Sort = &notion.SearchSort{Timestamp: sortBy, Direction: direction}
-			}
-			results, err := client.SearchAll(cmd.Context(), request, limit)
-			if err != nil {
-				return err
-			}
-			return writeValue(cmd, opts, results, func(w io.Writer) {
-				human := humanOutputOptions(cmd, opts)
-				rows := make([][]string, 0, len(results.Results))
-				for _, result := range results.Results {
-					status := "active"
-					if result.InTrash {
-						status = "trashed"
-					}
-					rows = append(rows, []string{
-						output.Value(result.Title),
-						result.ID,
-						output.Value(result.URL),
-						result.Object,
-						output.StatusBadge(human, status),
-						output.Value(result.LastEditedTime),
-					})
-				}
-				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Title", "ID", "URL", "Type", "Status", "Last Edited"},
-					Rows:    rows,
-					Empty:   "no Notion results",
-				})
-			})
-		},
-	}
-	cmd.Flags().StringVar(&query, "query", "", "title query")
-	cmd.Flags().StringVar(&objectType, "type", "all", "result type: all, page, data_source")
-	cmd.Flags().IntVar(&limit, "limit", 20, "maximum results")
-	cmd.Flags().StringVar(&sortBy, "sort", "", "sort: edited, none")
-	cmd.Flags().StringVar(&direction, "direction", "desc", "sort direction: asc, desc")
-	return cmd
-}
-
-func notionPageCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "page",
-		Short: "Read and mutate Notion pages",
-	}
-	cmd.AddCommand(notionPageGetCommand(opts))
-	cmd.AddCommand(notionPageReadCommand(opts))
-	cmd.AddCommand(notionPageLinksCommand(opts))
-	cmd.AddCommand(notionPageOpenCommand(opts))
-	cmd.AddCommand(notionPageChildrenCommand(opts))
-	cmd.AddCommand(notionPageTreeCommand(opts))
-	cmd.AddCommand(notionPageDoctorCommand(opts))
-	cmd.AddCommand(notionPageMarkdownCommand(opts))
-	cmd.AddCommand(notionPageCreateCommand(opts))
-	cmd.AddCommand(notionPageUpdateCommand(opts))
-	cmd.AddCommand(notionPageContentCommand(opts))
-	cmd.AddCommand(notionPageDeleteCommand(opts))
-	cmd.AddCommand(notionPageRestoreCommand(opts))
-	cmd.AddCommand(notionPageMoveCommand(opts))
-	return cmd
-}
-
-func notionPageGetCommand(opts *options) *cobra.Command {
-	var format string
-	var includeTranscript bool
-	var filterProperties []string
-	cmd := &cobra.Command{
-		Use:   "get <page>",
-		Short: "Retrieve a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.get"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			switch format {
-			case "properties":
-				page, err := client.RetrievePage(cmd.Context(), pageID, filterProperties)
+			handler, ok := providers.ActionHandler(provider, spec.ID)
+			if ok {
+				store, err := opts.credentials()
 				if err != nil {
 					return err
 				}
-				return writePage(cmd, opts, page)
-			case "markdown":
-				markdown, err := client.RetrievePageMarkdown(cmd.Context(), pageID, includeTranscript)
+				execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
+				execCtx.Interactive = interactiveCommand(cmd, opts)
+				execCtx.SelectString = selectString(cmd)
+				execCtx.SelectInteger = selectInteger(cmd)
+				result, err := handler(execCtx, actions.Invocation{
+					Spec:  spec,
+					Args:  append([]string(nil), args...),
+					Flags: metadataFlagValues(cmd, spec),
+				})
 				if err != nil {
 					return err
 				}
-				return writeMarkdown(cmd, opts, markdown)
-			case "full":
-				page, err := client.RetrievePage(cmd.Context(), pageID, filterProperties)
-				if err != nil {
-					return err
-				}
-				markdown, err := client.RetrievePageMarkdown(cmd.Context(), pageID, includeTranscript)
-				if err != nil {
-					return err
-				}
-				return writeValue(cmd, opts, map[string]any{"page": page, "markdown": markdown}, func(w io.Writer) {
-					fmt.Fprintf(w, "%s %s\n\n%s\n", page.ID, firstNonEmpty(page.Title(), page.URL), markdown.Markdown)
-				})
-			default:
-				return fmt.Errorf("--format must be properties, markdown, or full")
+				return writeActionResult(cmd, opts, execCtx, result)
 			}
-		},
-	}
-	cmd.Flags().StringVar(&format, "format", "properties", "format: properties, markdown, full")
-	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts in markdown")
-	cmd.Flags().StringSliceVar(&filterProperties, "filter-property", nil, "page property to include")
-	return cmd
-}
-
-type notionPageRead struct {
-	Page     notion.Page         `json:"page"`
-	Markdown notion.PageMarkdown `json:"markdown"`
-}
-
-type notionPageLink struct {
-	Index        int    `json:"index"`
-	Label        string `json:"label"`
-	URL          string `json:"url"`
-	Kind         string `json:"kind"`
-	NotionPageID string `json:"notion_page_id,omitempty"`
-}
-
-type notionPageChild struct {
-	Depth       int    `json:"depth"`
-	Title       string `json:"title"`
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	URL         string `json:"url,omitempty"`
-	HasChildren bool   `json:"has_children"`
-}
-
-func notionPageReadCommand(opts *options) *cobra.Command {
-	var includeTranscript bool
-	var follow bool
-	cmd := &cobra.Command{
-		Use:   "read <page>",
-		Short: "Read a Notion page in the terminal",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.read"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			result, err := retrieveNotionPageRead(cmd.Context(), client, pageID, includeTranscript)
-			if err != nil {
-				return err
-			}
-			if follow {
-				if !interactiveCommand(cmd, opts) {
-					return fmt.Errorf("--follow requires table output with interactive stdin, stdout, and stderr")
-				}
-				return followNotionPageLinks(cmd, opts, client, result, includeTranscript)
-			}
-			return writePageRead(cmd, opts, result)
-		},
-	}
-	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
-	cmd.Flags().BoolVar(&follow, "follow", false, "choose a link after reading; Notion links open in supacli, external links open in the browser")
-	return cmd
-}
-
-func notionPageLinksCommand(opts *options) *cobra.Command {
-	var includeTranscript bool
-	cmd := &cobra.Command{
-		Use:   "links <page>",
-		Short: "List links from a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.links"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			markdown, err := client.RetrievePageMarkdown(cmd.Context(), pageID, includeTranscript)
-			if err != nil {
-				return err
-			}
-			links := notionPageLinksFromMarkdown(markdown.Markdown)
-			return writeValue(cmd, opts, links, func(w io.Writer) {
-				human := humanOutputOptions(cmd, opts)
-				rows := make([][]string, 0, len(links))
-				for _, link := range links {
-					rows = append(rows, []string{
-						strconv.Itoa(link.Index),
-						output.Value(link.Label),
-						output.Value(link.Kind),
-						output.Value(link.URL),
-						output.Value(link.NotionPageID),
-					})
-				}
-				output.RenderTable(w, human, output.Table{
-					Headers: []string{"#", "Label", "Kind", "URL", "Notion Page"},
-					Rows:    rows,
-					Empty:   "no links on this page",
-				})
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
-	return cmd
-}
-
-func notionPageOpenCommand(opts *options) *cobra.Command {
-	var urlOnly bool
-	cmd := &cobra.Command{
-		Use:   "open <page>",
-		Short: "Open a Notion page in the browser",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.open"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.RetrievePage(cmd.Context(), pageID, nil)
-			if err != nil {
-				return err
-			}
-			pageURL := firstNonEmpty(page.URL, page.PublicURL, notionPageWebURL(page.ID))
-			if pageURL == "" {
-				return fmt.Errorf("Notion page %s has no URL", page.ID)
-			}
-			if urlOnly || opts.output != "table" {
-				return writeValue(cmd, opts, map[string]string{"id": page.ID, "url": pageURL}, func(w io.Writer) {
-					fmt.Fprintln(w, pageURL)
-				})
-			}
-			if err := openURL(pageURL); err != nil {
-				return fmt.Errorf("open Notion page %q: %w", pageURL, err)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), pageURL)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: not implemented yet\n", spec.ID)
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&urlOnly, "url-only", false, "print the page URL without opening a browser")
+	addMetadataFlags(cmd, spec)
 	return cmd
 }
 
-func notionPageChildrenCommand(opts *options) *cobra.Command {
-	var limit int
-	cmd := &cobra.Command{
-		Use:   "children <page>",
-		Short: "List child pages under a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.children"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			children, err := collectNotionPageChildren(cmd.Context(), client, pageID, 1, limit)
-			if err != nil {
-				return err
-			}
-			return writeNotionPageChildren(cmd, opts, children, "no child pages")
-		},
+func actionGroupCommand(group actions.Spec) *cobra.Command {
+	use := group.Use
+	if use == "" {
+		use = group.Segment
 	}
-	cmd.Flags().IntVar(&limit, "limit", 100, "maximum child pages")
-	return cmd
-}
-
-func notionPageTreeCommand(opts *options) *cobra.Command {
-	var depth int
-	var limit int
-	cmd := &cobra.Command{
-		Use:   "tree <page>",
-		Short: "List nested child pages under a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.tree"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			children, err := collectNotionPageChildren(cmd.Context(), client, pageID, depth, limit)
-			if err != nil {
-				return err
-			}
-			return writeNotionPageChildren(cmd, opts, children, "no child pages")
-		},
+	short := group.Short
+	if short == "" {
+		short = "Policy-aware command group"
 	}
-	cmd.Flags().IntVar(&depth, "depth", 3, "maximum child-page depth")
-	cmd.Flags().IntVar(&limit, "limit", 100, "maximum child pages")
-	return cmd
-}
-
-func notionPageDoctorCommand(opts *options) *cobra.Command {
-	var includeTranscript bool
-	cmd := &cobra.Command{
-		Use:   "doctor <page>",
-		Short: "Check Notion page markdown export fidelity",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.doctor"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			result, err := retrieveNotionPageRead(cmd.Context(), client, pageID, includeTranscript)
-			if err != nil {
-				return err
-			}
-			return writeDiagnostics(cmd, opts, notionPageDiagnostics(result))
-		},
+	return &cobra.Command{
+		Use:                use,
+		Aliases:            group.Aliases,
+		Short:              short,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	}
-	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
-	return cmd
 }
 
-func notionPageMarkdownCommand(opts *options) *cobra.Command {
-	var includeTranscript bool
-	cmd := &cobra.Command{
-		Use:   "markdown <page>",
-		Short: "Export a Notion page as raw markdown",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.markdown"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			markdown, err := client.RetrievePageMarkdown(cmd.Context(), pageID, includeTranscript)
-			if err != nil {
-				return err
-			}
-			return writeMarkdown(cmd, opts, markdown)
-		},
+func actionArgs(spec policy.CommandSpec) cobra.PositionalArgs {
+	minimum := spec.Args.Min
+	maximum := spec.Args.Max
+	if maximum < 0 {
+		return cobra.MinimumNArgs(minimum)
 	}
-	cmd.Flags().BoolVar(&includeTranscript, "include-transcript", false, "include meeting note transcripts")
-	return cmd
-}
-
-func notionPageCreateCommand(opts *options) *cobra.Command {
-	var parent string
-	var parentType string
-	var title string
-	var titleProperty string
-	var markdownText string
-	var file string
-	var propertiesJSON string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create a Notion page",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.create"), args); err != nil {
-				return err
-			}
-			body, err := readMarkdownInput(markdownText, file)
-			if err != nil {
-				return err
-			}
-			parsedParent, err := parseNotionParent(parentType, parent, true)
-			if err != nil {
-				return err
-			}
-			request := notion.CreatePageRequest{
-				Parent:        parsedParent,
-				Title:         title,
-				TitleProperty: titleProperty,
-				Markdown:      body,
-				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.create", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			page, err := client.CreatePage(cmd.Context(), request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
+	if minimum == maximum {
+		return cobra.ExactArgs(minimum)
 	}
-	cmd.Flags().StringVar(&parent, "parent", "", "parent page id, data source id, workspace, or URL")
-	cmd.Flags().StringVar(&parentType, "parent-type", "page", "parent type: page, data-source, workspace")
-	cmd.Flags().StringVar(&title, "title", "", "page title")
-	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
-	cmd.Flags().StringVar(&markdownText, "markdown", "", "markdown page body")
-	cmd.Flags().StringVar(&file, "file", "", "read markdown page body from file")
-	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without creating the page")
-	return cmd
-}
-
-func notionPageUpdateCommand(opts *options) *cobra.Command {
-	var title string
-	var titleProperty string
-	var propertiesJSON string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "update <page>",
-		Short: "Update Notion page properties",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.update"), args); err != nil {
-				return err
-			}
-			request := notion.UpdatePageRequest{
-				Title:         title,
-				TitleProperty: titleProperty,
-				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.update", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.UpdatePage(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
+	if minimum == 0 {
+		return cobra.MaximumNArgs(maximum)
 	}
-	cmd.Flags().StringVar(&title, "title", "", "new page title")
-	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
-	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
-	return cmd
-}
-
-func notionPageContentCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "content",
-		Short: "Update Notion page markdown content",
-	}
-	cmd.AddCommand(notionPageContentInsertCommand(opts))
-	cmd.AddCommand(notionPageContentReplaceCommand(opts))
-	cmd.AddCommand(notionPageContentUpdateCommand(opts))
-	return cmd
-}
-
-func notionPageContentInsertCommand(opts *options) *cobra.Command {
-	var markdownText string
-	var file string
-	var after string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "insert <page>",
-		Short: "Insert markdown into a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.content.insert"), args); err != nil {
-				return err
-			}
-			body, err := readMarkdownInput(markdownText, file)
-			if err != nil {
-				return err
-			}
-			request := notion.InsertMarkdownRequest{Content: body, After: after}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.content.insert", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			markdown, err := client.InsertMarkdown(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writeMarkdown(cmd, opts, markdown)
-		},
-	}
-	cmd.Flags().StringVar(&markdownText, "markdown", "", "markdown to insert")
-	cmd.Flags().StringVar(&file, "file", "", "read markdown to insert from file")
-	cmd.Flags().StringVar(&after, "after", "", "Notion markdown selection to insert after")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
-	return cmd
-}
-
-func notionPageContentReplaceCommand(opts *options) *cobra.Command {
-	var markdownText string
-	var file string
-	var allowDeletingContent bool
-	var dryRun bool
-	var yes bool
-	cmd := &cobra.Command{
-		Use:   "replace <page>",
-		Short: "Replace all markdown content in a Notion page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.content.replace"), args); err != nil {
-				return err
-			}
-			body, err := readMarkdownInput(markdownText, file)
-			if err != nil {
-				return err
-			}
-			request := notion.ReplaceMarkdownRequest{NewString: body, AllowDeletingContent: allowDeletingContent}
-			if !yes && !dryRun {
-				return fmt.Errorf("refusing to replace all Notion page content without --yes")
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.content.replace", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			markdown, err := client.ReplaceMarkdown(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writeMarkdown(cmd, opts, markdown)
-		},
-	}
-	cmd.Flags().StringVar(&markdownText, "markdown", "", "replacement markdown")
-	cmd.Flags().StringVar(&file, "file", "", "read replacement markdown from file")
-	cmd.Flags().BoolVar(&allowDeletingContent, "allow-deleting-content", false, "allow deleting child pages/databases")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
-	cmd.Flags().BoolVar(&yes, "yes", false, "confirm replacing all page content")
-	return cmd
-}
-
-func notionPageContentUpdateCommand(opts *options) *cobra.Command {
-	var oldString string
-	var newString string
-	var replaceAll bool
-	var allowDeletingContent bool
-	var dryRun bool
-	var yes bool
-	cmd := &cobra.Command{
-		Use:   "update <page>",
-		Short: "Search and replace Notion page markdown content",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.content.update"), args); err != nil {
-				return err
-			}
-			request := notion.UpdateMarkdownRequest{
-				ContentUpdates: []notion.ContentUpdate{{
-					OldString:         oldString,
-					NewString:         newString,
-					ReplaceAllMatches: replaceAll,
-				}},
-				AllowDeletingContent: allowDeletingContent,
-			}
-			if allowDeletingContent && !yes && !dryRun {
-				return fmt.Errorf("refusing to allow deleting child content without --yes")
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.content.update", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			markdown, err := client.UpdateMarkdown(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writeMarkdown(cmd, opts, markdown)
-		},
-	}
-	cmd.Flags().StringVar(&oldString, "old", "", "exact markdown text to find")
-	cmd.Flags().StringVar(&newString, "new", "", "replacement markdown text")
-	cmd.Flags().BoolVar(&replaceAll, "replace-all", false, "replace all matching occurrences")
-	cmd.Flags().BoolVar(&allowDeletingContent, "allow-deleting-content", false, "allow deleting child pages/databases")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the page")
-	cmd.Flags().BoolVar(&yes, "yes", false, "confirm allowing child content deletion")
-	return cmd
-}
-
-func notionPageDeleteCommand(opts *options) *cobra.Command {
-	var yes bool
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:     "delete <page>",
-		Aliases: []string{"trash"},
-		Short:   "Move a Notion page to trash",
-		Args:    cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.delete"), args); err != nil {
-				return err
-			}
-			if !yes && !dryRun {
-				return fmt.Errorf("refusing to trash Notion page without --yes")
-			}
-			inTrash := true
-			request := notion.UpdatePageRequest{InTrash: &inTrash}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.delete", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.UpdatePage(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
-	}
-	cmd.Flags().BoolVar(&yes, "yes", false, "confirm moving the page to trash")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without trashing the page")
-	return cmd
-}
-
-func notionPageRestoreCommand(opts *options) *cobra.Command {
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "restore <page>",
-		Short: "Restore a Notion page from trash",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.restore"), args); err != nil {
-				return err
-			}
-			inTrash := false
-			request := notion.UpdatePageRequest{InTrash: &inTrash}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.restore", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.UpdatePage(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without restoring the page")
-	return cmd
-}
-
-func notionPageMoveCommand(opts *options) *cobra.Command {
-	var parent string
-	var parentType string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "move <page>",
-		Short: "Move a Notion page to a new parent",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.page.move"), args); err != nil {
-				return err
-			}
-			parsedParent, err := parseNotionParent(parentType, parent, false)
-			if err != nil {
-				return err
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.page.move", map[string]any{"page": notionPageArg(args), "parent": parsedParent})
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.MovePage(cmd.Context(), pageID, parsedParent)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
-	}
-	cmd.Flags().StringVar(&parent, "parent", "", "new parent page/data source id or URL")
-	cmd.Flags().StringVar(&parentType, "parent-type", "page", "parent type: page, data-source")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without moving the page")
-	return cmd
-}
-
-func notionDataSourceCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "data-source",
-		Aliases: []string{"datasource"},
-		Short:   "Operate Notion data sources",
-	}
-	cmd.AddCommand(notionDataSourceQueryCommand(opts))
-	cmd.AddCommand(notionDataSourceSchemaCommand(opts))
-	cmd.AddCommand(notionDataSourceRowCommand(opts))
-	return cmd
-}
-
-func notionDataSourceQueryCommand(opts *options) *cobra.Command {
-	var limit int
-	var filterJSON string
-	var sortsJSON string
-	var resultType string
-	var filterProperties []string
-	cmd := &cobra.Command{
-		Use:   "query <data-source>",
-		Short: "Query a Notion data source",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.data_source.query"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			result, err := client.QueryDataSourceAll(cmd.Context(), args[0], notion.QueryDataSourceRequest{
-				PageSize:         limit,
-				FilterProperties: filterProperties,
-				Filter:           json.RawMessage(strings.TrimSpace(filterJSON)),
-				Sorts:            json.RawMessage(strings.TrimSpace(sortsJSON)),
-				ResultType:       resultType,
-			}, limit)
-			if err != nil {
-				return err
-			}
-			return writeValue(cmd, opts, result, func(w io.Writer) {
-				human := humanOutputOptions(cmd, opts)
-				rows := make([][]string, 0, len(result.Results))
-				for _, page := range result.Results {
-					status := "active"
-					if page.InTrash {
-						status = "trashed"
-					}
-					rows = append(rows, []string{
-						output.Value(page.Title()),
-						page.ID,
-						output.Value(page.URL),
-						output.StatusBadge(human, status),
-					})
-				}
-				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Title", "ID", "URL", "Status"},
-					Rows:    rows,
-					Empty:   "no Notion data source rows",
-				})
-			})
-		},
-	}
-	cmd.Flags().IntVar(&limit, "limit", 50, "maximum rows")
-	cmd.Flags().StringVar(&filterJSON, "filter-json", "", "raw Notion filter JSON")
-	cmd.Flags().StringVar(&sortsJSON, "sorts-json", "", "raw Notion sorts JSON")
-	cmd.Flags().StringVar(&resultType, "result-type", "", "optional result type: page or data_source")
-	cmd.Flags().StringSliceVar(&filterProperties, "filter-property", nil, "data source property to include")
-	return cmd
-}
-
-func notionDataSourceSchemaCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "schema <data-source>",
-		Short: "Inspect a Notion data source schema",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.data_source.schema"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			dataSource, err := client.RetrieveDataSource(cmd.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			return writeValue(cmd, opts, dataSource, func(w io.Writer) {
-				rows := dataSourcePropertyRows(dataSource.Properties)
-				output.RenderTable(w, humanOutputOptions(cmd, opts), output.Table{
-					Headers: []string{"Property", "ID", "Type"},
-					Rows:    rows,
-					Empty:   "no data source properties",
-				})
-			})
-		},
-	}
-	return cmd
-}
-
-func notionDataSourceRowCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "row",
-		Short: "Create and update Notion data source rows",
-	}
-	cmd.AddCommand(notionDataSourceRowCreateCommand(opts))
-	cmd.AddCommand(notionDataSourceRowUpdateCommand(opts))
-	return cmd
-}
-
-func notionDataSourceRowCreateCommand(opts *options) *cobra.Command {
-	var title string
-	var titleProperty string
-	var markdownText string
-	var file string
-	var propertiesJSON string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "create <data-source>",
-		Short: "Create a row in a Notion data source",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.data_source.row.create"), args); err != nil {
-				return err
-			}
-			parent, err := notion.DataSourceParent(args[0])
-			if err != nil {
-				return err
-			}
-			body, err := readMarkdownInput(markdownText, file)
-			if err != nil {
-				return err
-			}
-			request := notion.CreatePageRequest{
-				Parent:        parent,
-				Title:         title,
-				TitleProperty: titleProperty,
-				Markdown:      body,
-				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.data_source.row.create", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			page, err := client.CreatePage(cmd.Context(), request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
-	}
-	cmd.Flags().StringVar(&title, "title", "", "row title")
-	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
-	cmd.Flags().StringVar(&markdownText, "markdown", "", "initial row page markdown")
-	cmd.Flags().StringVar(&file, "file", "", "read initial row page markdown from file")
-	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without creating the row")
-	return cmd
-}
-
-func notionDataSourceRowUpdateCommand(opts *options) *cobra.Command {
-	var title string
-	var titleProperty string
-	var propertiesJSON string
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "update <page>",
-		Short: "Update row properties for a Notion data source page",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.data_source.row.update"), args); err != nil {
-				return err
-			}
-			request := notion.UpdatePageRequest{
-				Title:         title,
-				TitleProperty: titleProperty,
-				Properties:    json.RawMessage(strings.TrimSpace(propertiesJSON)),
-			}
-			if dryRun {
-				return writeDryRun(cmd, opts, "notion.data_source.row.update", request)
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			pageID, err := resolveNotionPageArg(cmd, opts, client, notionPageArg(args))
-			if err != nil {
-				return err
-			}
-			page, err := client.UpdatePage(cmd.Context(), pageID, request)
-			if err != nil {
-				return err
-			}
-			return writePage(cmd, opts, page)
-		},
-	}
-	cmd.Flags().StringVar(&title, "title", "", "row title")
-	cmd.Flags().StringVar(&titleProperty, "title-property", "", "title property name")
-	cmd.Flags().StringVar(&propertiesJSON, "properties-json", "", "raw Notion properties JSON")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show request without updating the row")
-	return cmd
-}
-
-func notionDatabaseCommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "database",
-		Short: "Inspect Notion database containers",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "data-sources <database>",
-		Short: "List data sources for a Notion database",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, notionSpec("notion.database.data_sources"), args); err != nil {
-				return err
-			}
-			client, err := notionClient(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			database, err := client.RetrieveDatabase(cmd.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			return writeValue(cmd, opts, database, func(w io.Writer) {
-				rows := make([][]string, 0, len(database.DataSources))
-				for _, dataSource := range database.DataSources {
-					rows = append(rows, []string{dataSource.Name, dataSource.ID})
-				}
-				output.RenderTable(w, humanOutputOptions(cmd, opts), output.Table{
-					Headers: []string{"Name", "ID"},
-					Rows:    rows,
-					Empty:   "no data sources",
-				})
-			})
-		},
-	})
-	return cmd
-}
-
-func registerProviderCommands(root *cobra.Command, opts *options) {
-	nodes := map[string]*cobra.Command{}
-	for _, spec := range providers.CommandSpecs() {
-		if spec.Provider == "notion" || rootOwnedPath(spec.Path) {
-			continue
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.MinimumNArgs(minimum)(cmd, args); err != nil {
+			return err
 		}
-		parent := root
-		var prefix []string
-		for i, part := range spec.Path {
-			prefix = append(prefix, part)
-			key := strings.Join(prefix, " ")
-			node := nodes[key]
-			if node == nil {
-				node = &cobra.Command{
-					Use:                part,
-					Short:              "Policy-aware command group",
-					FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
-				}
-				nodes[key] = node
-				parent.AddCommand(node)
-			}
-			parent = node
-			if i == len(spec.Path)-1 {
-				leafSpec := spec
-				node.RunE = func(cmd *cobra.Command, args []string) error {
-					if err := authorize(cmd, opts, leafSpec, args); err != nil {
-						return err
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s: not implemented yet\n", leafSpec.ID)
-					return nil
-				}
-			}
+		return cobra.MaximumNArgs(maximum)(cmd, args)
+	}
+}
+
+func addMetadataFlags(cmd *cobra.Command, spec policy.CommandSpec) {
+	for _, flag := range spec.Flags {
+		switch flag.Type {
+		case actions.FlagBool:
+			cmd.Flags().Bool(flag.Name, flag.DefaultBool, flag.Usage)
+		case actions.FlagInt:
+			cmd.Flags().Int(flag.Name, flag.DefaultInt, flag.Usage)
+		case actions.FlagString:
+			cmd.Flags().String(flag.Name, flag.Default, flag.Usage)
+		case actions.FlagStringSlice:
+			cmd.Flags().StringSlice(flag.Name, flag.DefaultString, flag.Usage)
 		}
 	}
 }
 
-func rootOwnedPath(path []string) bool {
-	return len(path) > 0 && (path[0] == "status" || path[0] == "doctor")
+func metadataFlagValues(cmd *cobra.Command, spec policy.CommandSpec) map[string]any {
+	values := make(map[string]any, len(spec.Flags))
+	for _, flag := range spec.Flags {
+		switch flag.Type {
+		case actions.FlagBool:
+			values[flag.Name], _ = cmd.Flags().GetBool(flag.Name)
+		case actions.FlagInt:
+			values[flag.Name], _ = cmd.Flags().GetInt(flag.Name)
+		case actions.FlagString:
+			values[flag.Name], _ = cmd.Flags().GetString(flag.Name)
+		case actions.FlagStringSlice:
+			values[flag.Name], _ = cmd.Flags().GetStringSlice(flag.Name)
+		}
+	}
+	return values
+}
+
+func actionShort(spec policy.CommandSpec) string {
+	return strings.TrimSpace(humanVerb(spec.Action) + " " + providerDisplayName(spec.Provider) + " " + humanResource(spec.Resource))
+}
+
+func humanVerb(verb string) string {
+	switch verb {
+	case "create":
+		return "Create"
+	case "delete":
+		return "Delete"
+	case "diagnose":
+		return "Diagnose"
+	case "list":
+		return "List"
+	case "move":
+		return "Move"
+	case "open":
+		return "Open"
+	case "query":
+		return "Query"
+	case "read":
+		return "Read"
+	case "restore":
+		return "Restore"
+	case "search":
+		return "Search"
+	case "send":
+		return "Send"
+	case "update":
+		return "Update"
+	default:
+		return "Run"
+	}
+}
+
+func providerDisplayName(id string) string {
+	provider, ok := providers.Lookup(id)
+	if !ok {
+		return id
+	}
+	return provider.DisplayName
+}
+
+func humanResource(resource string) string {
+	return strings.ReplaceAll(resource, "_", " ")
 }
 
 func writeCatalog(cmd *cobra.Command, opts *options) error {
@@ -1766,11 +1045,13 @@ func writeCatalog(cmd *cobra.Command, opts *options) error {
 				spec.Provider,
 				spec.Resource,
 				spec.Action,
+				spec.RemoteEffect,
+				spec.LocalEffect,
 				strings.Join(spec.Path, " "),
 			})
 		}
 		output.RenderTable(w, human, output.Table{
-			Headers: []string{"Command", "Provider", "Resource", "Action", "Path"},
+			Headers: []string{"Command", "Provider", "Resource", "Action", "Remote", "Local", "Path"},
 			Rows:    rows,
 			Empty:   "no command specs",
 		})
@@ -1789,6 +1070,13 @@ func authorize(cmd *cobra.Command, opts *options, spec policy.CommandSpec, args 
 }
 
 func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, args []string) (policy.Decision, error) {
+	if opts.readOnly && !policy.AllowsReadOnly(spec) {
+		return policy.Decision{
+			Allowed: false,
+			Reason:  "read-only mode blocks command " + spec.ID,
+			Rule:    "read-only",
+		}, nil
+	}
 	engine, _, err := policy.LoadDiscovered(opts.policy, "")
 	if err != nil {
 		return policy.Decision{}, err
@@ -1805,42 +1093,37 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 
 func specForCommand(commandLine string) (policy.CommandSpec, bool) {
 	parts := strings.Fields(commandLine)
+	if spec, ok := rootSpecForCommandParts(parts); ok {
+		return spec, true
+	}
 	for _, spec := range providers.CommandSpecs() {
-		if equalStrings(parts, spec.Path) {
+		if len(parts) >= len(spec.Path) && equalStrings(parts[:len(spec.Path)], spec.Path) {
 			return spec, true
 		}
 	}
 	return policy.CommandSpec{}, false
 }
 
-func notionSpec(id string) policy.CommandSpec {
-	for _, spec := range notion.CommandSpecs() {
-		if spec.ID == id {
-			return spec
-		}
+func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
+	if len(parts) < 2 {
+		return policy.CommandSpec{}, false
 	}
-	panic("missing Notion command spec " + id)
-}
-
-func notionClient(ctx context.Context, opts *options) (*notion.Client, error) {
-	store, err := opts.credentials()
-	if err != nil {
-		return nil, err
+	provider, ok := providers.Lookup(parts[1])
+	if !ok {
+		return policy.CommandSpec{}, false
 	}
-	tokens, err := store.LoadOAuthTokens(ctx, notionCredentialRef(opts))
-	if err != nil {
-		return nil, err
+	switch parts[0] {
+	case "status":
+		return providerStatusSpec(provider), true
+	case "doctor":
+		return providerDoctorSpec(provider), true
+	case "connect":
+		return providerConnectSpec(provider, parts[1]), true
+	case "disconnect":
+		return providerDisconnectSpec(provider, parts[1]), true
+	default:
+		return policy.CommandSpec{}, false
 	}
-	return notion.NewClient(
-		tokens.AccessToken,
-		notion.WithBaseURL(opts.notionBase),
-		notion.WithVersion(opts.notionAPI),
-		notion.WithHTTPClient(opts.httpClient),
-	), nil
-}
-
-func notionCredentialRef(opts *options) credentials.ConnectionRef {
-	return providerCredentialRef(opts, "notion")
 }
 
 func providerCredentialRef(opts *options, provider string) credentials.ConnectionRef {
@@ -1855,205 +1138,99 @@ func providerCredentialRef(opts *options, provider string) credentials.Connectio
 	}
 }
 
-type oauthSessionResponse struct {
-	SessionID   string                   `json:"session_id"`
-	Provider    string                   `json:"provider"`
-	Status      string                   `json:"status"`
-	AuthURL     string                   `json:"auth_url"`
-	RedirectURI string                   `json:"redirect_uri"`
-	Error       string                   `json:"error"`
-	Tokens      *credentials.OAuthTokens `json:"tokens"`
-	ExpiresAt   time.Time                `json:"expires_at"`
+func actionExecutionContext(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) actions.Context {
+	account := strings.TrimSpace(opts.account)
+	if account == "" {
+		account = "default"
+	}
+	return actions.Context{
+		Context:     ctx,
+		Credentials: store,
+		HTTPClient:  opts.httpClient,
+		Profile:     opts.profile,
+		Account:     account,
+		Provider:    provider.ID,
+		ProviderURL: opts.providerURL[provider.ID],
+		ProviderAPI: opts.providerAPI[provider.ID],
+		SupaclidURL: opts.supaclidURL,
+		ReadFile:    os.ReadFile,
+		OpenBrowser: openURL,
+	}
 }
 
-func connectNotion(cmd *cobra.Command, opts *options, serverURL string, authURLOnly, noBrowser bool, timeout time.Duration) error {
-	ui := newConnectUI(cmd, opts)
-	serverURL = strings.TrimRight(serverURL, "/")
-	if serverURL == "" {
-		return fmt.Errorf("supaclid URL is required")
-	}
-	ui.status("Creating Notion OAuth session")
-	payload, err := json.Marshal(map[string]string{"provider": "notion", "profile": opts.profile, "account": opts.account})
-	if err != nil {
-		return err
-	}
-	// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
-	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, serverURL+"/v1/oauth/sessions", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := opts.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("create Notion OAuth session: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	var session oauthSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return err
-	}
-	if session.AuthURL == "" {
-		return fmt.Errorf("supaclid did not return a Notion authorization URL")
-	}
-	ui.done("Created Notion OAuth session")
-	fmt.Fprintf(cmd.OutOrStdout(), "open this URL to connect Notion:\n%s\n", session.AuthURL)
-	if session.RedirectURI != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Notion redirect URI:\n%s\n", session.RedirectURI)
-	}
-	if authURLOnly {
-		return nil
-	}
-	if ui.interactive && !noBrowser {
-		if err := openURL(session.AuthURL); err != nil {
-			ui.warn("Could not open browser automatically: %v", err)
-		} else {
-			ui.status("Opened browser for Notion authorization")
+func selectString(cmd *cobra.Command) func(context.Context, actions.SelectStringRequest) (string, bool, error) {
+	return func(ctx context.Context, request actions.SelectStringRequest) (string, bool, error) {
+		if len(request.Options) == 0 {
+			return "", false, nil
 		}
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ui.spin("Waiting for Notion authorization")
-		polled, err := pollOAuthSession(cmd.Context(), opts, serverURL, session.SessionID)
-		if err != nil {
-			ui.stop()
-			return err
+		selected := request.Options[0].Value
+		options := make([]huh.Option[string], 0, len(request.Options))
+		for _, option := range request.Options {
+			options = append(options, huh.NewOption(option.Label, option.Value))
 		}
-		switch polled.Status {
-		case "complete":
-			ui.done("Notion authorization complete")
-			if polled.Tokens == nil {
-				return fmt.Errorf("notion OAuth session completed without token handoff")
+		height := request.Height
+		if height <= 0 {
+			height = min(len(options)+4, 12)
+		}
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(request.Title).
+				Description(request.Description).
+				Options(options...).
+				Value(&selected).
+				Height(height).
+				Filtering(request.Filtering),
+		)).
+			WithTheme(huh.ThemeCharm()).
+			WithInput(cmd.InOrStdin()).
+			WithOutput(cmd.ErrOrStderr()).
+			WithWidth(terminalWidth(cmd.ErrOrStderr())).
+			WithHeight(height + 5)
+		if err := form.RunWithContext(ctx); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return "", false, nil
 			}
-			store, err := opts.credentials()
-			if err != nil {
-				return err
+			return "", false, err
+		}
+		return selected, true, nil
+	}
+}
+
+func selectInteger(cmd *cobra.Command) func(context.Context, actions.SelectIntegerRequest) (int, bool, error) {
+	return func(ctx context.Context, request actions.SelectIntegerRequest) (int, bool, error) {
+		if len(request.Options) == 0 {
+			return 0, false, nil
+		}
+		selected := request.Options[0].Value
+		options := make([]huh.Option[int], 0, len(request.Options))
+		for _, option := range request.Options {
+			options = append(options, huh.NewOption(option.Label, option.Value))
+		}
+		height := request.Height
+		if height <= 0 {
+			height = min(len(options)+4, 14)
+		}
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[int]().
+				Title(request.Title).
+				Description(request.Description).
+				Options(options...).
+				Value(&selected).
+				Height(height).
+				Filtering(request.Filtering),
+		)).
+			WithTheme(huh.ThemeCharm()).
+			WithInput(cmd.InOrStdin()).
+			WithOutput(cmd.ErrOrStderr()).
+			WithWidth(terminalWidth(cmd.ErrOrStderr())).
+			WithHeight(height + 5)
+		if err := form.RunWithContext(ctx); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return 0, false, nil
 			}
-			if err := store.SaveOAuthTokens(cmd.Context(), notionCredentialRef(opts), *polled.Tokens); err != nil {
-				return err
-			}
-			workspace := polled.Tokens.Extra["workspace_name"]
-			if workspace == "" {
-				workspace = polled.Tokens.Extra["workspace_id"]
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "connected Notion: %s\n", firstNonEmpty(workspace, "default"))
-			return nil
-		case "failed", "expired":
-			ui.stop()
-			return fmt.Errorf("notion OAuth session %s: %s", polled.Status, polled.Error)
+			return 0, false, err
 		}
-		select {
-		case <-cmd.Context().Done():
-			ui.stop()
-			return cmd.Context().Err()
-		case <-time.After(time.Second):
-		}
-	}
-	ui.stop()
-	return fmt.Errorf("timed out waiting for Notion OAuth completion")
-}
-
-func disconnectNotion(cmd *cobra.Command, opts *options, serverURL string, yes bool) error {
-	if !yes {
-		return fmt.Errorf("refusing to disconnect Notion without --yes")
-	}
-	store, err := opts.credentials()
-	if err != nil {
-		return err
-	}
-	ref := notionCredentialRef(opts)
-	tokens, err := store.LoadOAuthTokens(cmd.Context(), ref)
-	if err != nil {
-		return err
-	}
-	if serverURL != "" && tokens.AccessToken != "" {
-		payload, err := json.Marshal(map[string]string{"token": tokens.AccessToken})
-		if err != nil {
-			return err
-		}
-		// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
-		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, strings.TrimRight(serverURL, "/")+"/v1/oauth/notion/revoke", bytes.NewReader(payload))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := opts.httpClient.Do(req)
-		if err != nil {
-			return err
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		if err := resp.Body.Close(); err != nil {
-			return err
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("revoke Notion token: status %d", resp.StatusCode)
-		}
-	}
-	if err := store.DeleteOAuthTokens(cmd.Context(), ref); err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "disconnected Notion")
-	return nil
-}
-
-func pollOAuthSession(ctx context.Context, opts *options, serverURL, sessionID string) (oauthSessionResponse, error) {
-	// #nosec G107 -- supaclid URL is explicit local/deployment configuration.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/v1/oauth/sessions/"+sessionID, nil)
-	if err != nil {
-		return oauthSessionResponse{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := opts.httpClient.Do(req)
-	if err != nil {
-		return oauthSessionResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return oauthSessionResponse{}, fmt.Errorf("poll OAuth session: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	var session oauthSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return oauthSessionResponse{}, err
-	}
-	return session, nil
-}
-
-func notionPageArg(args []string) string {
-	return strings.TrimSpace(strings.Join(args, " "))
-}
-
-func resolveNotionPageArg(cmd *cobra.Command, opts *options, client *notion.Client, value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", fmt.Errorf("notion page is required")
-	}
-	if id, err := notion.NormalizeID(value); err == nil {
-		return id, nil
-	}
-	results, err := client.Search(commandContext(cmd), notion.SearchRequest{
-		Query:      value,
-		ObjectType: "page",
-		PageSize:   10,
-	})
-	if err != nil {
-		return "", fmt.Errorf("search Notion page %q: %w", value, err)
-	}
-	pages := notionPageSearchMatches(results.Results)
-	switch len(pages) {
-	case 0:
-		return "", fmt.Errorf("no Notion page matches %q; pass a page ID or URL", value)
-	case 1:
-		return pages[0].ID, nil
-	default:
-		if interactiveCommand(cmd, opts) {
-			return selectNotionPage(cmd, value, pages)
-		}
-		return "", multipleNotionPagesError(value, pages)
+		return selected, true, nil
 	}
 }
 
@@ -2065,564 +1242,8 @@ func commandContext(cmd *cobra.Command) context.Context {
 	return ctx
 }
 
-func notionPageSearchMatches(results []notion.SearchResult) []notion.SearchResult {
-	pages := make([]notion.SearchResult, 0, len(results))
-	for _, result := range results {
-		if result.Object == "page" {
-			pages = append(pages, result)
-		}
-	}
-	return pages
-}
-
-func selectNotionPage(cmd *cobra.Command, query string, pages []notion.SearchResult) (string, error) {
-	selected := pages[0].ID
-	options := make([]huh.Option[string], 0, len(pages))
-	for _, page := range pages {
-		options = append(options, huh.NewOption(notionPageSelectionLabel(page), page.ID))
-	}
-	height := len(options) + 4
-	if height > 12 {
-		height = 12
-	}
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[string]().
-			Title("Select a Notion page").
-			Description("Multiple pages match " + strconv.Quote(query)).
-			Options(options...).
-			Value(&selected).
-			Height(height).
-			Filtering(len(options) > 6),
-	)).
-		WithTheme(huh.ThemeCharm()).
-		WithInput(cmd.InOrStdin()).
-		WithOutput(cmd.ErrOrStderr()).
-		WithWidth(terminalWidth(cmd.ErrOrStderr())).
-		WithHeight(height + 5)
-	if err := form.RunWithContext(commandContext(cmd)); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return "", fmt.Errorf("page selection cancelled")
-		}
-		return "", err
-	}
-	return selected, nil
-}
-
-func notionPageSelectionLabel(page notion.SearchResult) string {
-	title := firstNonEmpty(page.Title, "(untitled)")
-	detail := shortNotionPageID(page.ID)
-	if detail == "" {
-		detail = page.URL
-	}
-	if detail == "" {
-		return title
-	}
-	return title + "  " + detail
-}
-
-func shortNotionPageID(id string) string {
-	id = strings.ReplaceAll(strings.TrimSpace(id), "-", "")
-	if len(id) > 8 {
-		return id[:8]
-	}
-	return id
-}
-
-func multipleNotionPagesError(query string, pages []notion.SearchResult) error {
-	var b strings.Builder
-	fmt.Fprintf(&b, "multiple Notion pages match %q; pass a page ID or URL", query)
-	for _, page := range pages {
-		fmt.Fprintf(&b, "\n- %s (%s)", firstNonEmpty(page.Title, "(untitled)"), page.ID)
-	}
-	return errors.New(b.String())
-}
-
 func interactiveCommand(cmd *cobra.Command, opts *options) bool {
 	return opts.output == "table" && isTerminal(cmd.OutOrStdout()) && isTerminal(cmd.ErrOrStderr()) && isInputTerminal(cmd.InOrStdin())
-}
-
-func parseNotionParent(parentType, parent string, allowWorkspace bool) (notion.Parent, error) {
-	parentType = strings.TrimSpace(strings.ToLower(strings.ReplaceAll(parentType, "_", "-")))
-	parent = strings.TrimSpace(parent)
-	if parentType == "" || parentType == "auto" {
-		if strings.EqualFold(parent, "workspace") {
-			parentType = "workspace"
-		} else {
-			parentType = "page"
-		}
-	}
-	switch parentType {
-	case "workspace":
-		if !allowWorkspace {
-			return notion.Parent{}, fmt.Errorf("workspace parent is not supported for this command")
-		}
-		return notion.WorkspaceParent(), nil
-	case "page":
-		if parent == "" {
-			return notion.Parent{}, fmt.Errorf("--parent is required")
-		}
-		return notion.PageParent(parent)
-	case "data-source", "datasource":
-		if parent == "" {
-			return notion.Parent{}, fmt.Errorf("--parent is required")
-		}
-		return notion.DataSourceParent(parent)
-	default:
-		return notion.Parent{}, fmt.Errorf("unsupported Notion parent type %q", parentType)
-	}
-}
-
-func readMarkdownInput(markdownText, file string) (string, error) {
-	if strings.TrimSpace(file) != "" && markdownText != "" {
-		return "", fmt.Errorf("use either --markdown or --file, not both")
-	}
-	if strings.TrimSpace(file) == "" {
-		return markdownText, nil
-	}
-	// #nosec G304 -- the user explicitly chooses a local markdown file to send.
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func writePage(cmd *cobra.Command, opts *options, page notion.Page) error {
-	return writeValue(cmd, opts, page, func(w io.Writer) {
-		human := humanOutputOptions(cmd, opts)
-		title := page.Title()
-		status := "active"
-		if page.InTrash {
-			status = "trashed"
-		}
-		output.RenderTable(w, human, output.Table{
-			Headers: []string{"Title", "ID", "URL", "Status"},
-			Rows: [][]string{
-				{
-					output.Value(title),
-					page.ID,
-					output.Value(page.URL),
-					output.StatusBadge(human, status),
-				},
-			},
-		})
-	})
-}
-
-func retrieveNotionPageRead(ctx context.Context, client *notion.Client, pageID string, includeTranscript bool) (notionPageRead, error) {
-	page, err := client.RetrievePage(ctx, pageID, nil)
-	if err != nil {
-		return notionPageRead{}, err
-	}
-	markdown, err := client.RetrievePageMarkdown(ctx, pageID, includeTranscript)
-	if err != nil {
-		return notionPageRead{}, err
-	}
-	return notionPageRead{Page: page, Markdown: markdown}, nil
-}
-
-func notionPageDiagnostics(result notionPageRead) []providerDiagnostic {
-	pageID := result.Page.ID
-	if pageID == "" {
-		pageID = result.Markdown.ID
-	}
-	title := firstNonEmpty(result.Page.Title(), pageID)
-	diagnostics := []providerDiagnostic{{
-		Provider: "notion",
-		Check:    "page",
-		Status:   "ok",
-		Message:  firstNonEmpty(title, "page loaded"),
-		Details: map[string]string{
-			"page_id": pageID,
-		},
-	}}
-	if result.Markdown.Truncated {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider:    "notion",
-			Check:       "markdown-truncation",
-			Status:      "warn",
-			Message:     "Notion returned a truncated markdown export",
-			Remediation: "Read the page in Notion before relying on full round-trip edits.",
-			Details: map[string]string{
-				"page_id": pageID,
-			},
-		})
-	} else {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider: "notion",
-			Check:    "markdown-truncation",
-			Status:   "ok",
-			Message:  "markdown export is complete",
-			Details: map[string]string{
-				"page_id": pageID,
-			},
-		})
-	}
-	if len(result.Markdown.UnknownBlockIDs) > 0 {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider:    "notion",
-			Check:       "unknown-blocks",
-			Status:      "warn",
-			Message:     fmt.Sprintf("%d block(s) could not be represented as markdown", len(result.Markdown.UnknownBlockIDs)),
-			Remediation: "Use --output json on page markdown to inspect unknown_block_ids before editing.",
-			Details: map[string]string{
-				"page_id":           pageID,
-				"unknown_block_ids": strings.Join(result.Markdown.UnknownBlockIDs, ","),
-			},
-		})
-	} else {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider: "notion",
-			Check:    "unknown-blocks",
-			Status:   "ok",
-			Message:  "all exported blocks were represented",
-			Details: map[string]string{
-				"page_id": pageID,
-			},
-		})
-	}
-	links := notionPageLinksFromMarkdown(result.Markdown.Markdown)
-	diagnostics = append(diagnostics, providerDiagnostic{
-		Provider: "notion",
-		Check:    "links",
-		Status:   "ok",
-		Message:  fmt.Sprintf("%d link(s) found", len(links)),
-		Details: map[string]string{
-			"page_id": pageID,
-			"links":   strconv.Itoa(len(links)),
-		},
-	})
-	return diagnostics
-}
-
-func notionPageLinksFromMarkdown(markdown string) []notionPageLink {
-	rawLinks := output.ExtractMarkdownLinks(markdown)
-	links := make([]notionPageLink, 0, len(rawLinks))
-	for i, raw := range rawLinks {
-		link := notionPageLink{
-			Index: i + 1,
-			Label: strings.TrimSpace(raw.Label),
-			URL:   strings.TrimSpace(raw.URL),
-			Kind:  "external",
-		}
-		if link.Label == "" {
-			link.Label = link.URL
-		}
-		if id, ok := notionPageIDFromLink(link.URL); ok {
-			link.Kind = "notion"
-			link.NotionPageID = id
-		}
-		links = append(links, link)
-	}
-	return links
-}
-
-func collectNotionPageChildren(ctx context.Context, client *notion.Client, pageID string, maxDepth, limit int) ([]notionPageChild, error) {
-	if maxDepth <= 0 {
-		maxDepth = 1
-	}
-	if limit <= 0 {
-		limit = 100
-	}
-	children := make([]notionPageChild, 0)
-	seen := map[string]bool{}
-	var walk func(string, int) error
-	walk = func(parentID string, depth int) error {
-		if depth > maxDepth || len(children) >= limit {
-			return nil
-		}
-		blocks, err := listAllNotionChildBlocks(ctx, client, parentID, limit-len(children))
-		if err != nil {
-			return err
-		}
-		for _, block := range blocks {
-			child, ok := notionPageChildFromBlock(block, depth)
-			if !ok {
-				continue
-			}
-			if seen[child.ID] {
-				continue
-			}
-			seen[child.ID] = true
-			children = append(children, child)
-			if len(children) >= limit {
-				return nil
-			}
-			if err := walk(child.ID, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := walk(pageID, 1); err != nil {
-		return nil, err
-	}
-	return children, nil
-}
-
-func listAllNotionChildBlocks(ctx context.Context, client *notion.Client, blockID string, limit int) ([]notion.Block, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	blocks := make([]notion.Block, 0)
-	cursor := ""
-	for len(blocks) < limit {
-		pageSize := limit - len(blocks)
-		if pageSize > 100 {
-			pageSize = 100
-		}
-		result, err := client.ListBlockChildren(ctx, blockID, notion.ListBlockChildrenRequest{
-			StartCursor: cursor,
-			PageSize:    pageSize,
-		})
-		if err != nil {
-			return nil, err
-		}
-		blocks = append(blocks, result.Results...)
-		if !result.HasMore || result.NextCursor == "" {
-			break
-		}
-		cursor = result.NextCursor
-	}
-	if len(blocks) > limit {
-		return blocks[:limit], nil
-	}
-	return blocks, nil
-}
-
-func notionPageChildFromBlock(block notion.Block, depth int) (notionPageChild, bool) {
-	switch block.Type {
-	case "child_page":
-		title := ""
-		if block.ChildPage != nil {
-			title = block.ChildPage.Title
-		}
-		return notionPageChild{
-			Depth:       depth,
-			Title:       firstNonEmpty(title, "(untitled)"),
-			ID:          block.ID,
-			Type:        block.Type,
-			URL:         notionPageWebURL(block.ID),
-			HasChildren: block.HasChildren,
-		}, true
-	case "child_database":
-		title := ""
-		if block.ChildDatabase != nil {
-			title = block.ChildDatabase.Title
-		}
-		return notionPageChild{
-			Depth:       depth,
-			Title:       firstNonEmpty(title, "(untitled)"),
-			ID:          block.ID,
-			Type:        block.Type,
-			HasChildren: block.HasChildren,
-		}, true
-	default:
-		return notionPageChild{}, false
-	}
-}
-
-func writeNotionPageChildren(cmd *cobra.Command, opts *options, children []notionPageChild, empty string) error {
-	return writeValue(cmd, opts, children, func(w io.Writer) {
-		human := humanOutputOptions(cmd, opts)
-		rows := make([][]string, 0, len(children))
-		for _, child := range children {
-			rows = append(rows, []string{
-				strconv.Itoa(child.Depth),
-				strings.Repeat("  ", child.Depth-1) + child.Title,
-				child.ID,
-				child.Type,
-				output.Value(child.URL),
-			})
-		}
-		output.RenderTable(w, human, output.Table{
-			Headers: []string{"Depth", "Title", "ID", "Type", "URL"},
-			Rows:    rows,
-			Empty:   empty,
-		})
-	})
-}
-
-func followNotionPageLinks(cmd *cobra.Command, opts *options, client *notion.Client, result notionPageRead, includeTranscript bool) error {
-	for {
-		if err := writePageRead(cmd, opts, result); err != nil {
-			return err
-		}
-		links := output.ExtractMarkdownLinks(result.Markdown.Markdown)
-		if len(links) == 0 {
-			fmt.Fprintln(cmd.ErrOrStderr(), output.ToneText(humanOutputOptions(cmd, opts), output.ToneMuted, "no links on this page"))
-			return nil
-		}
-		link, ok, err := selectNotionPageReadLink(cmd, links)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		if pageID, ok := notionPageIDFromLink(link.URL); ok {
-			if err := authorize(cmd, opts, notionSpec("notion.page.read"), []string{link.URL}); err != nil {
-				return err
-			}
-			next, err := retrieveNotionPageRead(cmd.Context(), client, pageID, includeTranscript)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout())
-			result = next
-			continue
-		}
-		if err := openURL(link.URL); err != nil {
-			return fmt.Errorf("open link %q: %w", link.URL, err)
-		}
-		fmt.Fprintln(cmd.ErrOrStderr(), output.ToneText(humanOutputOptions(cmd, opts), output.ToneInfo, "opened "+link.URL))
-		return nil
-	}
-}
-
-func selectNotionPageReadLink(cmd *cobra.Command, links []output.MarkdownLink) (output.MarkdownLink, bool, error) {
-	selected := len(links)
-	options := make([]huh.Option[int], 0, len(links)+1)
-	for i, link := range links {
-		options = append(options, huh.NewOption(notionLinkSelectionLabel(i, link), i))
-	}
-	options = append(options, huh.NewOption("Done", len(links)))
-	height := len(options) + 4
-	if height > 14 {
-		height = 14
-	}
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[int]().
-			Title("Follow a link").
-			Description("Choose a link from this page").
-			Options(options...).
-			Value(&selected).
-			Height(height).
-			Filtering(len(options) > 8),
-	)).
-		WithTheme(huh.ThemeCharm()).
-		WithInput(cmd.InOrStdin()).
-		WithOutput(cmd.ErrOrStderr()).
-		WithWidth(terminalWidth(cmd.ErrOrStderr())).
-		WithHeight(height + 5)
-	if err := form.RunWithContext(commandContext(cmd)); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return output.MarkdownLink{}, false, nil
-		}
-		return output.MarkdownLink{}, false, err
-	}
-	if selected < 0 || selected >= len(links) {
-		return output.MarkdownLink{}, false, nil
-	}
-	return links[selected], true, nil
-}
-
-func notionLinkSelectionLabel(index int, link output.MarkdownLink) string {
-	label := firstNonEmpty(strings.TrimSpace(link.Label), strings.TrimSpace(link.URL))
-	detail := notionLinkSelectionDetail(link.URL)
-	if detail == "" || detail == label {
-		return fmt.Sprintf("[%d] %s", index+1, label)
-	}
-	return fmt.Sprintf("[%d] %s  %s", index+1, label, detail)
-}
-
-func notionLinkSelectionDetail(rawURL string) string {
-	if id, ok := notionPageIDFromLink(rawURL); ok {
-		return "Notion " + shortNotionPageID(id)
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Host == "" {
-		return rawURL
-	}
-	detail := parsed.Host
-	path := strings.TrimRight(parsed.EscapedPath(), "/")
-	if path != "" {
-		detail += path
-	}
-	if len(detail) > 72 {
-		return detail[:69] + "..."
-	}
-	return detail
-}
-
-func notionPageIDFromLink(rawURL string) (string, bool) {
-	id, err := notion.NormalizeID(rawURL)
-	if err != nil {
-		return "", false
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return "", false
-	}
-	if parsed.Host == "" {
-		if parsed.Scheme == "" && bareNotionLink(rawURL, id) {
-			return id, true
-		}
-		return "", false
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if host == "notion.so" || host == "www.notion.so" || strings.HasSuffix(host, ".notion.so") || host == "notion.site" || strings.HasSuffix(host, ".notion.site") {
-		return id, true
-	}
-	return "", false
-}
-
-func bareNotionLink(rawURL, id string) bool {
-	cleaned := strings.ToLower(strings.TrimSpace(rawURL))
-	compact := strings.ReplaceAll(strings.ToLower(id), "-", "")
-	return cleaned == strings.ToLower(id) || cleaned == compact || strings.HasSuffix(cleaned, "-"+compact)
-}
-
-func notionPageWebURL(id string) string {
-	compact := strings.ReplaceAll(strings.TrimSpace(id), "-", "")
-	if compact == "" {
-		return ""
-	}
-	return "https://www.notion.so/" + compact
-}
-
-func writePageRead(cmd *cobra.Command, opts *options, result notionPageRead) error {
-	switch opts.output {
-	case "json":
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
-	case "yaml":
-		encoder := yaml.NewEncoder(cmd.OutOrStdout())
-		defer encoder.Close()
-		return encoder.Encode(result)
-	case "table":
-		source := pageReadMarkdownSource(result.Page, result.Markdown)
-		rendered := markdownForOutput(cmd.OutOrStdout(), opts, source)
-		if result.Markdown.Truncated {
-			rendered += fmt.Sprintf("\n\n%s\n", output.ToneText(humanOutputOptions(cmd, opts), output.ToneWarning, fmt.Sprintf("truncated: %d unknown blocks", len(result.Markdown.UnknownBlockIDs))))
-		}
-		return writePossiblyPaged(cmd, opts, rendered)
-	default:
-		return fmt.Errorf("unsupported output format %q", opts.output)
-	}
-}
-
-func pageReadMarkdownSource(page notion.Page, markdown notion.PageMarkdown) string {
-	source := strings.TrimSpace(markdown.Markdown)
-	title := strings.TrimSpace(page.Title())
-	if title != "" && !strings.HasPrefix(source, "# ") && !strings.HasPrefix(source, "## ") {
-		if source == "" {
-			source = "# " + title
-		} else {
-			source = "# " + title + "\n\n" + source
-		}
-	}
-	return output.PrepareReadableMarkdown(source)
-}
-
-func writeMarkdown(cmd *cobra.Command, opts *options, markdown notion.PageMarkdown) error {
-	return writeValue(cmd, opts, markdown, func(w io.Writer) {
-		fmt.Fprintln(w, strings.TrimRight(markdown.Markdown, "\n"))
-		if markdown.Truncated {
-			fmt.Fprintf(w, "\ntruncated: %d unknown blocks\n", len(markdown.UnknownBlockIDs))
-		}
-	})
 }
 
 func markdownForOutput(w io.Writer, opts *options, source string) string {
@@ -2726,40 +1347,61 @@ func lineCount(content string) int {
 	return strings.Count(content, "\n") + 1
 }
 
-func writeDryRun(cmd *cobra.Command, opts *options, action string, request any) error {
-	value := map[string]any{
-		"dry_run": true,
-		"action":  action,
-		"request": request,
+func writeActionResult(cmd *cobra.Command, opts *options, execCtx actions.Context, result any) error {
+	for {
+		if err := writeActionResultOnce(cmd, opts, result); err != nil {
+			return err
+		}
+		follower, ok := result.(actions.FollowRenderable)
+		if !ok {
+			return nil
+		}
+		next, keepGoing, err := follower.Follow(execCtx)
+		if err != nil {
+			return err
+		}
+		if !keepGoing || next == nil {
+			return nil
+		}
+		if opts.output == "table" {
+			fmt.Fprintln(cmd.OutOrStdout())
+		}
+		result = next
 	}
-	return writeValue(cmd, opts, value, func(w io.Writer) {
-		output.RenderTable(w, humanOutputOptions(cmd, opts), output.Table{
-			Headers: []string{"Field", "Value"},
-			Rows: [][]string{
-				{"Dry run", "true"},
-				{"Action", action},
-				{"Request", "use --output json to inspect payload"},
-			},
-		})
-	})
 }
 
-func dataSourcePropertyRows(properties map[string]json.RawMessage) [][]string {
-	names := make([]string, 0, len(properties))
-	for name := range properties {
-		names = append(names, name)
+func writeActionResultOnce(cmd *cobra.Command, opts *options, result any) error {
+	if result == nil {
+		return nil
 	}
-	sort.Strings(names)
-	rows := make([][]string, 0, len(names))
-	for _, name := range names {
-		var property struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
+	switch opts.output {
+	case "json", "yaml":
+		return writeValue(cmd, opts, result, nil)
+	case "table":
+		if opener, ok := result.(actions.BrowserOpenRenderable); ok && opener.BrowserURL() != "" && !opener.BrowserURLOnly() {
+			if err := openURL(opener.BrowserURL()); err != nil {
+				return fmt.Errorf("open %q: %w", opener.BrowserURL(), err)
+			}
 		}
-		_ = json.Unmarshal(properties[name], &property)
-		rows = append(rows, []string{name, output.Value(property.ID), output.Value(property.Type)})
+		if markdown, ok := result.(actions.MarkdownRenderable); ok {
+			source := markdown.MarkdownSource()
+			rendered := markdownForOutput(cmd.OutOrStdout(), opts, source)
+			if truncated, unknown := markdown.MarkdownTruncated(); truncated {
+				rendered += fmt.Sprintf("\n\n%s\n", output.ToneText(humanOutputOptions(cmd, opts), output.ToneWarning, fmt.Sprintf("truncated: %d unknown blocks", unknown)))
+			}
+			return writePossiblyPaged(cmd, opts, rendered)
+		}
+		if text, ok := result.(actions.TextRenderable); ok {
+			return writePossiblyPaged(cmd, opts, text.Text())
+		}
+		if table, ok := result.(actions.TableRenderable); ok {
+			output.RenderTable(cmd.OutOrStdout(), humanOutputOptions(cmd, opts), table.Table(humanOutputOptions(cmd, opts)))
+			return nil
+		}
+		return writeValue(cmd, opts, result, nil)
+	default:
+		return fmt.Errorf("unsupported output format %q", opts.output)
 	}
-	return rows
 }
 
 func writeValue(cmd *cobra.Command, opts *options, value any, table func(io.Writer)) error {

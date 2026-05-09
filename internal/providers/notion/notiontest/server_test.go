@@ -1,4 +1,4 @@
-package fakeupstream
+package notiontest
 
 import (
 	"encoding/json"
@@ -10,7 +10,8 @@ import (
 )
 
 func TestIntegrationOAuthRoundTrip(t *testing.T) {
-	upstream := New()
+	t.Parallel()
+	upstream := NewUpstream()
 	defer upstream.Close()
 
 	callback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

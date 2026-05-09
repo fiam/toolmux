@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	_ "github.com/fiam/supacli/internal/providers/brokers/all"
 	"github.com/fiam/supacli/internal/server"
 )
 
