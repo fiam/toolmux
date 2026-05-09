@@ -31,7 +31,15 @@ Supacli is early software. The first usable provider is Notion.
 
 ## Install
 
-For now, build from source:
+With Homebrew:
+
+```bash
+brew tap fiam/tap
+brew install supacli
+supacli version
+```
+
+Or build from source:
 
 ```bash
 git clone https://github.com/fiam/supacli.git
@@ -40,8 +48,10 @@ make dev-cli
 supacli version
 ```
 
-Use Go 1.26.3 or newer on the Go 1.26 line. Docker is only required for the
-full linter pass and container image builds.
+Released archives include `supacli` and `supaclid` binaries for macOS, Linux,
+and Windows on amd64 and arm64. Use Go 1.26.3 or newer on the Go 1.26 line
+when building from source. Docker is only required for the full linter pass and
+container image builds.
 
 ## Connect Notion
 

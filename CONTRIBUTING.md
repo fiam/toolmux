@@ -54,7 +54,9 @@ pass also checks Go formatting and import order through `golangci-lint fmt`.
 GitHub Actions runs these checks for pull requests and pushes to `main`, plus
 race tests, fake-upstream integration tests, coverage generation, binary
 builds, commit-message validation, and the generic `supaclid` container image
-build. Live-provider tests stay opt-in and are not part of default CI.
+build. CI also runs a GoReleaser snapshot build so the release build matrix is
+validated before a release. Live-provider tests stay opt-in and are not part of
+default CI.
 
 ## Common Targets
 
@@ -78,6 +80,27 @@ make dev-server-tunnel
 
 `make test-live` is opt-in. It must not run live provider tests unless
 `SUPACLI_LIVE_TESTS=1` and the required provider credentials are present.
+
+## Releases
+
+Releases are managed by release-please and GoReleaser.
+
+1. Push conventional commits to `main`.
+2. The `release` workflow opens or updates a release-please PR.
+3. Merge the release PR to create the GitHub release and tag.
+4. GoReleaser builds `supacli` and `supaclid` archives for macOS, Linux, and
+   Windows on amd64 and arm64.
+5. GoReleaser uploads release artifacts and checksums to GitHub Releases.
+6. GoReleaser publishes the `supacli` Homebrew formula to
+   `fiam/homebrew-tap`.
+
+Required repository secrets:
+
+1. `HOMEBREW_TAP_GITHUB_TOKEN`: token with contents write access to
+   `fiam/homebrew-tap`.
+2. `RELEASE_PLEASE_TOKEN`: optional token for release-please PRs. Configure it
+   when release PRs need to trigger CI under branch protection; otherwise the
+   workflow falls back to `GITHUB_TOKEN`.
 
 ## Development Workflow
 
@@ -255,10 +278,11 @@ Before opening a PR, check:
 5. `make test-integration`
 6. `make build`
 7. `make coverage`
-8. `make build-supaclid-image`, when Docker is available
-9. `make lint`, when Docker is available
-10. `make commitlint`, after creating commits
-11. README/CONTRIBUTING/AGENTS/docs updates for behavior changes
+8. GoReleaser snapshot build, through CI
+9. `make build-supaclid-image`, when Docker is available
+10. `make lint`, when Docker is available
+11. `make commitlint`, after creating commits
+12. README/CONTRIBUTING/AGENTS/docs updates for behavior changes
 
 If you cannot run a check, call that out in the PR with the reason.
 
