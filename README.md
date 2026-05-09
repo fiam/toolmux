@@ -175,6 +175,68 @@ Global output controls:
 Interactive features are disabled automatically when Toolmux is not attached
 to a terminal.
 
+## MCP
+
+Toolmux can expose implemented provider actions as Model Context Protocol
+tools over stdio:
+
+```bash
+toolmux mcp serve
+```
+
+Configure installed agents automatically:
+
+```bash
+toolmux mcp configure
+```
+
+When no agent is named, Toolmux autodetects supported installed CLIs. You can
+also configure specific agents:
+
+```bash
+toolmux mcp configure codex claude gemini
+```
+
+Supported agent targets are Codex, Claude Code, and Gemini CLI. The configured
+command is `toolmux mcp serve`, so MCP tools use the same provider metadata,
+local policy checks, `--read-only` guard, credential profiles, and provider
+tokens as the regular CLI.
+
+Use MCP profiles to expose only selected tools. Profiles can be global in
+your user config or project-local in `.toolmux/mcp-profiles.yaml`; project
+profiles override global profiles with the same name.
+
+```bash
+toolmux mcp profile set notion-read \
+  --tool 'notion.*' \
+  --exclude-tool '*.create' \
+  --exclude-tool '*.update' \
+  --exclude-tool '*.delete'
+
+toolmux mcp configure codex --mcp-profile notion-read
+```
+
+Set a default profile so `toolmux mcp serve` uses it even when no
+`--mcp-profile` is passed:
+
+```bash
+toolmux mcp profile default notion-read
+```
+
+Use `--global` to write global profile config. Without `--global`, profile
+commands write project-local config, like Git.
+
+Filters support shell-style globs through `--tool` and `--exclude-tool`, and
+regular expressions through `--tool-regex` and `--exclude-tool-regex`. You can
+also pass filters directly during configuration:
+
+```bash
+toolmux mcp configure claude gemini \
+  --mcp-profile notion-pages \
+  --tool 'notion.page.*' \
+  --exclude-tool '*.delete'
+```
+
 ## Local Policy
 
 Toolmux can enforce local command policy before it reads provider credentials

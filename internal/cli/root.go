@@ -108,6 +108,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(doctorCommand(opts))
 	root.AddCommand(connectionsCommand())
 	root.AddCommand(policyCommand(opts))
+	root.AddCommand(mcpCommand(opts))
 	registerActionCommands(root, opts)
 
 	return root
@@ -1105,6 +1106,15 @@ func specForCommand(commandLine string) (policy.CommandSpec, bool) {
 }
 
 func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
+	if len(parts) >= 2 && parts[0] == "mcp" && parts[1] == "configure" {
+		return mcpConfigureSpec(), true
+	}
+	if len(parts) >= 3 && parts[0] == "mcp" && parts[1] == "profile" && parts[2] == "set" {
+		return mcpProfileSetSpec(), true
+	}
+	if len(parts) >= 3 && parts[0] == "mcp" && parts[1] == "profile" && parts[2] == "default" {
+		return mcpProfileDefaultSpec(), true
+	}
 	if len(parts) < 2 {
 		return policy.CommandSpec{}, false
 	}

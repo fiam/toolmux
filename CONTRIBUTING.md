@@ -58,6 +58,14 @@ build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
 Ko-built `toolmuxd` image manifest are validated before a release.
 Live-provider tests stay opt-in and are not part of default CI.
 
+MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
+manual protocol testing and `toolmux mcp configure` to register the server with
+Codex, Claude Code, or Gemini CLI. Project MCP tool profiles are stored in
+`.toolmux/mcp-profiles.yaml`, global profiles are stored under the user config
+directory, and both can be managed with `toolmux mcp profile`. Project config
+overrides global config for matching profile names and default profile
+selection.
+
 ## Common Targets
 
 ```bash
@@ -129,6 +137,11 @@ provider-specific fake upstream behavior kept in provider fixtures.
 Provider commands should be useful for both humans and agents. If a command
 adds a prompt, browser open, pager, spinner, or selector, it must be gated on
 interactive terminal use and must not affect JSON/YAML output.
+
+MCP tools are generated from the same provider action specs as Cobra commands.
+Do not add separate MCP-only provider command trees. If a provider action is
+not safe or useful for agents, control exposure with MCP profiles or policy
+rather than forking provider metadata.
 
 ## Documentation Expectations
 
