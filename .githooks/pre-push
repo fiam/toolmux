@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+empty_tree=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ "$local_sha" == "$empty_tree" ]]; then
+    continue
+  fi
+
+  if [[ "$remote_sha" == "$empty_tree" ]]; then
+    range="$local_sha"
+  else
+    range="${remote_sha}..${local_sha}"
+  fi
+
+  echo "Checking commit messages for ${local_ref} -> ${remote_ref}"
+  "${repo_root}/scripts/check-commit-range.sh" "$range"
+done

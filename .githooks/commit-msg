@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+message_file="${1:?commit message file required}"
+
+git stripspace --strip-comments <"$message_file" |
+  "${repo_root}/scripts/check-commit-message.sh"

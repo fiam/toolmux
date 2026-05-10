@@ -110,15 +110,7 @@ jobs:
             ;;
           esac
 
-          commits="$(git rev-list --reverse "$range")"
-
-          while IFS= read -r sha; do
-            if [[ -z "$sha" ]]; then
-              continue
-            fi
-            echo "Checking commit ${sha}"
-            git log -1 --format=%B "$sha" | scripts/check-commit-message.sh
-          done <<<"$commits"
+          scripts/check-commit-range.sh "$range"
 
   release-build:
     name: release build

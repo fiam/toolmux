@@ -18,6 +18,7 @@ help:
 	@printf '  %-27s %s\n' 'make fmt-check' 'Check Go formatting'
 	@printf '  %-27s %s\n' 'make lint' 'Run full Dockerfile-based linter pass'
 	@printf '  %-27s %s\n' 'make commitlint' 'Check the latest commit message'
+	@printf '  %-27s %s\n' 'make install-hooks' 'Install repository Git hooks'
 	@printf '  %-27s %s\n' 'make dev-server-tunnel' 'Run toolmuxd through Cloudflare Tunnel'
 	@printf '  %-27s %s\n' 'make vet' 'Run go vet'
 	@printf '  %-27s %s\n' 'make test' 'Run unit tests'
@@ -63,7 +64,11 @@ lint:
 
 .PHONY: commitlint
 commitlint:
-	@git log -1 --format=%B | scripts/check-commit-message.sh
+	@scripts/check-commit-range.sh -1 HEAD
+
+.PHONY: install-hooks
+install-hooks:
+	@scripts/install-git-hooks.sh
 
 .PHONY: dev-server-tunnel
 dev-server-tunnel:

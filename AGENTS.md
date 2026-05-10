@@ -88,6 +88,7 @@ make dev-cli
 make build-toolmuxd-image
 make coverage
 make commitlint
+make install-hooks
 make dev-server-tunnel
 ```
 
@@ -391,6 +392,10 @@ Commit message rules:
 3. Use a blank line between the subject and body.
 4. Explain why in the body when the change is not obvious.
 5. Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
+
+Run `make install-hooks` in local clones to install the repository
+`commit-msg` and `pre-push` hooks. The hooks reuse the same commit-message
+validation script as CI.
 
 Examples:
 

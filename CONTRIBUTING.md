@@ -123,6 +123,7 @@ make test-live
 make lint
 make coverage
 make commitlint
+make install-hooks
 make dev-server-tunnel
 ```
 
@@ -318,6 +319,10 @@ Rules enforced by `make commitlint`:
 3. Blank line between subject and body.
 4. Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`,
    `ci`, `chore`, and `revert`.
+
+Run `make install-hooks` once in a local clone to configure repository Git
+hooks. The `commit-msg` hook checks each new commit message, and the
+`pre-push` hook checks the outgoing commit range before it reaches CI.
 
 Example:
 
