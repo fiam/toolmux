@@ -191,9 +191,10 @@ pagers, no prompts, no progress animation, and no browser opens.
 
 MCP support is exposed through `toolmux mcp serve` over stdio. The MCP server
 must write only valid JSON-RPC messages to stdout; diagnostics belong on
-stderr. MCP tools must be generated from provider-owned `actions.Spec`
+stderr. Native MCP tools must be generated from provider-owned `actions.Spec`
 metadata and must run the same policy and `--read-only` checks before provider
-credentials are read. Do not add separate MCP-only provider command trees.
+credentials are read. Do not add separate MCP-only provider command trees for
+native providers.
 
 `toolmux mcp configure` manages supported agent CLIs: Codex, Claude Code, and
 Gemini CLI. With no agent argument it autodetects installed supported CLIs; with
@@ -215,6 +216,27 @@ profile names and default profile selection, similar to Git config layering.
 Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
 regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
 and tests in sync when changing selection behavior.
+
+Imported remote MCP servers are also managed under the general Toolmux `mcp`
+config key through `toolmux mcp`. Server definitions and cached
+`tools/list` metadata are non-secret; bearer tokens and future OAuth tokens must
+live only in the credential store. Remote tool commands are generated from
+cached remote metadata under the registered server name, and they must run
+policy and `--read-only` checks before stored auth is read or remote HTTP calls
+are made. Streamable HTTP clients must handle JSON and `text/event-stream`
+responses and preserve `Mcp-Session-Id` headers for sessionful remote servers.
+`toolmux mcp add` syncs tools by default; keep `--no-sync` available for
+auth-required servers. Stale remote caches should refresh opportunistically
+after about 24 hours without making existing cached commands unusable when a
+refresh attempt fails. `toolmux mcp catalog` must list built-in remotes whether
+or not they are registered, support scriptable `--enable`/`--disable`, and
+provide interactive `--manage` checkbox toggling for built-ins. Catalog
+enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
+can be registered under a non-conflicting command namespace.
+`toolmux mcp ls` must use shared table styling for human output, display only
+`project` or `global` scope labels, support `mcp ls <name>` for one server's
+cached tools, and support `mcp ls -R` for a tree of all registered servers and
+their cached tools.
 
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output
@@ -271,6 +293,17 @@ Every executable command and alias needs policy metadata for evaluation. For
 provider commands, add data-driven action specs with both `remote_effect` and
 `local_effect`; do not register placeholder specs for providers that are not
 implemented yet.
+
+Remote MCP management commands and synthetic remote tool commands also need
+policy metadata. Imported remote MCP server names must not collide with native
+top-level commands or aliases. If a newly added native command collides with an
+existing imported MCP server, startup must fail with an actionable error that
+prints `toolmux mcp rename <old-name> <new-name>`.
+Synthetic remote MCP tool commands must generate flags for representable
+top-level input-schema properties, keep help focused on command usage, expose
+full schemas through the top-level `toolmux schema` command, and provide
+`-v`/`--verbose` HTTP tracing on stderr with authorization and cookie headers
+redacted.
 
 Provider command paths, argument constraints, flags, group help, aliases, and
 leaf help must come from a provider-owned `actions.Spec` tree. Use the same

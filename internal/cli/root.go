@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,18 +32,20 @@ import (
 )
 
 type options struct {
-	output      string
-	color       string
-	pager       string
-	profile     string
-	account     string
-	policy      string
-	readOnly    bool
-	credentials func() (credentials.Store, error)
-	httpClient  *http.Client
-	providerURL map[string]string
-	providerAPI map[string]string
-	toolmuxdURL string
+	output             string
+	color              string
+	pager              string
+	profile            string
+	account            string
+	policy             string
+	readOnly           bool
+	credentials        func() (credentials.Store, error)
+	httpClient         *http.Client
+	providerURL        map[string]string
+	providerAPI        map[string]string
+	toolmuxdURL        string
+	mcpCacheDir        string
+	mcpRemoteConflicts []mcpRemoteNameConflict
 }
 
 type Dependencies struct {
@@ -83,14 +86,19 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 		opts.providerAPI = map[string]string{}
 	}
 	opts.toolmuxdURL = strings.TrimRight(firstNonEmpty(deps.ToolmuxdURL, env("TOOLMUX_TOOLMUXD_URL"), "https://api.toolmux.com"), "/")
+	opts.mcpCacheDir = strings.TrimSpace(env("TOOLMUX_MCP_CACHE_DIR"))
 	configureProviders(opts, env)
 
 	root := &cobra.Command{
 		Use:           "toolmux",
 		Short:         "A local-first mega CLI for SaaS services",
 		SilenceErrors: true,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			if mcpRemoteCommandAllowsConflicts(cmd) {
+				return nil
+			}
+			return mcpRemoteConflictsError(opts.mcpRemoteConflicts)
 		},
 	}
 	root.PersistentFlags().StringVarP(&opts.output, "output", "o", "table", "output format: table, json, yaml")
@@ -108,8 +116,10 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(doctorCommand(opts))
 	root.AddCommand(connectionsCommand())
 	root.AddCommand(policyCommand(opts))
+	root.AddCommand(schemaCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	registerActionCommands(root, opts)
+	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
 
 	return root
 }
@@ -801,7 +811,7 @@ func policyCommand(opts *options) *cobra.Command {
 				if commandLine == "" {
 					return fmt.Errorf("--command is required")
 				}
-				spec, ok := specForCommand(commandLine)
+				spec, ok := specForCommand(opts, commandLine)
 				if !ok {
 					return fmt.Errorf("no command spec found for %q", commandLine)
 				}
@@ -1036,7 +1046,7 @@ func humanResource(resource string) string {
 }
 
 func writeCatalog(cmd *cobra.Command, opts *options) error {
-	specs := providers.CommandSpecs()
+	specs := allPolicyCommandSpecs(opts)
 	return writeValue(cmd, opts, specs, func(w io.Writer) {
 		human := humanOutputOptions(cmd, opts)
 		rows := make([][]string, 0, len(specs))
@@ -1057,6 +1067,38 @@ func writeCatalog(cmd *cobra.Command, opts *options) error {
 			Empty:   "no command specs",
 		})
 	})
+}
+
+func allPolicyCommandSpecs(opts *options) []policy.CommandSpec {
+	specs := rootCommandSpecs()
+	specs = append(specs, providers.CommandSpecs()...)
+	specs = append(specs, cachedMCPRemoteCommandSpecs(opts)...)
+	sort.Slice(specs, func(i, j int) bool {
+		return specs[i].ID < specs[j].ID
+	})
+	return specs
+}
+
+func rootCommandSpecs() []policy.CommandSpec {
+	return []policy.CommandSpec{
+		mcpConfigureSpec(),
+		mcpEnableSpec(),
+		mcpDisableSpec(),
+		mcpProfileSetSpec(),
+		mcpProfileDefaultSpec(),
+		mcpRemoteAddSpec(),
+		mcpRemoteSyncSpec(),
+		mcpRemoteRenameSpec(),
+		mcpRemoteRemoveSpec(),
+		mcpRemoteListSpec(),
+		mcpRemoteShowSpec(),
+		mcpRemoteCatalogListSpec(),
+		mcpRemoteCatalogManageSpec(),
+		mcpRemoteAuthSetSpec(),
+		mcpRemoteAuthRemoveSpec(),
+		mcpRemoteAuthStatusSpec(),
+		schemaSpec(),
+	}
 }
 
 func authorize(cmd *cobra.Command, opts *options, spec policy.CommandSpec, args []string) error {
@@ -1092,9 +1134,12 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 	return engine.Authorize(inv), nil
 }
 
-func specForCommand(commandLine string) (policy.CommandSpec, bool) {
+func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool) {
 	parts := strings.Fields(commandLine)
 	if spec, ok := rootSpecForCommandParts(parts); ok {
+		return spec, true
+	}
+	if spec, ok := mcpRemoteSpecForCommandParts(opts, parts); ok {
 		return spec, true
 	}
 	for _, spec := range providers.CommandSpecs() {
@@ -1106,14 +1151,56 @@ func specForCommand(commandLine string) (policy.CommandSpec, bool) {
 }
 
 func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
+	if len(parts) >= 1 && parts[0] == "schema" {
+		return schemaSpec(), true
+	}
 	if len(parts) >= 2 && parts[0] == "mcp" && parts[1] == "configure" {
 		return mcpConfigureSpec(), true
+	}
+	if len(parts) >= 2 && parts[0] == "mcp" && parts[1] == "enable" {
+		return mcpEnableSpec(), true
+	}
+	if len(parts) >= 2 && parts[0] == "mcp" && parts[1] == "disable" {
+		return mcpDisableSpec(), true
 	}
 	if len(parts) >= 3 && parts[0] == "mcp" && parts[1] == "profile" && parts[2] == "set" {
 		return mcpProfileSetSpec(), true
 	}
 	if len(parts) >= 3 && parts[0] == "mcp" && parts[1] == "profile" && parts[2] == "default" {
 		return mcpProfileDefaultSpec(), true
+	}
+	if len(parts) >= 2 && parts[0] == "mcp" {
+		switch parts[1] {
+		case "add", "register":
+			return mcpRemoteAddSpec(), true
+		case "sync":
+			return mcpRemoteSyncSpec(), true
+		case "rename":
+			return mcpRemoteRenameSpec(), true
+		case "remove", "rm":
+			return mcpRemoteRemoveSpec(), true
+		case "ls", "list":
+			return mcpRemoteListSpec(), true
+		case "show":
+			return mcpRemoteShowSpec(), true
+		case "catalog", "available":
+			if mcpRemoteCatalogCommandModifies(parts) {
+				return mcpRemoteCatalogManageSpec(), true
+			}
+			return mcpRemoteCatalogListSpec(), true
+		case "auth":
+			if len(parts) < 3 {
+				return policy.CommandSpec{}, false
+			}
+			switch parts[2] {
+			case "set":
+				return mcpRemoteAuthSetSpec(), true
+			case "remove", "rm":
+				return mcpRemoteAuthRemoveSpec(), true
+			case "status":
+				return mcpRemoteAuthStatusSpec(), true
+			}
+		}
 	}
 	if len(parts) < 2 {
 		return policy.CommandSpec{}, false

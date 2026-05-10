@@ -278,7 +278,7 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name == "shared" && !slices.Equal(entry.Scopes, []string{"global", "local"}) {
+		if entry.Name == "shared" && !slices.Equal(entry.Scopes, []string{"global", "project"}) {
 			t.Fatalf("expected shared profile to report both scopes, got %+v", entry)
 		}
 	}

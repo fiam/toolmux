@@ -198,6 +198,103 @@ toolmux mcp serve \
 `mcp serve` accepts `--mcp-profile`, `--tool`, `--tool-regex`,
 `--exclude-tool`, and `--exclude-tool-regex`.
 
+### Remote MCP Servers
+
+Toolmux can import a remote MCP server, cache its tool definitions, and expose
+the cached tools as top-level CLI commands under the registered server name.
+
+```bash
+toolmux mcp add iterate
+toolmux iterate mock_echo --message hello
+toolmux iterate mock_calculate --operation add --a 2 --b 3
+toolmux schema iterate mock_calculate
+```
+
+The built-in remote server names are `atlassian`, `cloudflare`, `iterate`,
+`linear`, `miro`, and `notion`. `iterate` points at the public no-auth mock
+server at `https://mock.iterate.com/no-auth` and is useful for smoke tests.
+You can also register any Streamable HTTP MCP endpoint:
+
+```bash
+toolmux mcp add linear2 https://mcp.linear.app/mcp --no-sync
+toolmux mcp sync linear2
+toolmux mcp ls
+toolmux mcp ls linear2
+toolmux mcp ls -R
+toolmux mcp show linear2
+toolmux mcp catalog
+toolmux mcp catalog --enable iterate --global --sync
+toolmux mcp catalog --enable notion=notion-mcp --global
+toolmux mcp catalog --manage
+toolmux mcp rename linear2 linear-work
+toolmux mcp remove linear-work
+```
+
+`mcp add` syncs tools immediately by default. Use `--no-sync` when a protected
+server needs auth first, then store auth and run `mcp sync`:
+
+```bash
+toolmux mcp add cloudflare --no-sync
+printenv CLOUDFLARE_API_TOKEN | \
+  toolmux mcp auth set cloudflare --bearer-token-stdin
+toolmux mcp sync cloudflare
+```
+
+`mcp catalog` lists built-in remote MCP servers whether or not they are
+registered. Use `--enable <name>` and `--disable <name>` for scriptable
+changes, or `--manage` in an interactive terminal to select enabled built-ins
+with a checkbox form. Catalog enablement writes only server config by default;
+pass `--sync` to sync newly enabled servers immediately.
+Use `--enable <catalog-name>=<registered-name>` when the default catalog name
+would collide with a native command, such as `notion=notion-mcp`.
+`mcp ls` lists registered remotes with `project` or `global` scope labels,
+`mcp ls <name>` lists cached tools for one remote, and `mcp ls -R` prints a
+tree of all registered remotes and their cached tools.
+
+The registered name is the namespace. Registering `linear2` exposes tools as
+`linear2 <tool-name>` in the CLI and `linear2.<tool-name>` from
+`toolmux mcp serve`. Toolmux rejects names that collide with native commands.
+If a later Toolmux version adds a native command that collides with an imported
+remote MCP server, startup fails with a rename command such as:
+
+```bash
+toolmux mcp rename linear <new-name>
+```
+
+Remote MCP server definitions are non-secret config under `mcp.servers`.
+Global config uses `$XDG_CONFIG_HOME/toolmux/config.yaml` or the platform user
+config directory; project config uses `.toolmux/config.yaml` and overrides
+global entries with the same name. Tool metadata is cached under the user cache
+directory and can be redirected for tests with `TOOLMUX_MCP_CACHE_DIR`.
+Streamable HTTP responses may be plain JSON or `text/event-stream`; Toolmux
+tracks `Mcp-Session-Id` headers when a remote server requires sessions.
+Cached tool metadata is refreshed opportunistically after about 24 hours when
+remote tools are listed or called. Use `toolmux mcp sync <name>` to refresh on
+demand.
+
+Remote tool commands translate supported top-level JSON Schema properties into
+flags, including strings, booleans, integers, numbers, and scalar arrays. Use
+`--json` for nested objects or other schemas that cannot be represented as
+flags. Tool help stays focused on command usage and generated flags; use
+`toolmux schema <server> <tool>` or `toolmux schema <server>.<tool>` to print
+the cached input schema. Remote tool commands accept `-v`/`--verbose` to print
+raw MCP HTTP requests and responses to stderr with authorization headers
+redacted.
+
+Bearer-token auth can be stored in the OS credential store and is applied to
+`sync`, CLI tool calls, and proxied `mcp serve` tool calls after policy checks:
+
+```bash
+printenv CLOUDFLARE_API_TOKEN | \
+  toolmux mcp auth set cloudflare --bearer-token-stdin
+toolmux mcp auth status cloudflare
+toolmux mcp auth remove cloudflare
+```
+
+Remote MCP OAuth and dynamic client registration are not implemented yet.
+Servers that require browser OAuth will need bearer-token support from the
+provider or a future Toolmux OAuth mediator.
+
 ### Agent Setup
 
 Toolmux can configure supported local agent CLIs automatically:
@@ -370,13 +467,15 @@ Inspect available policy-aware commands:
 toolmux policy catalog
 ```
 
-The catalog lists implemented provider actions and their remote/local effects.
-Use `--read-only` to block actions with remote or local write effects.
+The catalog lists implemented provider actions, Toolmux MCP management
+commands, cached imported MCP tools, and their remote/local effects. Use
+`--read-only` to block actions with remote or local write effects.
 
 Check a command:
 
 ```bash
 toolmux policy check --command "notion page read Roadmap"
+toolmux policy check --command "iterate mock_echo"
 ```
 
 Policy discovery order:

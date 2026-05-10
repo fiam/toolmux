@@ -58,11 +58,25 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve and configure MCP tools",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown mcp command %q", args[0])
+			}
+			return cmd.Help()
+		},
 	}
 	cmd.AddCommand(mcpServeCommand(opts))
 	cmd.AddCommand(mcpConfigureCommand(opts))
 	cmd.AddCommand(mcpEnableCommand(opts))
 	cmd.AddCommand(mcpDisableCommand(opts))
+	cmd.AddCommand(mcpRemoteAddCommand(opts))
+	cmd.AddCommand(mcpRemoteSyncCommand(opts))
+	cmd.AddCommand(mcpRemoteRenameCommand(opts))
+	cmd.AddCommand(mcpRemoteRemoveCommand(opts))
+	cmd.AddCommand(mcpRemoteAuthCommand(opts))
+	cmd.AddCommand(mcpRemoteListCommand(opts))
+	cmd.AddCommand(mcpRemoteShowCommand(opts))
+	cmd.AddCommand(mcpRemoteCatalogCommand(opts))
 	cmd.AddCommand(mcpProfileCommand(opts))
 	return cmd
 }
@@ -613,6 +627,7 @@ type toolmuxConfigFile struct {
 type mcpConfig struct {
 	DefaultProfile string                      `json:"default_profile,omitempty" yaml:"default_profile,omitempty"`
 	Profiles       map[string]mcpProfileConfig `json:"profiles,omitempty" yaml:"profiles,omitempty"`
+	Servers        map[string]mcpRemoteServer  `json:"servers,omitempty" yaml:"servers,omitempty"`
 }
 
 type mcpProfileConfig struct {
@@ -762,9 +777,9 @@ func mcpProfileWritePath(scope mcpProfileScopeOptions) (string, string, error) {
 	if path, ok, err := discoverToolmuxConfigFile(""); err != nil {
 		return "", "", err
 	} else if ok {
-		return path, "local", nil
+		return path, "project", nil
 	}
-	return toolmuxConfigRelPath, "local", nil
+	return toolmuxConfigRelPath, "project", nil
 }
 
 func lookupMCPProfile(name, startDir string) (mcpProfileEntry, bool, error) {
@@ -856,7 +871,7 @@ func loadMCPProfileSources(startDir, globalPath string) ([]mcpProfileSource, err
 		if err != nil {
 			return nil, err
 		}
-		sources = append(sources, mcpProfileSource{Scope: "local", Path: localPath, config: config})
+		sources = append(sources, mcpProfileSource{Scope: "project", Path: localPath, config: config})
 	}
 	return sources, nil
 }
@@ -913,6 +928,9 @@ func readToolmuxConfigFile(path string) (toolmuxConfigFile, error) {
 	if config.MCP.Profiles == nil {
 		config.MCP.Profiles = map[string]mcpProfileConfig{}
 	}
+	if config.MCP.Servers == nil {
+		config.MCP.Servers = map[string]mcpRemoteServer{}
+	}
 	return config, nil
 }
 
@@ -933,6 +951,9 @@ func writeToolmuxConfigFile(path string, config toolmuxConfigFile) error {
 	}
 	if config.MCP.Profiles == nil {
 		config.MCP.Profiles = map[string]mcpProfileConfig{}
+	}
+	if config.MCP.Servers == nil {
+		config.MCP.Servers = map[string]mcpRemoteServer{}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -1033,7 +1054,7 @@ func (server mcpServer) handleRequest(ctx context.Context, request mcpRequest) (
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return server.toolsListResult(), nil
+		return server.toolsListResult(ctx), nil
 	case "tools/call":
 		var params mcpCallToolParams
 		if err := decodeMCPParams(request.Params, &params); err != nil {
@@ -1085,12 +1106,13 @@ func (server mcpServer) initializeResult(params json.RawMessage) map[string]any 
 	}
 }
 
-func (server mcpServer) toolsListResult() map[string]any {
+func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
 	specs := server.mcpSpecs()
-	tools := make([]mcpTool, 0, len(specs))
+	tools := make([]any, 0, len(specs))
 	for _, spec := range specs {
 		tools = append(tools, mcpToolFromSpec(spec))
 	}
+	tools = append(tools, server.remoteMCPTools(ctx)...)
 	return map[string]any{
 		"tools": tools,
 	}
@@ -1212,6 +1234,9 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	}
 	spec, ok := server.lookupMCPTool(name)
 	if !ok {
+		if ref, ok := server.lookupRemoteMCPTool(ctx, name); ok {
+			return server.callRemoteTool(ctx, ref, params.Arguments)
+		}
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: "unknown MCP tool " + name}
 	}
 	arguments, err := decodeMCPToolArguments(params.Arguments, spec)
@@ -1251,6 +1276,26 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 		return mcpErrorToolResult(err), nil
 	}
 	return mcpTextToolResult(text), nil
+}
+
+func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef, raw json.RawMessage) (mcpCallToolResult, error) {
+	arguments, err := remoteMCPToolArguments(raw)
+	if err != nil {
+		return mcpCallToolResult{}, mcpError{Code: -32602, Message: err.Error()}
+	}
+	spec := mcpRemoteActionSpec(ref.Entry.Name, ref.Tool)
+	if err := authorize(server.cmd, server.opts, spec, nil); err != nil {
+		return mcpErrorToolResult(err), nil
+	}
+	token, err := loadMCPRemoteBearerToken(ctx, server.opts, ref.Entry.Name)
+	if err != nil {
+		return mcpErrorToolResult(err), nil
+	}
+	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, nil)
+	if err != nil {
+		return mcpErrorToolResult(err), nil
+	}
+	return result, nil
 }
 
 func (server mcpServer) lookupMCPTool(name string) (actions.Spec, bool) {
