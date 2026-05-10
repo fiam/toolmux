@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -426,6 +427,14 @@ func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"linear", "miro"} {
+		if err := env.Store.SaveOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, name), credentials.OAuthTokens{
+			AccessToken: "token-" + name,
+			TokenType:   "Bearer",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	help := runRootForRemoteTest(t, env, "mcp", "rm", "--help")
 	if !strings.Contains(help, "--project") {
@@ -450,6 +459,27 @@ func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
 	}
 	if len(config.MCP.Servers) != 0 {
 		t.Fatalf("expected all project MCP servers removed, got %#v", config.MCP.Servers)
+	}
+	for _, name := range []string{"linear", "miro"} {
+		_, err := env.Store.LoadOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, name))
+		if !errors.Is(err, credentials.ErrNotFound) {
+			t.Fatalf("expected stored auth for %s to be removed, got %v", name, err)
+		}
+	}
+
+	if err := env.Store.SaveOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, "linear"), credentials.OAuthTokens{
+		AccessToken: "stale-token",
+		TokenType:   "Bearer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	authRemoveOutput := runRootForRemoteTest(t, env, "mcp", "auth", "rm", "linear")
+	if !strings.Contains(authRemoveOutput, "removed stored auth for MCP server linear") {
+		t.Fatalf("expected stale auth removal output, got %q", authRemoveOutput)
+	}
+	_, err = env.Store.LoadOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, "linear"))
+	if !errors.Is(err, credentials.ErrNotFound) {
+		t.Fatalf("expected stale stored auth to be removed, got %v", err)
 	}
 }
 

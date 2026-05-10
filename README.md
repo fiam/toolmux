@@ -322,6 +322,9 @@ toolmux mcp rename linear2 linear-work
 toolmux mcp remove linear-work miro
 ```
 
+Removing a remote also deletes stored auth for that server name in the active
+Toolmux profile/account.
+
 The registered name becomes the command namespace. Registering `linear2`
 exposes CLI commands as `toolmux linear2 <tool-name>` and MCP tools as
 `linear2.<tool-name>`.
@@ -361,6 +364,9 @@ toolmux mcp auth login cloudflare
 toolmux mcp auth status cloudflare
 toolmux mcp auth remove cloudflare
 ```
+
+`toolmux mcp auth remove <name>` can also clean up stale auth after the remote
+server entry has already been removed.
 
 If dynamic client registration is not available, provide a client from the MCP
 server operator:

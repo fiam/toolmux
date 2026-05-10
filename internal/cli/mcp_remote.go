@@ -349,6 +349,11 @@ func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 			if err := authorize(cmd, opts, mcpRemoteRemoveSpec(), args); err != nil {
 				return err
 			}
+			store, err := opts.credentials()
+			if err != nil {
+				return err
+			}
+			ctx := commandContext(cmd)
 			for _, removal := range removals {
 				for _, name := range removal.Names {
 					delete(removal.Config.MCP.Servers, name)
@@ -360,6 +365,9 @@ func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 			for _, removal := range removals {
 				for _, name := range removal.Names {
 					_ = removeMCPRemoteCache(opts.mcpCacheDir, name)
+					if err := store.DeleteOAuthTokens(ctx, mcpRemoteCredentialRef(opts, name)); err != nil {
+						return fmt.Errorf("remove stored auth for MCP server %s: %w", name, err)
+					}
 					fmt.Fprintf(cmd.OutOrStdout(), "removed MCP server %s from %s\n", name, removal.Path)
 				}
 			}
@@ -513,11 +521,6 @@ func mcpRemoteAuthRemoveCommand(opts *options) *cobra.Command {
 			name, err := cleanMCPRemoteName(args[0])
 			if err != nil {
 				return err
-			}
-			if _, ok, err := lookupMCPRemoteServer(name, ""); err != nil {
-				return err
-			} else if !ok {
-				return fmt.Errorf("MCP server %q is not registered", name)
 			}
 			if err := authorize(cmd, opts, mcpRemoteAuthRemoveSpec(), args); err != nil {
 				return err
@@ -2789,7 +2792,7 @@ func mcpRemoteRemoveSpec() actions.Spec {
 		actions.Use("mcp remove <name> [name...]"),
 		actions.Short("Remove a registered remote MCP server"),
 		actions.RBAC("mcp_server", actions.VerbDelete, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("mcp-config"),
+		actions.Risks("mcp-config", "mcp-auth"),
 	)
 }
 

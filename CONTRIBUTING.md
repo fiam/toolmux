@@ -83,6 +83,10 @@ metadata in the user cache directory. Use `toolmux mcp add`, `sync`,
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
 registration, and `toolmux mcp auth set` for externally issued bearer tokens.
 `toolmux mcp remove` and its `rm` alias should accept one or more server names.
+Removing a remote MCP server should also delete stored auth for that server
+name in the active Toolmux profile/account.
+`toolmux mcp auth remove` should still delete matching stored auth when the
+server entry has already been removed.
 `toolmux mcp ls` should use the shared table renderer for human output,
 display only `project` or `global` scope labels, support `mcp ls <name>` for
 cached tools on one server, and support `mcp ls -R` for a tree of registered
