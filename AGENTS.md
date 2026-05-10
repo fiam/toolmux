@@ -271,6 +271,11 @@ When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
 human table columns, or policy metadata.
 
+The initial Slack native surface is brokered OAuth v2 user-token auth plus
+`slack conversations ls`, `slack message send`, and `slack search`. Keep Slack
+scopes aligned with `docs/providers/slack-app.md`, do not request bot scopes by
+default, and preserve token rotation through `toolmuxd` before Slack API calls.
+
 ## Hosted Broker
 
 The CLI defaults to `https://api.toolmux.com` for brokered OAuth flows. Use

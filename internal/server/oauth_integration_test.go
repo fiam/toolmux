@@ -16,9 +16,7 @@ import (
 
 func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 	t.Parallel()
-	upstream := notiontest.NewUpstream()
-	defer upstream.Close()
-	toolmuxd := toolmuxdtest.NewNotion(t, upstream.URL, upstream.Client())
+	toolmuxd := newNotionToolmuxd(t)
 
 	session := createNotionSession(t, toolmuxd)
 	if session.AuthURL == "" {
@@ -99,6 +97,17 @@ func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 
 func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
 	t.Parallel()
+	if toolmuxd, ok := toolmuxdtest.ExternalFromEnv(t); ok {
+		resp, err := toolmuxd.Client().Get(toolmuxd.URL + "/oauth/notion/callback?state=bad&code=code")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected invalid state to return 400, got %d", resp.StatusCode)
+		}
+		return
+	}
 	config := toolmuxdtest.NotionConfig("https://notion.example.test", http.DefaultClient)
 	config.SessionTTL = time.Minute
 	toolmuxd := toolmuxdtest.New(t, config)
@@ -111,6 +120,16 @@ func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected invalid state to return 400, got %d", resp.StatusCode)
 	}
+}
+
+func newNotionToolmuxd(t *testing.T) *toolmuxdtest.Server {
+	t.Helper()
+	if toolmuxd, ok := toolmuxdtest.ExternalFromEnv(t); ok {
+		return toolmuxd
+	}
+	upstream := notiontest.NewUpstream()
+	t.Cleanup(upstream.Close)
+	return toolmuxdtest.NewNotion(t, upstream.URL, upstream.Client())
 }
 
 func createNotionSession(t *testing.T, server *toolmuxdtest.Server) createSessionResponse {

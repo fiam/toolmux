@@ -34,7 +34,7 @@ func TestCommandSpecsHaveRequiredFields(t *testing.T) {
 			}
 		}
 		switch spec.Provider {
-		case "jira", "slack", "google", "google-docs", "google-drive", "gmail":
+		case "jira", "google", "google-docs", "google-drive", "gmail":
 			t.Fatalf("unimplemented provider command should not be registered: %#v", spec)
 		}
 		if seen[spec.ID] {

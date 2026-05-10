@@ -323,7 +323,6 @@ Initial providers:
 
 1. Linear.
 2. Google Docs/Drive/Gmail through Google desktop OAuth.
-3. Slack user-token mode when using Slack PKCE-compatible desktop redirect flows.
 
 ### toolmuxd Local-Custody OAuth
 
@@ -345,7 +344,8 @@ Initial providers:
 
 1. Notion.
 2. Jira.
-3. Slack bot/workspace-install mode, if enabled after user-token MVP.
+3. Slack user-token mode.
+4. Slack bot/workspace-install mode, if enabled after user-token MVP.
 
 toolmuxd must not store provider access tokens or refresh tokens in durable storage.
 
@@ -451,9 +451,10 @@ Out of scope for MVP:
 
 Auth:
 
-1. Default MVP path is user-token OAuth with PKCE where possible.
-2. Slack bot scopes are not the default because Slack desktop redirects with PKCE are not allowed to request bot scopes.
-3. Slack bot/workspace install can be added through toolmuxd as a separate `--mode bot` path.
+1. Default MVP path is brokered Slack OAuth v2 user-token auth through `toolmuxd`.
+2. Slack bot scopes are not requested by the initial command set.
+3. Slack token rotation is enabled when the app issues refresh tokens.
+4. Slack bot/workspace install can be added through toolmuxd as a separate `--mode bot` path.
 
 Candidate user scopes:
 
@@ -680,7 +681,7 @@ MVP success:
 ## Risks
 
 1. Google verification can block or delay broad Docs/Drive/Gmail features.
-2. Slack PKCE user-token capabilities may not cover desired bot/workspace workflows.
+2. Slack user-token capabilities may not cover desired bot/workspace workflows.
 3. toolmuxd availability affects Notion/Jira refresh flows even though tokens are local.
 4. Provider OAuth policies can change and may require re-review.
 5. Local keychains behave differently in headless Linux and CI environments.

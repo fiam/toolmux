@@ -112,7 +112,7 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	for _, provider := range []string{"jira", "slack", "google"} {
+	for _, provider := range []string{"jira", "google"} {
 		if strings.Contains(rendered, provider) {
 			t.Fatalf("unimplemented provider command %q should not appear in help: %q", provider, rendered)
 		}

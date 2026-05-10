@@ -1,15 +1,25 @@
 package slack
 
-import "github.com/fiam/toolmux/internal/providers"
+import "github.com/fiam/toolmux/internal/actions"
 
-func init() {
-	providers.Register(Descriptor())
-}
+const ProviderName actions.ProviderName = "slack"
 
-func Descriptor() providers.Provider {
-	return providers.Provider{
-		ID:          "slack",
-		DisplayName: "Slack",
-		AuthMode:    "native_pkce",
+const (
+	CapabilityReadConversations = "channels:read"
+	CapabilityReadGroups        = "groups:read"
+	CapabilityReadIMs           = "im:read"
+	CapabilityReadMPIMs         = "mpim:read"
+	CapabilitySearch            = "search:read"
+	CapabilityWriteChat         = "chat:write"
+)
+
+func DefaultCapabilities() []string {
+	return []string{
+		CapabilityReadConversations,
+		CapabilityReadGroups,
+		CapabilityReadIMs,
+		CapabilityReadMPIMs,
+		CapabilitySearch,
+		CapabilityWriteChat,
 	}
 }

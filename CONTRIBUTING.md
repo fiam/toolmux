@@ -58,6 +58,11 @@ build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
 Ko-built `toolmuxd` image manifest are validated before a release.
 Live-provider tests stay opt-in and are not part of default CI.
 
+Current native provider command coverage includes Notion and the initial Slack
+surface. Jira and Google provider packages may exist as registration stubs, but
+they should not expose command trees until their provider-owned specs, handlers,
+fake upstreams, and tests are ready.
+
 MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
 manual protocol testing and `toolmux mcp configure` to register the server with
 Codex, Claude Code, or Gemini CLI. Interactive no-argument configuration shows

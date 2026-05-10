@@ -23,6 +23,7 @@ SERVER_PID=""
 TUNNEL_PID=""
 PUBLIC_URL=""
 TUNNEL_MODE="quick"
+QUIET="${TOOLMUX_TUNNEL_QUIET:-1}"
 
 usage() {
   cat <<'EOF'
@@ -82,6 +83,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+log() {
+  if [[ "$QUIET" != "1" ]]; then
+    printf '%s\n' "$*"
+  fi
+}
+
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1" >&2
@@ -131,15 +138,16 @@ mkdir -p "$STATE_DIR" bin
 
 write_env_file() {
   cat >"$ENV_FILE" <<EOF
-TOOLMUX_LOCAL_SERVER_URL=${LOCAL_URL}
-TOOLMUX_PUBLIC_URL=${PUBLIC_URL}
-TOOLMUX_TOOLMUXD_URL=${PUBLIC_URL}
-NOTION_REDIRECT_URI=${PUBLIC_URL}/oauth/notion/callback
+export TOOLMUX_LOCAL_SERVER_URL=${LOCAL_URL}
+export TOOLMUX_PUBLIC_URL=${PUBLIC_URL}
+export TOOLMUX_TOOLMUXD_URL=${PUBLIC_URL}
+export NOTION_REDIRECT_URI=${PUBLIC_URL}/oauth/notion/callback
+export SLACK_REDIRECT_URI=${PUBLIC_URL}/oauth/slack/callback
 EOF
 }
 
 wait_for_local_server() {
-  echo "waiting for ${LOCAL_URL}/healthz..."
+  log "waiting for ${LOCAL_URL}/healthz..."
   for _ in {1..80}; do
     if curl -fsS "${LOCAL_URL}/healthz" >/dev/null 2>&1; then
       return
@@ -158,7 +166,7 @@ wait_for_local_server() {
 }
 
 wait_for_public_tunnel() {
-  echo "waiting for ${PUBLIC_URL}/healthz through Cloudflare..."
+  log "waiting for ${PUBLIC_URL}/healthz through Cloudflare..."
   for _ in {1..120}; do
     if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
       echo "cloudflared exited early; log follows:" >&2
@@ -177,7 +185,7 @@ wait_for_public_tunnel() {
 }
 
 start_quick_tunnel() {
-  echo "starting Cloudflare quick tunnel for ${LOCAL_URL}..."
+  log "starting Cloudflare quick tunnel for ${LOCAL_URL}..."
   cloudflared tunnel --url "$LOCAL_URL" >"$CLOUDFLARED_LOG" 2>&1 &
   TUNNEL_PID="$!"
 
@@ -216,17 +224,21 @@ write_named_tunnel_config() {
 
 start_named_tunnel() {
   write_named_tunnel_config
-  echo "wrote Cloudflare tunnel config to ${CLOUDFLARED_CONFIG}"
-  cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress validate
+  log "wrote Cloudflare tunnel config to ${CLOUDFLARED_CONFIG}"
+  if ! cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress validate >>"$CLOUDFLARED_LOG" 2>&1; then
+    echo "Cloudflare tunnel config validation failed; log follows:" >&2
+    cat "$CLOUDFLARED_LOG" >&2
+    exit 1
+  fi
 
   if [[ "$TUNNEL_ROUTE_DNS" == "1" ]]; then
-    echo "routing ${TUNNEL_HOSTNAME} to Cloudflare tunnel ${TUNNEL_NAME}..."
+    log "routing ${TUNNEL_HOSTNAME} to Cloudflare tunnel ${TUNNEL_NAME}..."
     if ! cloudflared tunnel route dns "$TUNNEL_NAME" "$TUNNEL_HOSTNAME"; then
       echo "warning: DNS route command failed; continuing in case the route already exists" >&2
     fi
   fi
 
-  echo "starting Cloudflare named tunnel ${TUNNEL_NAME} for ${PUBLIC_URL}..."
+  log "starting Cloudflare named tunnel ${TUNNEL_NAME} for ${PUBLIC_URL}..."
   if [[ -n "$CLOUDFLARED_CREDENTIALS_FILE" ]]; then
     cloudflared tunnel --config "$CLOUDFLARED_CONFIG" run \
       --credentials-file "$CLOUDFLARED_CREDENTIALS_FILE" \
@@ -239,7 +251,7 @@ start_named_tunnel() {
 }
 
 start_token_tunnel() {
-  echo "starting Cloudflare dashboard-managed tunnel for ${PUBLIC_URL}..."
+  log "starting Cloudflare dashboard-managed tunnel for ${PUBLIC_URL}..."
   if [[ -n "$CLOUDFLARED_TOKEN_FILE" ]]; then
     cloudflared tunnel run --token-file "$CLOUDFLARED_TOKEN_FILE" >"$CLOUDFLARED_LOG" 2>&1 &
   else
@@ -248,10 +260,11 @@ start_token_tunnel() {
   TUNNEL_PID="$!"
 }
 
-echo "building toolmuxd..."
+echo "starting toolmuxd tunnel..."
+log "building toolmuxd..."
 go build -o bin/toolmuxd ./cmd/toolmuxd
 
-echo "starting local server on ${SERVER_ADDR}..."
+log "starting local server on ${SERVER_ADDR}..."
 if [[ -n "$PUBLIC_URL" ]]; then
   TOOLMUX_PUBLIC_URL="$PUBLIC_URL" bin/toolmuxd --addr "$SERVER_ADDR" >"$SERVER_LOG" 2>&1 &
 else
@@ -281,34 +294,20 @@ wait_for_public_tunnel
 write_env_file
 
 cat <<EOF
+ready
 
-Toolmux local server tunnel is running.
+  local:  ${LOCAL_URL}
+  public: ${PUBLIC_URL} (${TUNNEL_MODE})
 
-Mode:
-  ${TUNNEL_MODE}
+  env:    source ${ENV_FILE}
+  logs:   ${SERVER_LOG}
+          ${CLOUDFLARED_LOG}
 
-Local server:
-  ${LOCAL_URL}
+  callbacks:
+    ${PUBLIC_URL}/oauth/notion/callback
+    ${PUBLIC_URL}/oauth/slack/callback
 
-Public tunnel:
-  ${PUBLIC_URL}
-
-OAuth callback template:
-  ${PUBLIC_URL}/oauth/<provider>/callback
-
-Toolmux environment:
-  export TOOLMUX_TOOLMUXD_URL=${PUBLIC_URL}
-  export TOOLMUX_PUBLIC_URL=${PUBLIC_URL}
-  export NOTION_REDIRECT_URI=${PUBLIC_URL}/oauth/notion/callback
-
-Wrote local environment hints to:
-  ${ENV_FILE}
-
-Logs:
-  ${SERVER_LOG}
-  ${CLOUDFLARED_LOG}
-
-Press Ctrl+C to stop the server and tunnel.
+Press Ctrl+C to stop.
 
 EOF
 

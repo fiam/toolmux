@@ -329,7 +329,7 @@ Rules:
 
 ### Native PKCE Flow
 
-Used for Linear, Google Docs/Drive/Gmail, and Slack user-token mode when configured.
+Used for Linear and Google Docs/Drive/Gmail when configured.
 
 Implementation:
 
@@ -345,7 +345,8 @@ The callback HTML should contain no token data.
 
 ### toolmuxd-Backed Local-Custody Flow
 
-Used for Notion, Jira, and Slack bot/workspace mode.
+Used for Notion, Jira, Slack user-token mode, and any future Slack
+bot/workspace mode.
 
 toolmuxd OAuth endpoints:
 
@@ -597,9 +598,9 @@ Acceptance criteria:
 
 Deliverables:
 
-1. Slack PKCE user-token connection mode.
-2. Slack token rotation support.
-3. Slack commands:
+1. Slack brokered OAuth v2 user-token connection mode.
+2. Slack token rotation support through `toolmuxd`.
+3. Initial Slack commands:
 
 ```bash
 toolmux slack conversations ls
@@ -611,7 +612,7 @@ Acceptance criteria:
 
 1. Slack user-token mode does not request bot scopes.
 2. Token rotation handles 12-hour access tokens and refresh-token replacement.
-3. Commands clearly tell users when workspace admin approval is required.
+3. Missing Slack scopes surface as provider API errors before output rendering.
 4. Slack bot/workspace mode remains explicitly out of MVP or behind `toolmux connect slack --mode bot`.
 5. Slack send/search commands include distinct policy actions.
 
