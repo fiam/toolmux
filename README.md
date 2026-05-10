@@ -297,13 +297,13 @@ notion
 Register a custom Streamable HTTP MCP endpoint:
 
 ```bash
-toolmux mcp add linear2 https://mcp.linear.app/mcp --no-sync
-toolmux mcp auth login linear2
-toolmux mcp sync linear2
+toolmux mcp add linear-work https://mcp.linear.app/mcp --no-sync
+toolmux mcp auth login linear-work
+toolmux mcp sync linear-work
 toolmux mcp ls
-toolmux mcp ls linear2
+toolmux mcp ls linear-work
 toolmux mcp ls -R
-toolmux mcp show linear2
+toolmux mcp show linear-work
 ```
 
 Manage built-ins from the catalog:
@@ -318,16 +318,17 @@ toolmux mcp catalog --manage
 Rename or remove registered remotes:
 
 ```bash
-toolmux mcp rename linear2 linear-work
-toolmux mcp remove linear-work miro
+toolmux mcp rename linear-work linear-prod
+toolmux mcp remove linear-prod miro
 ```
 
 Removing a remote also deletes stored auth for that server name in the active
 Toolmux profile/account.
 
-The registered name becomes the command namespace. Registering `linear2`
-exposes CLI commands as `toolmux linear2 <tool-name>` and MCP tools as
-`linear2.<tool-name>`.
+The registered name becomes the command namespace. Registering `linear-work`
+exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
+`linear-work.<tool-name>`. Running `toolmux linear-work` without a tool prints
+the available cached tools for that remote.
 
 Toolmux rejects imported remote names that collide with native commands. If a
 future Toolmux version adds a native command that collides with an imported

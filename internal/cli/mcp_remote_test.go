@@ -262,6 +262,24 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 
 	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global")
 
+	serverHelp := runRootForRemoteTest(t, env, "linear")
+	for _, want := range []string{"Imported remote MCP server linear", "create_issue", "calculate"} {
+		if !strings.Contains(serverHelp, want) {
+			t.Fatalf("expected remote server help to contain %q, got:\n%s", want, serverHelp)
+		}
+	}
+	if strings.Contains(serverHelp, "has no command") {
+		t.Fatalf("expected remote server without a tool to show help, got:\n%s", serverHelp)
+	}
+
+	missingOutput, missingErr := runRootForRemoteTestError(t, env, "linear", "missing_tool")
+	if missingErr == nil {
+		t.Fatalf("expected missing remote tool error, got output:\n%s", missingOutput)
+	}
+	if !strings.Contains(missingErr.Error(), `MCP server "linear" has no command "missing_tool"`) {
+		t.Fatalf("unexpected missing remote tool error: %v", missingErr)
+	}
+
 	help := runRootForRemoteTest(t, env, "linear", "calculate", "-h")
 	for _, want := range []string{
 		"--a float",

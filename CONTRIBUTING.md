@@ -90,7 +90,8 @@ server entry has already been removed.
 `toolmux mcp ls` should use the shared table renderer for human output,
 display only `project` or `global` scope labels, support `mcp ls <name>` for
 cached tools on one server, and support `mcp ls -R` for a tree of registered
-servers and cached tools.
+servers and cached tools. Running a registered remote namespace such as
+`toolmux linear` without a tool should show help with available cached tools.
 Do not store bearer tokens, OAuth tokens, refresh tokens, dynamic client
 secrets, client secrets, auth codes, or authorization headers in YAML config or
 test fixtures. Remote Streamable HTTP support must handle both JSON and

@@ -2106,6 +2106,9 @@ func mcpRemoteRootCommand(opts *options, entry mcpRemoteServerEntry) *cobra.Comm
 			mcpRemoteServerAnnotation: entry.Name,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return fmt.Errorf("MCP server %q has no command %q; run `toolmux mcp sync %s` to refresh cached tools", entry.Name, strings.Join(args, " "), entry.Name)
 		},
 	}

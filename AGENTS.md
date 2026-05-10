@@ -254,7 +254,9 @@ can be registered under a non-conflicting command namespace.
 `toolmux mcp ls` must use shared table styling for human output, display only
 `project` or `global` scope labels, support `mcp ls <name>` for one server's
 cached tools, and support `mcp ls -R` for a tree of all registered servers and
-their cached tools.
+their cached tools. Running a registered remote namespace such as
+`toolmux linear` without a tool must show command help with available cached
+tools.
 
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output
