@@ -1,84 +1,39 @@
+<p align="center">
+  <img src="docs/assets/toolmux-header.png" alt="Toolmux">
+</p>
+
 # Toolmux
 
-Toolmux is a local-first Swiss-army knife for the CLI. It connects services
-you use every day, exposes them through one consistent command surface, and
-lets the same tools work for both humans and AI agents.
+Toolmux connects your terminal and local agents to the tools you already use,
+with one command surface, local credential storage, and policy checks before
+credentials are read.
 
-Use it to:
+Use Toolmux when you want to:
 
-1. Connect SaaS services once, then operate them from the terminal.
-2. Give agents a controlled MCP tool server backed by the same commands.
-3. Import remote MCP servers and call their tools as normal CLI commands.
+1. Work with SaaS tools from the command line.
+2. Give coding agents controlled access to those same tools through MCP.
+3. Import remote MCP servers and call their tools like normal CLI commands.
 4. Keep provider tokens in your operating system credential store.
-5. Use local policy and `--read-only` checks before credentials are read.
+5. Use `--read-only` and local policy files to block writes before auth is
+   loaded.
 
-Toolmux has one command model with two presentation modes. Humans get readable
-tables, color, Markdown rendering, pagers, browser opens, and interactive
-selectors. Agents and scripts get stable JSON or YAML with no prompts,
-spinners, ANSI escapes, pagers, or browser side effects.
-
-## Current Status
-
-Toolmux is early software. The native provider surface includes Notion and an
-initial Slack command set, and Toolmux can also bridge imported remote MCP
-servers into the CLI and into agent MCP sessions.
-
-Active:
-
-1. Notion native provider: OAuth connect, search, page reads/writes, links,
-   page tree, databases, and data sources.
-2. Slack native provider: OAuth connect, conversation listing, message send,
-   and message search.
-3. Remote MCP imports: register Streamable HTTP MCP servers, cache tools,
-   authenticate with OAuth or bearer tokens, and call tools from CLI or agents.
-4. Agent setup: configure Codex, Claude Code, and Gemini CLI to launch
-   `toolmux mcp serve`.
-
-Planned native providers:
-
-1. Linear
-2. Jira
-3. Google Docs
-4. Google Drive
-5. Gmail
-
-Until those native providers are implemented, use remote MCP servers where
-available, such as Atlassian MCP for Jira-related workflows.
+Toolmux is early software. Today it has native Notion support, an initial
+Slack command set, remote MCP imports, and agent setup for Codex, Claude Code,
+and Gemini CLI.
 
 ## Install
 
 With Homebrew:
 
 ```bash
-brew tap fiam/tap
-brew install toolmux
+brew install fiam/tap/toolmux
 toolmux version
 ```
 
-Or build from source:
+Release archives for macOS, Linux, and Windows are available from
+[GitHub Releases](https://github.com/fiam/toolmux/releases).
 
-```bash
-git clone https://github.com/fiam/toolmux.git
-cd toolmux
-make dev-cli
-./bin/toolmux version
-```
-
-Released archives include the `toolmux` CLI for macOS, Linux, and Windows on
-amd64 and arm64. The `toolmuxd` server daemon is released only as a Linux
-amd64/arm64 container image at `ghcr.io/fiam/toolmuxd:<tag>`.
-
-When building from source, use Go 1.26.3 or newer on the Go 1.26 line. Docker
-is only required for the full linter pass and container image builds.
-
-## First Run
-
-Start by checking the CLI:
-
-```bash
-toolmux --help
-toolmux version
-```
+## Connect Services
 
 Connect Notion:
 
@@ -96,56 +51,107 @@ toolmux status slack
 toolmux doctor slack
 ```
 
-The default OAuth broker is `https://api.toolmux.com`. The broker helps with
-provider flows that require confidential client secrets, but long-lived
-provider tokens are stored locally in your OS credential store.
-
-For a local or self-hosted `toolmuxd`, point the CLI at your server:
-
-```bash
-export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
-toolmux connect notion
-```
-
-If you want to open the browser yourself:
-
-```bash
-toolmux connect notion --auth-url-only
-```
-
 Disconnect and remove the local token:
 
 ```bash
 toolmux disconnect notion --yes
 ```
 
+Toolmux uses a hosted OAuth broker at `https://api.toolmux.com` by default for
+provider flows that require confidential client secrets. Long-lived provider
+tokens are handed back to your local CLI and stored in your OS credential
+store.
+
+To self-host the broker, point the CLI at your own `toolmuxd`:
+
+```bash
+export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
+toolmux connect notion
+```
+
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-Provider app setup notes are in [docs/providers/notion-app.md](docs/providers/notion-app.md)
-and [docs/providers/slack-app.md](docs/providers/slack-app.md).
+Provider app setup notes are in
+[docs/providers/notion-app.md](docs/providers/notion-app.md) and
+[docs/providers/slack-app.md](docs/providers/slack-app.md).
 
-## Use It As A Human
+## Notion
 
-Human output is the default:
+Search:
 
 ```bash
 toolmux notion search roadmap
+toolmux notion search --query tasks --type data_source
+toolmux notion search --limit 10 --sort edited --direction desc
+```
+
+Read and navigate pages:
+
+```bash
 toolmux notion page read "Roadmap"
+toolmux notion page markdown "Roadmap"
+toolmux notion page links "Roadmap"
+toolmux notion page open "Roadmap"
 toolmux notion page tree "Roadmap" --depth 3
+```
+
+Create and update pages:
+
+```bash
+toolmux notion page create \
+  --parent-type workspace \
+  --title "Meeting Notes" \
+  --markdown "# Meeting Notes"
+
+toolmux notion page update "Meeting Notes" --title "Team Notes"
+toolmux notion page content insert "Team Notes" --markdown "## Followups"
+toolmux notion page content replace "Team Notes" \
+  --markdown "# Replacement" \
+  --yes
+```
+
+Work with data sources:
+
+```bash
+toolmux notion data-source query <data-source-id>
+toolmux notion data-source schema <data-source-id>
+toolmux notion data-source row create <data-source-id> --title "New Row"
+```
+
+## Slack
+
+List visible conversations:
+
+```bash
 toolmux slack conversations ls
+```
+
+Send a message:
+
+```bash
 toolmux slack message send --channel C123456 --text "deploy is done"
+```
+
+Search messages when the Slack app was granted search access:
+
+```bash
 toolmux slack search --query "from:me deploy"
 ```
 
-Toolmux uses terminal-friendly presentation when stdout is a TTY: tables,
-colors, Markdown rendering, pagers, links, and interactive selection where a
-command needs follow-up input.
+## Output For Humans And Scripts
 
-Global output controls:
+Human output is the default. When stdout is a terminal, Toolmux can use tables,
+colors, Markdown rendering, links, pagers, browser opens, and interactive
+selectors.
+
+Use structured output when another program is reading the result:
 
 ```bash
-toolmux --color auto --pager auto notion page read "Roadmap"
-toolmux --read-only notion page read "Roadmap"
+toolmux --output json notion page links "Roadmap"
+toolmux --output yaml status notion
 ```
+
+JSON and YAML output are stable and undecorated: no ANSI escapes, prompts,
+spinners, pagers, or browser side effects.
 
 Common global flags:
 
@@ -159,57 +165,51 @@ Common global flags:
 --read-only
 ```
 
-## Use It From Agents And Scripts
+## Read-Only And Policy
 
-Use structured output whenever another program is reading the result:
-
-```bash
-toolmux --output json notion page links "Roadmap"
-toolmux --output yaml status notion
-```
-
-Structured output is undecorated and stable: no ANSI escapes, prompts, pagers,
-spinners, or browser opens. Interactive features are disabled automatically
-when Toolmux is not attached to a terminal.
-
-Use `--read-only` to deny commands with local or remote write effects:
+Use `--read-only` to block commands with local or remote write effects before
+provider credentials are read:
 
 ```bash
-toolmux --read-only --output json notion page read "Roadmap"
+toolmux --read-only notion page read "Roadmap"
 toolmux --read-only notion page content replace "Roadmap" --markdown "# New"
 ```
 
-The first command can run. The second is blocked before provider credentials
-are read.
+The first command can run. The second is blocked.
 
-## Use It As An MCP Server
+For project-specific guardrails, create a local policy file:
 
-Toolmux can expose implemented provider actions and imported remote MCP tools
-over Model Context Protocol stdio:
+```bash
+toolmux policy init
+toolmux policy catalog
+toolmux policy check --command "notion page read Roadmap"
+```
+
+Policy discovery order:
+
+1. `--policy <path>`
+2. `TOOLMUX_POLICY=<path>`
+3. `.toolmux/policy.yaml` in the current directory or a parent directory
+4. No policy file means local usage is allowed by default
+
+Policy files are local guardrails for projects and automation. They are not a
+security boundary against a user who controls the machine or working
+directory.
+
+## Use Toolmux With Agents
+
+Toolmux can expose provider actions and imported remote MCP tools over Model
+Context Protocol stdio:
 
 ```bash
 toolmux mcp serve
 ```
 
-The MCP server is generated from the same action metadata as the CLI, so tool
-calls still pass through local policy checks, `--read-only`, profiles, account
-selection, and provider auth.
+The MCP server uses the same action metadata as the CLI, so tool calls still
+pass through local policy checks, `--read-only`, profiles, account selection,
+and provider auth.
 
-When an agent lets you provide a command manually, use:
-
-```bash
-toolmux mcp serve \
-  --mcp-profile notion-read \
-  --tool 'notion.*' \
-  --exclude-tool '*.delete'
-```
-
-`mcp serve` accepts `--mcp-profile`, `--tool`, `--tool-regex`,
-`--exclude-tool`, and `--exclude-tool-regex`.
-
-## Configure Local Agents
-
-Toolmux can configure supported agent CLIs to launch `toolmux mcp serve`:
+Configure supported local agent CLIs:
 
 ```bash
 toolmux mcp configure
@@ -217,8 +217,7 @@ toolmux mcp configure
 
 With no agent name, Toolmux autodetects supported installed CLIs. Interactive
 runs show a checkbox selector, preselect agents where Toolmux MCP is already
-enabled, and remove the Toolmux MCP server from any configured agent you
-uncheck.
+enabled, and remove Toolmux from any configured agent you uncheck.
 
 Supported agent targets:
 
@@ -241,34 +240,26 @@ toolmux mcp enable codex claude
 toolmux mcp disable gemini
 ```
 
-Examples:
+Limit which tools agents can see with MCP profiles:
 
 ```bash
-toolmux mcp enable codex \
-  --command /opt/toolmux/bin/toolmux \
-  --mcp-profile notion-read \
-  --read-only \
-  --dry-run
-
-toolmux mcp enable claude gemini \
-  --scope project \
-  --tool 'notion.page.*' \
+toolmux mcp profile set notion-read \
+  --tool 'notion.*' \
+  --exclude-tool '*.create' \
+  --exclude-tool '*.update' \
   --exclude-tool '*.delete'
 
-toolmux mcp disable claude gemini --mcp-profile notion-read
+toolmux mcp profile default notion-read
+toolmux mcp configure codex --mcp-profile notion-read --read-only
 ```
-
-`mcp configure` and `mcp enable` can write relevant global Toolmux flags into
-the launched MCP command, including `--profile`, `--account`, `--policy`, and
-`--read-only`.
 
 ## Import Remote MCP Servers
 
-Toolmux can import a remote MCP server, cache its tool definitions, and expose
-those tools in two places:
+Toolmux can import a remote Streamable HTTP MCP server, cache its tool
+definitions, and expose those tools in two places:
 
-1. As top-level CLI commands under the registered server name.
-2. As proxied tools from `toolmux mcp serve`.
+1. Top-level CLI commands under the registered server name.
+2. Proxied tools from `toolmux mcp serve`.
 
 Try the public no-auth Iterate mock server:
 
@@ -290,92 +281,42 @@ miro
 notion
 ```
 
-`atlassian` uses Atlassian's OAuth-capable
-`https://mcp.atlassian.com/v1/mcp/authv2` endpoint. `iterate` points at
-`https://mock.iterate.com/no-auth` and is useful for smoke tests.
+Manage built-ins from the catalog:
 
-Register a custom Streamable HTTP MCP endpoint:
+```bash
+toolmux mcp catalog
+toolmux mcp catalog --enable cloudflare --global
+toolmux mcp auth login cloudflare
+toolmux mcp sync cloudflare
+toolmux cloudflare
+```
+
+Register a custom endpoint:
 
 ```bash
 toolmux mcp add linear-work https://mcp.linear.app/mcp --no-sync
 toolmux mcp auth login linear-work
 toolmux mcp sync linear-work
-toolmux mcp ls
-toolmux mcp ls linear-work
-toolmux mcp ls -R
-toolmux mcp show linear-work
+toolmux linear-work
 ```
 
-Manage built-ins from the catalog:
-
-```bash
-toolmux mcp catalog
-toolmux mcp catalog --enable iterate --global --sync
-toolmux mcp catalog --enable notion=notion-mcp --global
-toolmux mcp catalog --manage
-```
+The registered name becomes the command namespace. Registering `linear-work`
+exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
+`linear-work.<tool-name>`.
 
 Rename or remove registered remotes:
 
 ```bash
 toolmux mcp rename linear-work linear-prod
-toolmux mcp remove linear-prod miro
+toolmux mcp remove linear-prod
 ```
 
 Removing a remote also deletes stored auth for that server name in the active
-Toolmux profile/account.
-
-The registered name becomes the command namespace. Registering `linear-work`
-exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
-`linear-work.<tool-name>`. Running `toolmux linear-work` without a tool prints
-the available cached tools for that remote.
-
-Toolmux rejects imported remote names that collide with native commands. If a
-future Toolmux version adds a native command that collides with an imported
-remote MCP server, startup fails with a rename command such as:
+Toolmux profile/account. If you already removed a server and want to clear a
+stale token, use:
 
 ```bash
-toolmux mcp rename linear <new-name>
-```
-
-`mcp add` syncs tools immediately by default. If the first sync returns an
-auth-required response and no auth is stored for that server name, Toolmux
-starts MCP OAuth, stores auth, retries sync, and writes the server config only
-after auth and sync succeed. If login is cancelled or fails, no server entry is
-written.
-
-Use `--no-sync` when you want to register first and authenticate later with
-`toolmux mcp auth login <name>` or `toolmux mcp auth set <name>`.
-
-Remote tool commands translate representable top-level JSON Schema properties
-into flags. Use `--json` for nested objects or schemas that cannot be expressed
-as flags. Use `toolmux schema <server> <tool>` or
-`toolmux schema <server>.<tool>` to print the cached input schema. Remote tool
-commands also accept `-v`/`--verbose` for raw MCP HTTP tracing on stderr with
-authorization headers redacted.
-
-## Authenticate Remote MCP
-
-OAuth auth uses MCP protected-resource metadata discovery,
-authorization-server metadata, PKCE, the OAuth `resource` parameter, and
-dynamic client registration when the server advertises it:
-
-```bash
-toolmux mcp auth login cloudflare
-toolmux mcp auth status cloudflare
-toolmux mcp auth remove cloudflare
-```
-
-`toolmux mcp auth remove <name>` can also clean up stale auth after the remote
-server entry has already been removed.
-
-If dynamic client registration is not available, provide a client from the MCP
-server operator:
-
-```bash
-toolmux mcp auth login myserver \
-  --client-id "$MCP_CLIENT_ID" \
-  --scope tools.read
+toolmux mcp auth remove <name>
 ```
 
 Bearer-token auth is supported for servers that issue tokens outside a browser
@@ -386,162 +327,14 @@ printenv CLOUDFLARE_API_TOKEN | \
   toolmux mcp auth set cloudflare --bearer-token-stdin
 ```
 
-Stored auth is applied to `sync`, CLI remote tool calls, and proxied
-`mcp serve` tool calls after policy checks.
-
-## Notion Workflows
-
-Search:
-
-```bash
-toolmux notion search roadmap
-toolmux notion search --query tasks --type data_source
-toolmux notion search --limit 10 --sort edited --direction desc
-```
-
-Read and navigate pages:
-
-```bash
-toolmux notion page read "Roadmap"
-toolmux notion page read --follow "Roadmap"
-toolmux notion page markdown "Roadmap"
-toolmux notion page links "Roadmap"
-toolmux notion page open "Roadmap"
-toolmux notion page children "Roadmap"
-toolmux notion page tree "Roadmap" --depth 3
-```
-
-Create and update pages:
-
-```bash
-toolmux notion page create \
-  --parent-type workspace \
-  --title "Meeting Notes" \
-  --markdown "# Meeting Notes"
-
-toolmux notion page update "Meeting Notes" --title "Team Notes"
-toolmux notion page content insert "Team Notes" --markdown "## Followups"
-toolmux notion page content replace "Team Notes" \
-  --markdown "# Replacement" \
-  --yes
-```
-
-Inspect page export fidelity before automated edits:
-
-```bash
-toolmux notion page doctor "Roadmap"
-```
-
-Work with data sources:
-
-```bash
-toolmux notion data-source query <data-source-id>
-toolmux notion data-source schema <data-source-id>
-toolmux notion data-source row create <data-source-id> \
-  --title "New Row"
-toolmux notion data-source row update <page-id> \
-  --title "Updated Row"
-```
-
-## MCP Profiles
-
-Use MCP profiles to expose only selected tools to agents. Profiles live in the
-general Toolmux config under the `mcp` key.
-
-Global config uses `$XDG_CONFIG_HOME/toolmux/config.yaml` or the platform user
-config directory. Project config uses `.toolmux/config.yaml`. Project config
-overrides global config for matching profile names and default profile
-selection, similar to Git config layering.
-
-Example config:
-
-```yaml
-version: 1
-mcp:
-  default_profile: notion-read
-  profiles:
-    notion-read:
-      tools:
-        - "notion.*"
-      exclude_tools:
-        - "*.create"
-        - "*.update"
-        - "*.delete"
-      tool_regex:
-        - "^notion\\.page\\."
-      exclude_tool_regex:
-        - "\\.delete$"
-```
-
-Create and use a profile:
-
-```bash
-toolmux mcp profile set notion-read \
-  --tool 'notion.*' \
-  --exclude-tool '*.create' \
-  --exclude-tool '*.update' \
-  --exclude-tool '*.delete'
-
-toolmux mcp profile default notion-read
-toolmux mcp configure codex --mcp-profile notion-read
-```
-
-Profile commands:
-
-```bash
-toolmux mcp profile set <name>
-toolmux mcp profile default <name>
-toolmux mcp profile ls
-toolmux mcp profile show <name>
-```
-
-Use `--global` to write global Toolmux config. Without `--global`, profile
-commands write project config. Use `--project` when you want to make the
-project scope explicit.
-
-Filters support shell-style globs through `--tool` and `--exclude-tool`, and
-regular expressions through `--tool-regex` and `--exclude-tool-regex`.
-
-## Local Policy
-
-Toolmux can enforce local command policy before it reads provider credentials
-or calls provider APIs.
-
-Create a starter policy:
-
-```bash
-toolmux policy init
-```
-
-Inspect available policy-aware commands:
-
-```bash
-toolmux policy catalog
-```
-
-The catalog lists implemented provider actions, Toolmux MCP management
-commands, cached imported MCP tools, and their remote/local effects.
-
-Check a command:
-
-```bash
-toolmux policy check --command "notion page read Roadmap"
-toolmux policy check --command "iterate mock_echo"
-```
-
-Policy discovery order:
-
-1. `--policy <path>`
-2. `TOOLMUX_POLICY=<path>`
-3. `.toolmux/policy.yaml` in the current directory or a parent directory
-4. No policy file means local usage is allowed by default
-
-Policy files are local guardrails for projects and automation. They are not a
-security boundary against a user who controls the machine or working directory.
+Remote tool commands translate representable top-level JSON Schema properties
+into flags. Use `--json` for nested objects or schemas that cannot be
+expressed as flags. Use `toolmux schema <server> <tool>` or
+`toolmux schema <server>.<tool>` to print the cached input schema.
 
 ## Token Custody
 
-Toolmux uses local token custody:
+For native provider OAuth:
 
 1. `toolmuxd` starts a browser OAuth flow.
 2. The provider redirects back to `toolmuxd`.
@@ -555,27 +348,14 @@ Bearer tokens, OAuth tokens, refresh tokens, dynamic client secrets, manually
 supplied client secrets, and auth codes are stored only in the OS credential
 store or transient process memory.
 
-## Self-Hosting
+## Help
 
-You can run your own `toolmuxd` with your own provider OAuth apps and secrets.
-See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-
-Self-hosted `toolmuxd` exposes unauthenticated operational endpoints for
-deployment checks:
-
-```text
-GET /healthz
-GET /build
+```bash
+toolmux --help
+toolmux <provider> --help
+toolmux mcp --help
+toolmux doctor
 ```
 
-These responses must not include secrets, provider configuration, tokens, or
-deployment-specific infrastructure details.
-
-The public repository contains portable source, generic container builds, fake
-upstream tests, and self-hosting docs. Toolmux's hosted deployment
-infrastructure and provider secrets are intentionally outside this repository.
-
-## Development
-
-Contributor setup and project conventions are in
+For developer setup, tests, architecture notes, and release workflow, see
 [CONTRIBUTING.md](CONTRIBUTING.md).
