@@ -1094,6 +1094,7 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpRemoteShowSpec(),
 		mcpRemoteCatalogListSpec(),
 		mcpRemoteCatalogManageSpec(),
+		mcpRemoteAuthLoginSpec(),
 		mcpRemoteAuthSetSpec(),
 		mcpRemoteAuthRemoveSpec(),
 		mcpRemoteAuthStatusSpec(),
@@ -1193,6 +1194,8 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 				return policy.CommandSpec{}, false
 			}
 			switch parts[2] {
+			case "login", "connect":
+				return mcpRemoteAuthLoginSpec(), true
 			case "set":
 				return mcpRemoteAuthSetSpec(), true
 			case "remove", "rm":

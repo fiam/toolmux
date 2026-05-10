@@ -156,7 +156,10 @@ Fake upstreams should emulate:
    responses, empty responses, 5xx errors, and retries.
 4. Notion, Jira, Slack, Linear, Google Docs, Google Drive, and Gmail behavior
    needed by implemented commands.
-5. toolmuxd local-custody handoff without storing plaintext provider tokens.
+5. Remote MCP OAuth protected-resource metadata, authorization-server metadata,
+   dynamic client registration, loopback callbacks, resource parameters, PKCE,
+   and refresh behavior.
+6. toolmuxd local-custody handoff without storing plaintext provider tokens.
 
 Live-provider tests may exist for smoke coverage, but they must be opt-in,
 isolated from default CI, and must never record real tokens in fixtures.
@@ -219,18 +222,29 @@ and tests in sync when changing selection behavior.
 
 Imported remote MCP servers are also managed under the general Toolmux `mcp`
 config key through `toolmux mcp`. Server definitions and cached
-`tools/list` metadata are non-secret; bearer tokens and future OAuth tokens must
-live only in the credential store. Remote tool commands are generated from
+`tools/list` metadata are non-secret; bearer tokens, OAuth tokens, refresh
+tokens, dynamic client secrets, manually supplied client secrets, and auth codes
+must live only in the credential store or transient process memory. Remote tool
+commands are generated from
 cached remote metadata under the registered server name, and they must run
 policy and `--read-only` checks before stored auth is read or remote HTTP calls
 are made. Streamable HTTP clients must handle JSON and `text/event-stream`
 responses and preserve `Mcp-Session-Id` headers for sessionful remote servers.
-`toolmux mcp add` syncs tools by default; keep `--no-sync` available for
-auth-required servers. Stale remote caches should refresh opportunistically
-after about 24 hours without making existing cached commands unusable when a
-refresh attempt fails. `toolmux mcp catalog` must list built-in remotes whether
-or not they are registered, support scriptable `--enable`/`--disable`, and
-provide interactive `--manage` checkbox toggling for built-ins. Catalog
+`toolmux mcp auth login` must use MCP protected-resource metadata discovery,
+authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
+client registration when advertised; keep `--client-id` available for servers
+without registration. `toolmux mcp add` syncs tools by default; when the first
+sync returns an auth-required response and no auth is stored, it must start MCP
+OAuth, store auth, retry sync, and only then write the server config. Failed or
+cancelled OAuth must not leave a registered server behind. Keep `--no-sync`
+available for registration without auth or sync. Custom URL adds must use the
+single `mcp add <name> <url>` form. `toolmux mcp remove` and `rm` must accept
+one or more server names. Stale remote caches should refresh
+opportunistically after about 24 hours without making existing cached
+commands unusable when a refresh attempt fails. `toolmux mcp catalog` must list
+built-in remotes whether or not they are registered, support scriptable
+`--enable`/`--disable`, and provide interactive `--manage` checkbox toggling
+for built-ins. Catalog
 enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
 can be registered under a non-conflicting command namespace.
 `toolmux mcp ls` must use shared table styling for human output, display only

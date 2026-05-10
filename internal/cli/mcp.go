@@ -50,8 +50,8 @@ type mcpConfigureOptions struct {
 }
 
 type mcpProfileScopeOptions struct {
-	Global bool
-	Local  bool
+	Global  bool
+	Project bool
 }
 
 func mcpCommand(opts *options) *cobra.Command {
@@ -490,8 +490,8 @@ func addMCPToolPatternFlags(cmd *cobra.Command, selection *mcpToolSelection) {
 }
 
 func addMCPProfileScopeFlags(cmd *cobra.Command, scope *mcpProfileScopeOptions) {
-	cmd.Flags().BoolVar(&scope.Global, "global", false, "write the profile to the user config")
-	cmd.Flags().BoolVar(&scope.Local, "local", false, "write the profile to the project config")
+	cmd.Flags().BoolVar(&scope.Global, "global", false, "write to the user config")
+	cmd.Flags().BoolVar(&scope.Project, "project", false, "write to the project config")
 }
 
 type mcpToolSelector struct {
@@ -767,8 +767,8 @@ func mcpProfileConfigFromSelection(selection mcpToolSelection) mcpProfileConfig 
 }
 
 func mcpProfileWritePath(scope mcpProfileScopeOptions) (string, string, error) {
-	if scope.Global && scope.Local {
-		return "", "", fmt.Errorf("use only one of --global or --local")
+	if scope.Global && scope.Project {
+		return "", "", fmt.Errorf("use only one of --global or --project")
 	}
 	if scope.Global {
 		path, err := globalToolmuxConfigPath()
@@ -1287,7 +1287,7 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	if err := authorize(server.cmd, server.opts, spec, nil); err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	token, err := loadMCPRemoteBearerToken(ctx, server.opts, ref.Entry.Name)
+	token, err := loadMCPRemoteAccessToken(ctx, server.opts, ref.Entry)
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}

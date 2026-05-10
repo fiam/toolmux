@@ -1,14 +1,21 @@
+//nolint:paralleltest // These tests exercise process-global cwd and environment config discovery.
 package cli
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +55,63 @@ func TestMCPRemoteServerSyncAndTopLevelCommand(t *testing.T) {
 	labels, ok := called["labels"].([]any)
 	if !ok || len(labels) != 2 || labels[0] != "backend" || labels[1] != "urgent" {
 		t.Fatalf("unexpected labels argument: %#v", called["labels"])
+	}
+}
+
+func TestMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
+	server, ok := mcpBuiltinRemoteServers()["atlassian"]
+	if !ok {
+		t.Fatal("expected atlassian built-in MCP server")
+	}
+	if strings.TrimSpace(server.URL) == "" {
+		t.Fatal("expected atlassian MCP endpoint")
+	}
+	metadataURL, err := wellKnownOAuthMetadataURL(server.URL, "oauth-protected-resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(metadataURL) == "" {
+		t.Fatal("expected atlassian protected resource metadata URL")
+	}
+	if os.Getenv("TOOLMUX_LIVE_TESTS") != "1" {
+		t.Skip("set TOOLMUX_LIVE_TESTS=1 to check Atlassian protected resource metadata")
+	}
+	resp, err := http.Get(metadataURL) // #nosec G107 -- live test URL is derived from a built-in MCP endpoint.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		t.Fatalf("expected atlassian protected resource metadata to return 2xx, got %d", resp.StatusCode)
+	}
+}
+
+func TestMCPRemoteAddURLRequiresNameAndSupportsNameURLForm(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteServer(t, &called)
+	defer upstream.Close()
+
+	output, err := runRootForRemoteTestError(t, env, "mcp", "add", upstream.URL, "--global")
+	if err == nil {
+		t.Fatalf("expected missing name error, got output:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "MCP server name is required when adding a URL") {
+		t.Fatalf("unexpected missing name error: %v", err)
+	}
+
+	addOutput := runRootForRemoteTest(t, env, "mcp", "add", "custom", upstream.URL, "--global")
+	for _, want := range []string{
+		"registered global MCP server custom",
+		"synced MCP server custom: 2 tools",
+	} {
+		if !strings.Contains(addOutput, want) {
+			t.Fatalf("expected URL add output to contain %q, got:\n%s", want, addOutput)
+		}
+	}
+	output = runRootForRemoteTest(t, env, "custom", "create_issue", "--title", "URL")
+	if !strings.Contains(output, "called create_issue: URL") {
+		t.Fatalf("expected custom remote tool output, got %q", output)
 	}
 }
 
@@ -348,6 +412,125 @@ func TestMCPRemoteServerUsesStoredBearerToken(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	projectPath := filepath.Join(env.Home, ".toolmux", "config.yaml")
+	if err := writeToolmuxConfigFile(projectPath, toolmuxConfigFile{
+		Version: 1,
+		MCP: mcpConfig{
+			Servers: map[string]mcpRemoteServer{
+				"linear": {URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+				"miro":   {URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	help := runRootForRemoteTest(t, env, "mcp", "rm", "--help")
+	if !strings.Contains(help, "--project") {
+		t.Fatalf("expected remove help to include --project, got:\n%s", help)
+	}
+	if strings.Contains(help, "--local") {
+		t.Fatalf("expected remove help not to include --local, got:\n%s", help)
+	}
+
+	output := runRootForRemoteTest(t, env, "mcp", "rm", "miro", "linear", "--project")
+	for _, want := range []string{
+		"removed MCP server miro",
+		"removed MCP server linear",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected remove output to contain %q, got:\n%s", want, output)
+		}
+	}
+	config, err := readToolmuxConfigFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.MCP.Servers) != 0 {
+		t.Fatalf("expected all project MCP servers removed, got %#v", config.MCP.Servers)
+	}
+}
+
+func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteOAuthServer(t, &called)
+	defer upstream.Close()
+
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp auth login linear")
+	if !strings.Contains(policyOutput, "allowed") {
+		t.Fatalf("expected OAuth auth policy check, got %q", policyOutput)
+	}
+	addOutput := runRootForRemoteOAuthTest(t, env, upstream.Client(), "mcp", "add", "linear", upstream.URL+"/mcp", "--global")
+	for _, want := range []string{
+		"registered global MCP server linear",
+		"MCP server linear requires auth; starting OAuth login",
+		"stored OAuth token for MCP server linear",
+		"synced MCP server linear: 1 tools",
+	} {
+		if !strings.Contains(addOutput, want) {
+			t.Fatalf("expected OAuth add output to contain %q, got:\n%s", want, addOutput)
+		}
+	}
+	authStatus := runRootForRemoteTest(t, env, "mcp", "auth", "status", "linear")
+	if !strings.Contains(authStatus, "stored OAuth token") {
+		t.Fatalf("expected stored OAuth status, got %q", authStatus)
+	}
+
+	output := runRootForRemoteTest(t, env, "linear", "create_issue", "--title", "OAuth")
+	if !strings.Contains(output, "called create_issue: OAuth") {
+		t.Fatalf("expected OAuth remote tool output, got %q", output)
+	}
+
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, "linear"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	if err := env.Store.SaveOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, "linear"), tokens); err != nil {
+		t.Fatal(err)
+	}
+	output = runRootForRemoteTest(t, env, "linear", "create_issue", "--title", "Refreshed")
+	if !strings.Contains(output, "called create_issue: Refreshed") {
+		t.Fatalf("expected refreshed OAuth remote tool output, got %q", output)
+	}
+	if called["title"] != "Refreshed" {
+		t.Fatalf("unexpected remote arguments: %#v", called)
+	}
+}
+
+func TestMCPRemoteAddDoesNotRegisterWhenOAuthLoginFails(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	upstream := newFakeMCPRemoteOAuthRequiredWithoutMetadataServer(t)
+	defer upstream.Close()
+
+	output, err := runRootForRemoteTestError(t, env, "mcp", "add", "linear", upstream.URL, "--global")
+	if err == nil {
+		t.Fatalf("expected OAuth add failure, got output:\n%s", output)
+	}
+	if strings.Contains(output, "registered global MCP server linear") {
+		t.Fatalf("expected failed OAuth add not to print registration, got:\n%s", output)
+	}
+	if !strings.Contains(output, "MCP server linear requires auth; starting OAuth login") {
+		t.Fatalf("expected OAuth login attempt, got:\n%s", output)
+	}
+	for _, want := range []string{
+		"initial sync failed for MCP server linear",
+		"OAuth login failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got %v", want, err)
+		}
+	}
+	if _, ok, lookupErr := lookupMCPRemoteServer("linear", ""); lookupErr != nil {
+		t.Fatal(lookupErr)
+	} else if ok {
+		t.Fatal("expected failed OAuth add not to register MCP server")
+	}
+}
+
 func TestMCPRemoteServerSupportsSSEAndSessionID(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any
@@ -507,6 +690,103 @@ func runRootForRemoteTestWithInput(t *testing.T, env mcpRemoteTestEnv, input str
 	return out.String()
 }
 
+func runRootForRemoteTestError(t *testing.T, env mcpRemoteTestEnv, args ...string) (string, error) {
+	t.Helper()
+	cmd := rootForRemoteTest(env)
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func runRootForRemoteOAuthTest(t *testing.T, env mcpRemoteTestEnv, client *http.Client, args ...string) string {
+	t.Helper()
+	cmd := rootForRemoteTest(env)
+	out := newOAuthFollowerWriter(t, client)
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out.wait()
+	return out.String()
+}
+
+type oauthFollowerWriter struct {
+	t      *testing.T
+	client *http.Client
+
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	once sync.Once
+	done chan error
+}
+
+func newOAuthFollowerWriter(t *testing.T, client *http.Client) *oauthFollowerWriter {
+	t.Helper()
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &oauthFollowerWriter{t: t, client: client, done: make(chan error, 1)}
+}
+
+func (w *oauthFollowerWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	_, _ = w.buf.Write(data)
+	text := w.buf.String()
+	authURL := firstHTTPURL(text)
+	w.mu.Unlock()
+	if authURL != "" {
+		w.once.Do(func() {
+			go func() {
+				resp, err := w.client.Get(authURL)
+				if err != nil {
+					w.done <- err
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				err = resp.Body.Close()
+				if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+					err = fmt.Errorf("authorization URL returned status %d", resp.StatusCode)
+				}
+				w.done <- err
+			}()
+		})
+	}
+	return len(data), nil
+}
+
+func (w *oauthFollowerWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func (w *oauthFollowerWriter) wait() {
+	w.t.Helper()
+	select {
+	case err := <-w.done:
+		if err != nil {
+			w.t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		w.t.Fatal("timed out following OAuth authorization URL")
+	}
+}
+
+func firstHTTPURL(text string) string {
+	for field := range strings.FieldsSeq(text) {
+		field = strings.TrimRight(field, ".,)")
+		if strings.HasPrefix(field, "http://") || strings.HasPrefix(field, "https://") {
+			return field
+		}
+	}
+	return ""
+}
+
 func writeRemoteTestConfig(t *testing.T, env mcpRemoteTestEnv, servers map[string]mcpRemoteServer) {
 	t.Helper()
 	if err := writeToolmuxConfigFile(env.Config, toolmuxConfigFile{
@@ -599,6 +879,217 @@ func newFakeMCPRemoteServerWithBearer(t *testing.T, called *map[string]any, bear
 			})
 		}
 	}))
+}
+
+func newFakeMCPRemoteOAuthRequiredWithoutMetadataServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("WWW-Authenticate", `Bearer realm="OAuth", error="invalid_token"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid_token"}`)
+	}))
+}
+
+func newFakeMCPRemoteOAuthServer(t *testing.T, called *map[string]any) *httptest.Server {
+	t.Helper()
+	type authCode struct {
+		ClientID      string
+		RedirectURI   string
+		Resource      string
+		CodeChallenge string
+	}
+	var serverURL string
+	codes := map[string]authCode{}
+	accessTokens := map[string]bool{
+		"oauth-access-1": true,
+		"oauth-access-2": true,
+	}
+	refreshCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mcpURL := serverURL + "/mcp"
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/.well-known/oauth-protected-resource/mcp":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"resource":              mcpURL,
+				"authorization_servers": []string{serverURL},
+				"scopes_supported":      []string{"tools.read"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                                serverURL,
+				"authorization_endpoint":                serverURL + "/authorize",
+				"token_endpoint":                        serverURL + "/token",
+				"registration_endpoint":                 serverURL + "/register",
+				"response_types_supported":              []string{"code"},
+				"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
+				"code_challenge_methods_supported":      []string{"S256"},
+				"token_endpoint_auth_methods_supported": []string{"none"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/register":
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode registration: %v", err)
+			}
+			redirects, _ := req["redirect_uris"].([]any)
+			if len(redirects) != 1 || redirects[0] == "" {
+				t.Fatalf("unexpected redirect_uris in registration: %#v", req)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"client_id": "toolmux-test-client",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/authorize":
+			query := r.URL.Query()
+			if query.Get("client_id") != "toolmux-test-client" {
+				t.Fatalf("unexpected client_id %q", query.Get("client_id"))
+			}
+			if query.Get("resource") != mcpURL {
+				t.Fatalf("unexpected resource %q", query.Get("resource"))
+			}
+			if scope := query.Get("scope"); scope != "" && scope != "tools.read" {
+				t.Fatalf("unexpected scope %q", query.Get("scope"))
+			}
+			if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" {
+				t.Fatalf("missing PKCE challenge: %s", r.URL.RawQuery)
+			}
+			code := "code-1"
+			codes[code] = authCode{
+				ClientID:      query.Get("client_id"),
+				RedirectURI:   query.Get("redirect_uri"),
+				Resource:      query.Get("resource"),
+				CodeChallenge: query.Get("code_challenge"),
+			}
+			redirect, err := url.Parse(query.Get("redirect_uri"))
+			if err != nil {
+				t.Fatalf("parse redirect URI: %v", err)
+			}
+			redirectQuery := redirect.Query()
+			redirectQuery.Set("code", code)
+			redirectQuery.Set("state", query.Get("state"))
+			redirect.RawQuery = redirectQuery.Encode()
+			http.Redirect(w, r, redirect.String(), http.StatusFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse token form: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Form.Get("grant_type") {
+			case "authorization_code":
+				code := r.Form.Get("code")
+				issued, ok := codes[code]
+				if !ok {
+					t.Fatalf("unexpected code %q", code)
+				}
+				if r.Form.Get("client_id") != issued.ClientID || r.Form.Get("redirect_uri") != issued.RedirectURI || r.Form.Get("resource") != issued.Resource {
+					t.Fatalf("unexpected token request form: %#v", r.Form)
+				}
+				sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
+				if got := base64.RawURLEncoding.EncodeToString(sum[:]); got != issued.CodeChallenge {
+					t.Fatalf("unexpected PKCE verifier challenge %q, want %q", got, issued.CodeChallenge)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token":  "oauth-access-1",
+					"refresh_token": "oauth-refresh-1",
+					"token_type":    "Bearer",
+					"expires_in":    3600,
+					"scope":         "tools.read",
+				})
+			case "refresh_token":
+				if r.Form.Get("client_id") != "toolmux-test-client" || r.Form.Get("refresh_token") != "oauth-refresh-1" || r.Form.Get("resource") != mcpURL {
+					t.Fatalf("unexpected refresh request form: %#v", r.Form)
+				}
+				refreshCount++
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token":  "oauth-access-2",
+					"refresh_token": "oauth-refresh-2",
+					"token_type":    "Bearer",
+					"expires_in":    3600,
+					"scope":         "tools.read",
+				})
+			default:
+				t.Fatalf("unexpected grant_type %q", r.Form.Get("grant_type"))
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/mcp":
+			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !accessTokens[token] {
+				w.Header().Add("WWW-Authenticate", `Bearer resource_metadata="`+serverURL+`/.well-known/oauth-protected-resource/mcp"`)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			var req mcpRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			switch req.Method {
+			case "initialize":
+				_ = json.NewEncoder(w).Encode(mcpResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: map[string]any{
+						"protocolVersion": mcpProtocolVersion,
+						"serverInfo": map[string]any{
+							"name": "fake-oauth-linear",
+						},
+					},
+				})
+			case "tools/list":
+				_ = json.NewEncoder(w).Encode(mcpResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: map[string]any{
+						"tools": []map[string]any{fakeMCPCreateIssueTool()},
+					},
+				})
+			case "tools/call":
+				var params struct {
+					Name      string         `json:"name"`
+					Arguments map[string]any `json:"arguments"`
+				}
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Fatalf("decode call params: %v", err)
+				}
+				if called != nil {
+					*called = params.Arguments
+				}
+				_ = json.NewEncoder(w).Encode(mcpResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: mcpCallToolResult{
+						Content: []mcpContent{{
+							Type: "text",
+							Text: "called create_issue: " + params.Arguments["title"].(string),
+						}},
+					},
+				})
+			case "notifications/initialized":
+				w.WriteHeader(http.StatusAccepted)
+			default:
+				_ = json.NewEncoder(w).Encode(mcpResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Error:   &mcpError{Code: -32601, Message: "method not found"},
+				})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	t.Cleanup(func() {
+		if refreshCount == 0 {
+			t.Error("expected OAuth refresh token flow to be exercised")
+		}
+	})
+	return server
 }
 
 func newFakeMCPRemoteServerWithToolListCounter(t *testing.T, called *map[string]any, toolsListCalls *int) *httptest.Server {

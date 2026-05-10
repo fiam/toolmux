@@ -211,8 +211,10 @@ toolmux schema iterate mock_calculate
 ```
 
 The built-in remote server names are `atlassian`, `cloudflare`, `iterate`,
-`linear`, `miro`, and `notion`. `iterate` points at the public no-auth mock
-server at `https://mock.iterate.com/no-auth` and is useful for smoke tests.
+`linear`, `miro`, and `notion`. `atlassian` uses Atlassian's OAuth-capable
+`https://mcp.atlassian.com/v1/mcp/authv2` endpoint. `iterate` points at the
+public no-auth mock server at `https://mock.iterate.com/no-auth` and is useful
+for smoke tests.
 You can also register any Streamable HTTP MCP endpoint:
 
 ```bash
@@ -227,18 +229,21 @@ toolmux mcp catalog --enable iterate --global --sync
 toolmux mcp catalog --enable notion=notion-mcp --global
 toolmux mcp catalog --manage
 toolmux mcp rename linear2 linear-work
-toolmux mcp remove linear-work
+toolmux mcp remove linear-work miro
 ```
 
-`mcp add` syncs tools immediately by default. Use `--no-sync` when a protected
-server needs auth first, then store auth and run `mcp sync`:
+`mcp add` syncs tools immediately by default. If the first sync returns an
+auth-required response and no auth is stored for that server name, Toolmux
+starts MCP OAuth, stores the token, and retries sync. The server is registered
+only after auth and sync complete; if login is cancelled or fails, no server
+entry is written.
 
 ```bash
-toolmux mcp add cloudflare --no-sync
-printenv CLOUDFLARE_API_TOKEN | \
-  toolmux mcp auth set cloudflare --bearer-token-stdin
-toolmux mcp sync cloudflare
+toolmux mcp add cloudflare
 ```
+
+Use `--no-sync` when you want to register first and authenticate explicitly
+later with `toolmux mcp auth login <name>` or `toolmux mcp auth set <name>`.
 
 `mcp catalog` lists built-in remote MCP servers whether or not they are
 registered. Use `--enable <name>` and `--disable <name>` for scriptable
@@ -281,8 +286,22 @@ the cached input schema. Remote tool commands accept `-v`/`--verbose` to print
 raw MCP HTTP requests and responses to stderr with authorization headers
 redacted.
 
-Bearer-token auth can be stored in the OS credential store and is applied to
-`sync`, CLI tool calls, and proxied `mcp serve` tool calls after policy checks:
+OAuth auth uses the MCP protected-resource metadata flow, authorization-server
+metadata, PKCE, the OAuth `resource` parameter, and dynamic client registration
+when the authorization server advertises a registration endpoint. Access tokens,
+refresh tokens, dynamically registered client credentials, and manually supplied
+client secrets are stored only in the OS credential store. If dynamic client
+registration is not available, provide a client from the MCP server operator:
+
+```bash
+toolmux mcp auth login myserver \
+  --client-id "$MCP_CLIENT_ID" \
+  --scope tools.read
+```
+
+Bearer-token auth is still supported for servers that issue a token outside the
+browser OAuth flow. Stored auth is applied to `sync`, CLI tool calls, and
+proxied `mcp serve` tool calls after policy checks:
 
 ```bash
 printenv CLOUDFLARE_API_TOKEN | \
@@ -290,10 +309,6 @@ printenv CLOUDFLARE_API_TOKEN | \
 toolmux mcp auth status cloudflare
 toolmux mcp auth remove cloudflare
 ```
-
-Remote MCP OAuth and dynamic client registration are not implemented yet.
-Servers that require browser OAuth will need bearer-token support from the
-provider or a future Toolmux OAuth mediator.
 
 ### Agent Setup
 
@@ -436,8 +451,8 @@ toolmux mcp profile default notion-read
 ```
 
 Use `--global` to write global Toolmux config. Without `--global`, profile
-commands write project-local config. `--local` is also accepted for explicit
-project writes.
+commands write project config. Use `--project` when you want to make the
+project scope explicit.
 
 Filters support shell-style globs through `--tool` and `--exclude-tool`, and
 regular expressions through `--tool-regex` and `--exclude-tool-regex`. You can

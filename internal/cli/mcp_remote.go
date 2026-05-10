@@ -111,6 +111,12 @@ type mcpRemoteHTTPTrace struct {
 	w io.Writer
 }
 
+type mcpRemoteHTTPStatusError struct {
+	Method     string
+	StatusCode int
+	Body       string
+}
+
 type mcpRemoteCatalogEntry struct {
 	Name            string   `json:"name" yaml:"name"`
 	Status          string   `json:"status" yaml:"status"`
@@ -140,6 +146,9 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 		Short:   "Register and sync a remote MCP server",
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && isMCPRemoteURLArgument(args[0]) {
+				return fmt.Errorf("MCP server name is required when adding a URL; use `toolmux mcp add <name> %s`", strings.TrimSpace(args[0]))
+			}
 			name, err := cleanMCPRemoteName(args[0])
 			if err != nil {
 				return err
@@ -189,28 +198,35 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 			if err := authorize(cmd, opts, mcpRemoteAddSpec(), args); err != nil {
 				return err
 			}
-			config.Version = 1
-			config.MCP.Servers[name] = mcpRemoteServer{
+			server := normalizeMCPRemoteServer(mcpRemoteServer{
 				URL:       serverURL,
 				Transport: transport,
-			}
-			if err := writeToolmuxConfigFile(configPath, config); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "registered %s MCP server %s in %s\n", scopeName, name, configPath)
-			if noSync {
+			})
+			register := func() error {
+				config.Version = 1
+				config.MCP.Servers[name] = server
+				if err := writeToolmuxConfigFile(configPath, config); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "registered %s MCP server %s in %s\n", scopeName, name, configPath)
 				return nil
+			}
+			if noSync {
+				return register()
 			}
 			entry := mcpRemoteServerEntry{
 				Name:   name,
 				Scope:  scopeName,
 				Scopes: []string{scopeName},
 				Path:   configPath,
-				Server: normalizeMCPRemoteServer(config.MCP.Servers[name]),
+				Server: server,
 			}
-			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+			cache, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args)
 			if err != nil {
-				return fmt.Errorf("registered MCP server %s, but initial sync failed: %w", name, err)
+				return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
+			}
+			if err := register(); err != nil {
+				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "synced MCP server %s: %d tools\n", name, len(cache.Tools))
 			return nil
@@ -275,7 +291,7 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 				return fmt.Errorf("MCP server %q is not registered", oldName)
 			}
 			configPath := entry.Path
-			if scope.Global || scope.Local {
+			if scope.Global || scope.Project {
 				var scopeName string
 				configPath, scopeName, err = mcpProfileWritePath(scope)
 				if err != nil {
@@ -317,47 +333,36 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	cmd := &cobra.Command{
-		Use:     "remove <name>",
+		Use:     "remove <name> [name...]",
 		Aliases: []string{"rm"},
 		Short:   "Remove a registered remote MCP server",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, err := cleanMCPRemoteName(args[0])
+			names, err := cleanMCPRemoteNames(args)
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			removals, err := planMCPRemoteRemovals(names, scope)
 			if err != nil {
 				return err
-			}
-			if !ok {
-				return fmt.Errorf("MCP server %q is not registered", name)
-			}
-			configPath := entry.Path
-			if scope.Global || scope.Local {
-				var scopeName string
-				configPath, scopeName, err = mcpProfileWritePath(scope)
-				if err != nil {
-					return err
-				}
-				_ = scopeName
-			}
-			config, err := readToolmuxConfigFile(configPath)
-			if err != nil {
-				return err
-			}
-			if _, exists := config.MCP.Servers[name]; !exists {
-				return fmt.Errorf("MCP server %q is not registered in %s", name, configPath)
 			}
 			if err := authorize(cmd, opts, mcpRemoteRemoveSpec(), args); err != nil {
 				return err
 			}
-			delete(config.MCP.Servers, name)
-			if err := writeToolmuxConfigFile(configPath, config); err != nil {
-				return err
+			for _, removal := range removals {
+				for _, name := range removal.Names {
+					delete(removal.Config.MCP.Servers, name)
+				}
+				if err := writeToolmuxConfigFile(removal.Path, removal.Config); err != nil {
+					return err
+				}
 			}
-			_ = removeMCPRemoteCache(opts.mcpCacheDir, name)
-			fmt.Fprintf(cmd.OutOrStdout(), "removed MCP server %s from %s\n", name, configPath)
+			for _, removal := range removals {
+				for _, name := range removal.Names {
+					_ = removeMCPRemoteCache(opts.mcpCacheDir, name)
+					fmt.Fprintf(cmd.OutOrStdout(), "removed MCP server %s from %s\n", name, removal.Path)
+				}
+			}
 			return nil
 		},
 	}
@@ -365,11 +370,89 @@ func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
+type mcpRemoteRemovalPlan struct {
+	Path   string
+	Config toolmuxConfigFile
+	Names  []string
+}
+
+func cleanMCPRemoteNames(values []string) ([]string, error) {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		name, err := cleanMCPRemoteName(value)
+		if err != nil {
+			return nil, err
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func planMCPRemoteRemovals(names []string, scope mcpProfileScopeOptions) ([]mcpRemoteRemovalPlan, error) {
+	if scope.Global || scope.Project {
+		configPath, _, err := mcpProfileWritePath(scope)
+		if err != nil {
+			return nil, err
+		}
+		config, err := readToolmuxConfigFile(configPath)
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			if _, exists := config.MCP.Servers[name]; !exists {
+				return nil, fmt.Errorf("MCP server %q is not registered in %s", name, configPath)
+			}
+		}
+		return []mcpRemoteRemovalPlan{{
+			Path:   configPath,
+			Config: config,
+			Names:  names,
+		}}, nil
+	}
+
+	plansByPath := map[string]int{}
+	var plans []mcpRemoteRemovalPlan
+	for _, name := range names {
+		entry, ok, err := lookupMCPRemoteServer(name, "")
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("MCP server %q is not registered", name)
+		}
+		index, exists := plansByPath[entry.Path]
+		if !exists {
+			config, err := readToolmuxConfigFile(entry.Path)
+			if err != nil {
+				return nil, err
+			}
+			plans = append(plans, mcpRemoteRemovalPlan{
+				Path:   entry.Path,
+				Config: config,
+			})
+			index = len(plans) - 1
+			plansByPath[entry.Path] = index
+		}
+		plan := &plans[index]
+		if _, exists := plan.Config.MCP.Servers[name]; !exists {
+			return nil, fmt.Errorf("MCP server %q is not registered in %s", name, entry.Path)
+		}
+		plan.Names = append(plan.Names, name)
+	}
+	return plans, nil
+}
+
 func mcpRemoteAuthCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage stored auth for imported remote MCP servers",
 	}
+	cmd.AddCommand(mcpRemoteAuthLoginCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthSetCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthRemoveCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthStatusCommand(opts))
@@ -470,12 +553,16 @@ func mcpRemoteAuthStatusCommand(opts *options) *cobra.Command {
 			if err := authorize(cmd, opts, mcpRemoteAuthStatusSpec(), args); err != nil {
 				return err
 			}
-			token, err := loadMCPRemoteBearerToken(commandContext(cmd), opts, name)
+			tokens, ok, err := loadMCPRemoteStoredTokens(commandContext(cmd), opts, name)
 			if err != nil {
 				return err
 			}
-			if token == "" {
+			if !ok {
 				fmt.Fprintf(cmd.OutOrStdout(), "no stored auth for MCP server %s\n", name)
+				return nil
+			}
+			if mcpRemoteStoredTokenIsOAuth(tokens) {
+				fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", name)
 				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "stored bearer token for MCP server %s\n", name)
@@ -964,7 +1051,7 @@ func manageMCPRemoteCatalogInteractive(cmd *cobra.Command, opts *options, scope 
 		if entry.Status == "alias_required" || entry.Status == "unavailable" {
 			continue
 		}
-		title := entry.Name
+		var title string
 		switch {
 		case entry.Registered && entry.Tools != nil:
 			title = fmt.Sprintf("%s as %s (%d tools)", entry.Name, strings.Join(entry.RegisteredNames, ", "), *entry.Tools)
@@ -1137,7 +1224,7 @@ func parseMCPRemoteCatalogEnableSpecs(values []string) ([]mcpRemoteCatalogEnable
 	seen := map[string]bool{}
 	var specs []mcpRemoteCatalogEnable
 	for _, raw := range values {
-		for _, part := range strings.Split(raw, ",") {
+		for part := range strings.SplitSeq(raw, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
 				continue
@@ -1175,7 +1262,7 @@ func cleanMCPRemoteCatalogNames(values []string) ([]string, error) {
 	seen := map[string]bool{}
 	var names []string
 	for _, raw := range values {
-		for _, part := range strings.Split(raw, ",") {
+		for part := range strings.SplitSeq(raw, ",") {
 			name, err := cleanMCPRemoteName(part)
 			if err != nil {
 				return nil, err
@@ -1260,7 +1347,7 @@ func mcpRemoteCatalogCommandModifies(parts []string) bool {
 
 func mcpBuiltinRemoteServers() map[string]mcpRemoteServer {
 	return map[string]mcpRemoteServer{
-		"atlassian":  {URL: "https://mcp.atlassian.com/v1/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		"atlassian":  {URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
 		"cloudflare": {URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
 		"iterate":    {URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP},
 		"linear":     {URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP},
@@ -1294,6 +1381,11 @@ func validateMCPRemoteURL(raw string) error {
 	return nil
 }
 
+func isMCPRemoteURLArgument(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
 func validateMCPRemoteTransport(transport string) error {
 	switch strings.TrimSpace(transport) {
 	case "", mcpRemoteTransportStreamableHTTP:
@@ -1315,10 +1407,8 @@ func rootCommandHasName(root *cobra.Command, name string) bool {
 		if command.Name() == name {
 			return true
 		}
-		for _, alias := range command.Aliases {
-			if alias == name {
-				return true
-			}
+		if slices.Contains(command.Aliases, name) {
+			return true
 		}
 	}
 	return false
@@ -1335,10 +1425,8 @@ func rootNativeCommandHasName(root *cobra.Command, name string) bool {
 		if command.Name() == name {
 			return true
 		}
-		for _, alias := range command.Aliases {
-			if alias == name {
-				return true
-			}
+		if slices.Contains(command.Aliases, name) {
+			return true
 		}
 	}
 	return false
@@ -1501,7 +1589,7 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), args); err != nil {
 		return mcpRemoteCache{}, err
 	}
-	token, err := loadMCPRemoteBearerToken(commandContext(cmd), opts, entry.Name)
+	token, err := loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
 	if err != nil {
 		return mcpRemoteCache{}, err
 	}
@@ -1515,6 +1603,38 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	return cache, nil
 }
 
+func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string) (mcpRemoteCache, error) {
+	cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+	if err == nil {
+		return cache, nil
+	}
+	if !mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
+		return mcpRemoteCache{}, err
+	}
+	if _, ok, loadErr := loadMCPRemoteStoredTokens(commandContext(cmd), opts, entry.Name); loadErr != nil {
+		return mcpRemoteCache{}, loadErr
+	} else if ok {
+		return mcpRemoteCache{}, err
+	}
+	if authErr := authorize(cmd, opts, mcpRemoteAuthLoginSpec(), []string{entry.Name}); authErr != nil {
+		return mcpRemoteCache{}, fmt.Errorf("%s; OAuth login was denied: %w", err.Error(), authErr)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "MCP server %s requires auth; starting OAuth login\n", entry.Name)
+	tokens, loginErr := loginMCPRemoteOAuth(cmd, opts, entry, mcpRemoteAuthLoginOptions{Timeout: 2 * time.Minute})
+	if loginErr != nil {
+		return mcpRemoteCache{}, fmt.Errorf("%s; OAuth login failed: %w", err.Error(), loginErr)
+	}
+	store, storeErr := opts.credentials()
+	if storeErr != nil {
+		return mcpRemoteCache{}, storeErr
+	}
+	if saveErr := store.SaveOAuthTokens(commandContext(cmd), mcpRemoteCredentialRef(opts, entry.Name), tokens); saveErr != nil {
+		return mcpRemoteCache{}, saveErr
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", entry.Name)
+	return syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+}
+
 func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool) {
 	cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
 	if err != nil {
@@ -1526,7 +1646,7 @@ func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts 
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), []string{entry.Name}); err != nil {
 		return cache, ok
 	}
-	token, err := loadMCPRemoteBearerToken(ctx, opts, entry.Name)
+	token, err := loadMCPRemoteAccessToken(ctx, opts, entry)
 	if err != nil {
 		return cache, ok
 	}
@@ -1708,13 +1828,32 @@ func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteSer
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return nil, responseSessionID, fmt.Errorf("remote MCP %s returned status %d: %s", method, resp.StatusCode, strings.TrimSpace(string(data)))
+		return nil, responseSessionID, &mcpRemoteHTTPStatusError{
+			Method:     method,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(data)),
+		}
 	}
 	result, err := decodeMCPRemoteResponse(resp, method)
 	if err != nil {
 		return nil, responseSessionID, err
 	}
 	return result, responseSessionID, nil
+}
+
+func (err *mcpRemoteHTTPStatusError) Error() string {
+	if err == nil {
+		return ""
+	}
+	if err.Body == "" {
+		return fmt.Sprintf("remote MCP %s returned status %d", err.Method, err.StatusCode)
+	}
+	return fmt.Sprintf("remote MCP %s returned status %d: %s", err.Method, err.StatusCode, err.Body)
+}
+
+func mcpRemoteErrorStatus(err error, status int) bool {
+	var statusErr *mcpRemoteHTTPStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == status
 }
 
 func postMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteServer, bearerToken, sessionID string, body []byte, trace *mcpRemoteHTTPTrace) (*http.Response, error) {
@@ -1888,7 +2027,7 @@ func readMCPRemoteSSEMessage(reader io.Reader) ([]byte, error) {
 	}
 	eventName := ""
 	var dataLines []string
-	for _, rawLine := range strings.Split(string(data), "\n") {
+	for rawLine := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSuffix(rawLine, "\r")
 		if line == "" {
 			if len(dataLines) > 0 && (eventName == "" || eventName == "message") {
@@ -2004,7 +2143,7 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 				}
 				toolForCall = freshTool
 			}
-			token, err := loadMCPRemoteBearerToken(commandContext(cmd), opts, entry.Name)
+			token, err := loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
 			if err != nil {
 				return err
 			}
@@ -2130,8 +2269,7 @@ func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRem
 	rawJSON = strings.TrimSpace(rawJSON)
 	if rawJSON != "" {
 		data := []byte(rawJSON)
-		if strings.HasPrefix(rawJSON, "@") {
-			path := strings.TrimPrefix(rawJSON, "@")
+		if path, ok := strings.CutPrefix(rawJSON, "@"); ok {
 			read, err := os.ReadFile(path) // #nosec G304 -- explicit CLI argument file.
 			if err != nil {
 				return nil, err
@@ -2253,12 +2391,7 @@ func mcpRemoteSchemaScalarType(property map[string]any) string {
 }
 
 func mcpRemoteSchemaHasType(property map[string]any, want string) bool {
-	for _, typ := range mcpRemoteSchemaTypes(property["type"]) {
-		if typ == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(mcpRemoteSchemaTypes(property["type"]), want)
 }
 
 func mcpRemoteSchemaTypes(value any) []string {
@@ -2617,25 +2750,11 @@ func mcpRemoteBearerTokens(token string, entry mcpRemoteServerEntry) credentials
 		AccessToken: token,
 		TokenType:   "bearer",
 		Extra: map[string]string{
+			"auth_type":  mcpRemoteAuthTypeBearer,
 			"mcp_server": entry.Name,
 			"url":        entry.Server.URL,
 		},
 	}
-}
-
-func loadMCPRemoteBearerToken(ctx context.Context, opts *options, name string) (string, error) {
-	store, err := opts.credentials()
-	if err != nil {
-		return "", err
-	}
-	tokens, err := store.LoadOAuthTokens(ctx, mcpRemoteCredentialRef(opts, name))
-	if err != nil {
-		if errors.Is(err, credentials.ErrNotFound) {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(tokens.AccessToken), nil
 }
 
 func mcpRemoteAddSpec() actions.Spec {
@@ -2667,7 +2786,7 @@ func mcpRemoteRenameSpec() actions.Spec {
 
 func mcpRemoteRemoveSpec() actions.Spec {
 	return actions.Command("mcp.remove", "remove",
-		actions.Use("mcp remove <name>"),
+		actions.Use("mcp remove <name> [name...]"),
 		actions.Short("Remove a registered remote MCP server"),
 		actions.RBAC("mcp_server", actions.VerbDelete, actions.EffectNone, actions.EffectWrite),
 		actions.Risks("mcp-config"),
@@ -2704,6 +2823,15 @@ func mcpRemoteCatalogManageSpec() actions.Spec {
 		actions.Short("Enable or disable known remote MCP servers"),
 		actions.RBAC("mcp_server", actions.VerbUpdate, actions.EffectRead, actions.EffectWrite),
 		actions.Risks("mcp-config", "remote-mcp"),
+	)
+}
+
+func mcpRemoteAuthLoginSpec() actions.Spec {
+	return actions.Command("mcp.auth.login", "login",
+		actions.Use("mcp auth login <name>"),
+		actions.Short("Authorize a remote MCP server with OAuth"),
+		actions.RBAC("mcp_server_auth", actions.VerbConnect, actions.EffectWrite, actions.EffectWrite),
+		actions.Risks("remote-mcp", "secret-storage"),
 	)
 }
 

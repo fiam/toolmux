@@ -75,21 +75,32 @@ Imported remote MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool
 metadata in the user cache directory. Use `toolmux mcp add`, `sync`,
 `rename`, `remove`, `ls`, `show`, and `catalog` for server definitions. Use
-`toolmux mcp auth` for bearer tokens stored in the credential store.
+`toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
+registration, and `toolmux mcp auth set` for externally issued bearer tokens.
+`toolmux mcp remove` and its `rm` alias should accept one or more server names.
 `toolmux mcp ls` should use the shared table renderer for human output,
 display only `project` or `global` scope labels, support `mcp ls <name>` for
 cached tools on one server, and support `mcp ls -R` for a tree of registered
 servers and cached tools.
-Do not store bearer tokens, OAuth tokens, or authorization headers in YAML
-config or test fixtures. Remote Streamable HTTP support must handle both JSON
-and `text/event-stream` responses and preserve `Mcp-Session-Id` headers for
-sessionful servers. `mcp add` syncs tools by default; keep `--no-sync` working
-for servers that require auth before introspection. Stale caches should refresh
-opportunistically after about 24 hours without breaking use of an existing
-cache when refresh fails. Remote tool commands should translate representable
-top-level input-schema properties into flags, keep help focused on command
-usage, expose full schemas through the top-level `toolmux schema` command, and
-support `-v`/`--verbose` HTTP tracing with credential headers redacted.
+Do not store bearer tokens, OAuth tokens, refresh tokens, dynamic client
+secrets, client secrets, auth codes, or authorization headers in YAML config or
+test fixtures. Remote Streamable HTTP support must handle both JSON and
+`text/event-stream` responses and preserve `Mcp-Session-Id` headers for
+sessionful servers. `mcp add` syncs tools by default; when the first sync gets
+an auth-required response and no auth is stored, it should start MCP OAuth,
+store auth, retry sync, and only then write the server config. Failed or
+cancelled OAuth must not leave a registered server behind. Keep `--no-sync`
+working for users who want registration without auth or sync. Custom URL adds
+must use the single `mcp add <name> <url>` form. OAuth tests should use fake
+upstreams for protected-resource metadata,
+authorization-server metadata, dynamic registration, loopback callbacks, PKCE,
+token exchange, and refresh. Stale caches should refresh opportunistically
+after about 24 hours without breaking
+use of an existing cache when refresh fails. Remote tool commands
+should translate representable top-level input-schema properties into flags,
+keep help focused on command usage, expose full schemas through the top-level
+`toolmux schema` command, and support `-v`/`--verbose` HTTP tracing with
+credential headers redacted.
 `mcp catalog` must list built-in remotes regardless of registration state and
 support scriptable `--enable`/`--disable` plus interactive `--manage` toggling.
 Catalog enablement must allow `--enable <catalog-name>=<registered-name>` so
