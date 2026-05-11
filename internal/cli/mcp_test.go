@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/credentials"
-	_ "github.com/fiam/toolmux/internal/providers/all"
 )
 
 type mcpTestResponse struct {
@@ -22,75 +22,6 @@ type mcpTestResponse struct {
 	ID      json.RawMessage `json:"id"`
 	Result  json.RawMessage `json:"result"`
 	Error   *mcpError       `json:"error"`
-}
-
-func TestMCPToolsListUsesProfileFilters(t *testing.T) {
-	t.Parallel()
-
-	output := runMCPServe(t,
-		[]string{"mcp", "serve", "--tool", "slack.*", "--exclude-tool", "*.search"},
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
-	)
-	response := decodeMCPTestResponse(t, output)
-	if response.Error != nil {
-		t.Fatalf("unexpected MCP error: %+v", response.Error)
-	}
-	var result struct {
-		Tools []mcpTool `json:"tools"`
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatal(err)
-	}
-	names := make([]string, 0, len(result.Tools))
-	for _, tool := range result.Tools {
-		names = append(names, tool.Name)
-	}
-	for _, want := range []string{"slack.conversations.list", "slack.message.send"} {
-		if !slices.Contains(names, want) {
-			t.Fatalf("expected MCP tools to include %q, got %v", want, names)
-		}
-	}
-	for _, unwanted := range []string{"slack.search"} {
-		if slices.Contains(names, unwanted) {
-			t.Fatalf("expected MCP tools to exclude %q, got %v", unwanted, names)
-		}
-	}
-}
-
-func TestMCPToolCallReturnsStructuredText(t *testing.T) {
-	t.Parallel()
-
-	output := runMCPServe(t,
-		[]string{"mcp", "serve"},
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slack.message.send","arguments":{"channel":"C123456","text":"Draft","dry-run":true}}}`,
-	)
-	result := decodeMCPCallResult(t, output)
-	if result.IsError {
-		t.Fatalf("unexpected MCP tool error: %+v", result.Content)
-	}
-	if len(result.Content) != 1 || result.Content[0].Type != "text" {
-		t.Fatalf("unexpected MCP content: %+v", result.Content)
-	}
-	text := result.Content[0].Text
-	if !strings.Contains(text, `"dry_run": true`) || !strings.Contains(text, `"action": "slack.message.send"`) {
-		t.Fatalf("expected dry-run JSON text, got %q", text)
-	}
-}
-
-func TestMCPToolCallHonorsReadOnlyMode(t *testing.T) {
-	t.Parallel()
-
-	output := runMCPServe(t,
-		[]string{"--read-only", "mcp", "serve"},
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slack.message.send","arguments":{"channel":"C123456","text":"Draft","dry-run":true}}}`,
-	)
-	result := decodeMCPCallResult(t, output)
-	if !result.IsError {
-		t.Fatalf("expected MCP tool error, got %+v", result)
-	}
-	if len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "read-only mode blocks command slack.message.send") {
-		t.Fatalf("expected read-only denial, got %+v", result.Content)
-	}
 }
 
 func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
@@ -106,8 +37,8 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 		"mcp", "configure", "codex", "claude-code", "gemini-cli",
 		"--dry-run",
 		"--command", "/opt/toolmux/bin/toolmux",
-		"--mcp-profile", "slack read",
-		"--tool", "slack.*",
+		"--mcp-profile", "ops read",
+		"--tool", "linear.*",
 		"--exclude-tool", "*.send",
 		"--scope", "project",
 	})
@@ -117,9 +48,9 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	}
 	rendered := out.String()
 	for _, want := range []string{
-		"codex: codex mcp add toolmux-slack-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'slack read' --tool 'slack.*' --exclude-tool '*.send'",
-		"claude: claude mcp add --scope project --transport stdio toolmux-slack-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'slack read' --tool 'slack.*' --exclude-tool '*.send'",
-		"gemini: gemini mcp add --scope project --transport stdio toolmux-slack-read /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'slack read' --tool 'slack.*' --exclude-tool '*.send'",
+		"codex: codex mcp add toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
+		"claude: claude mcp add --scope project --transport stdio toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
+		"gemini: gemini mcp add --scope project --transport stdio toolmux-ops-read /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -140,8 +71,8 @@ func TestMCPEnableDryRunSupportsKnownAgents(t *testing.T) {
 		"mcp", "enable", "codex", "claude-code",
 		"--dry-run",
 		"--command", "/opt/toolmux/bin/toolmux",
-		"--mcp-profile", "slack read",
-		"--tool", "slack.*",
+		"--mcp-profile", "ops read",
+		"--tool", "linear.*",
 		"--scope", "project",
 	})
 
@@ -150,8 +81,8 @@ func TestMCPEnableDryRunSupportsKnownAgents(t *testing.T) {
 	}
 	rendered := out.String()
 	for _, want := range []string{
-		"codex: codex mcp add toolmux-slack-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'slack read' --tool 'slack.*'",
-		"claude: claude mcp add --scope project --transport stdio toolmux-slack-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'slack read' --tool 'slack.*'",
+		"codex: codex mcp add toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*'",
+		"claude: claude mcp add --scope project --transport stdio toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*'",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -171,7 +102,7 @@ func TestMCPDisableDryRunSupportsKnownAgents(t *testing.T) {
 	cmd.SetArgs([]string{
 		"mcp", "disable", "claude-code", "gemini-cli",
 		"--dry-run",
-		"--mcp-profile", "slack read",
+		"--mcp-profile", "ops read",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -179,11 +110,11 @@ func TestMCPDisableDryRunSupportsKnownAgents(t *testing.T) {
 	}
 	rendered := out.String()
 	for _, want := range []string{
-		"claude: claude mcp remove --scope local toolmux-slack-read",
-		"claude: claude mcp remove --scope user toolmux-slack-read",
-		"claude: claude mcp remove --scope project toolmux-slack-read",
-		"gemini: gemini mcp remove --scope user toolmux-slack-read",
-		"gemini: gemini mcp remove --scope project toolmux-slack-read",
+		"claude: claude mcp remove --scope local toolmux-ops-read",
+		"claude: claude mcp remove --scope user toolmux-ops-read",
+		"claude: claude mcp remove --scope project toolmux-ops-read",
+		"gemini: gemini mcp remove --scope user toolmux-ops-read",
+		"gemini: gemini mcp remove --scope project toolmux-ops-read",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -197,7 +128,7 @@ func TestMCPProfileSetWritesLocalProfile(t *testing.T) {
 	dir := t.TempDir()
 	profilePath := filepath.Join(dir, ".toolmux", "config.yaml")
 	profile := mcpProfileConfigFromSelection(mcpToolSelection{
-		Tools:        []string{"slack.*"},
+		Tools:        []string{"linear.*"},
 		ExcludeTools: []string{"*.send"},
 	})
 	if err := writeToolmuxConfigFile(profilePath, toolmuxConfigFile{
@@ -217,13 +148,10 @@ func TestMCPProfileSetWritesLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := mcpServer{selector: selector}
-	names := make([]string, 0, len(server.mcpSpecs()))
-	for _, spec := range server.mcpSpecs() {
-		names = append(names, spec.ID)
-	}
-	if !slices.Contains(names, "slack.conversations.list") || slices.Contains(names, "slack.message.send") {
-		t.Fatalf("profile filters were not applied: %v", names)
+	listSpec := actions.Spec{ID: "linear.issue.list", Path: []string{"linear", "issue", "list"}}
+	sendSpec := actions.Spec{ID: "linear.message.send", Path: []string{"linear", "message", "send"}}
+	if !selector.matches(listSpec) || selector.matches(sendSpec) {
+		t.Fatalf("profile filters were not applied")
 	}
 }
 
@@ -237,8 +165,8 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 		MCP: mcpConfig{
 			DefaultProfile: "global",
 			Profiles: map[string]mcpProfileConfig{
-				"global": {Tools: []string{"slack.*"}},
-				"shared": {Tools: []string{"slack.*"}},
+				"global": {Tools: []string{"linear.*"}},
+				"shared": {Tools: []string{"linear.*"}},
 			},
 		},
 	}); err != nil {
@@ -249,8 +177,8 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 		MCP: mcpConfig{
 			DefaultProfile: "project",
 			Profiles: map[string]mcpProfileConfig{
-				"project": {Tools: []string{"slack.message.*"}},
-				"shared":  {Tools: []string{"slack.conversations.*"}},
+				"project": {Tools: []string{"linear.issue.*"}},
+				"shared":  {Tools: []string{"linear.project.*"}},
 			},
 		},
 	}); err != nil {
@@ -261,7 +189,7 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Profile != "project" || !slices.Equal(resolved.Tools, []string{"slack.message.*"}) {
+	if resolved.Profile != "project" || !slices.Equal(resolved.Tools, []string{"linear.issue.*"}) {
 		t.Fatalf("expected project default profile, got %+v", resolved)
 	}
 
@@ -269,7 +197,7 @@ func TestMCPProfilesLayerGlobalAndProjectDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(resolved.Tools, []string{"slack.conversations.*"}) {
+	if !slices.Equal(resolved.Tools, []string{"linear.project.*"}) {
 		t.Fatalf("expected project profile to override global profile, got %+v", resolved)
 	}
 
@@ -456,10 +384,10 @@ func Example_mcpConfiguredServeArgs() {
 	configure := mcpConfigureOptions{
 		mcpToolSelection: mcpToolSelection{
 			Profile:      "readonly",
-			Tools:        []string{"slack.*"},
+			Tools:        []string{"linear.*"},
 			ExcludeTools: []string{"*.send"},
 		},
 	}
 	fmt.Println(strings.Join(mcpConfiguredServeArgs(opts, configure), " "))
-	// Output: mcp serve --profile work --account default --read-only --mcp-profile readonly --tool slack.* --exclude-tool *.send
+	// Output: mcp serve --profile work --account default --read-only --mcp-profile readonly --tool linear.* --exclude-tool *.send
 }

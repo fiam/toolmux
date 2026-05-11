@@ -16,7 +16,7 @@ func TestAuthorizeDefaultDenyAllowsReader(t *testing.T) {
 
 	decision := engine.Authorize(Invocation{
 		Spec: CommandSpec{
-			ID: "slack.conversations.list", Provider: "slack", Resource: "conversation", Action: "list",
+			ID: "linear.issue.list", Provider: "linear", Resource: "issue", Action: "list",
 		},
 		Profile: "default",
 	})
@@ -92,7 +92,7 @@ func TestAuthorizeMatchesRemoteAndLocalEffects(t *testing.T) {
 	})
 
 	readSpec := CommandSpec{
-		ID: "slack.conversations.list", Provider: "slack", Resource: "conversation", Action: "list",
+		ID: "linear.issue.list", Provider: "linear", Resource: "issue", Action: "list",
 		RemoteEffect: "read", LocalEffect: "none",
 	}
 	if decision := engine.Authorize(Invocation{Spec: readSpec, Profile: "default"}); !decision.Allowed {
@@ -100,7 +100,7 @@ func TestAuthorizeMatchesRemoteAndLocalEffects(t *testing.T) {
 	}
 
 	connectSpec := CommandSpec{
-		ID: "slack.connect", Provider: "slack", Resource: "connection", Action: "connect",
+		ID: "linear.connect", Provider: "linear", Resource: "connection", Action: "connect",
 		RemoteEffect: "none", LocalEffect: "write",
 	}
 	if decision := engine.Authorize(Invocation{Spec: connectSpec, Profile: "default"}); decision.Allowed {
@@ -134,7 +134,7 @@ func TestLegacyEffectsMatchBroadEffect(t *testing.T) {
 	})
 
 	spec := CommandSpec{
-		ID: "slack.connect", Provider: "slack", Resource: "connection", Action: "connect",
+		ID: "linear.connect", Provider: "linear", Resource: "connection", Action: "connect",
 		Effect: "write", RemoteEffect: "none", LocalEffect: "write",
 	}
 	if decision := engine.Authorize(Invocation{Spec: spec, Profile: "default"}); !decision.Allowed {

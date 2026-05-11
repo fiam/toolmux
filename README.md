@@ -17,8 +17,9 @@ Use Toolmux when you want to:
 5. Use `--read-only` and local policy files to block writes before auth is
    loaded.
 
-Toolmux is early software. Today it has an initial native Slack command set,
-remote MCP imports, and agent setup for Codex, Claude Code, and Gemini CLI.
+Toolmux is early software. Today it focuses on remote MCP imports and agent
+setup for Codex, Claude Code, and Gemini CLI. Native provider command sets are
+not currently shipped as the primary integration path.
 
 ## Install
 
@@ -34,54 +35,37 @@ Release archives for macOS, Linux, and Windows are available from
 
 ## Connect Services
 
-Connect Slack:
+Import a supported remote MCP server from the catalog:
 
 ```bash
-toolmux connect slack
-toolmux status slack
-toolmux doctor slack
+toolmux mcp catalog
+toolmux mcp catalog --enable grafana
+toolmux mcp auth login grafana
+toolmux mcp sync grafana
+toolmux grafana
 ```
 
-Disconnect and remove the local token:
+Try the public no-auth Iterate mock server:
 
 ```bash
-toolmux disconnect slack --yes
+toolmux mcp add iterate
+toolmux iterate mock_echo --message hello
 ```
+
+Remote MCP server definitions and cached tool metadata are non-secret config.
+OAuth tokens, bearer tokens, refresh tokens, dynamic client secrets, manually
+supplied client secrets, and auth codes are stored only in the OS credential
+store or transient process memory.
 
 Toolmux uses a hosted OAuth broker at `https://api.toolmux.com` by default for
-provider flows that require confidential client secrets. Long-lived provider
-tokens are handed back to your local CLI and stored in your OS credential
-store.
-
-To self-host the broker, point the CLI at your own `toolmuxd`:
+native provider flows that require confidential client secrets. To self-host
+the broker, point the CLI at your own `toolmuxd`:
 
 ```bash
 export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
-toolmux connect slack
 ```
 
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-Provider app setup notes are in [docs/providers/slack-app.md](docs/providers/slack-app.md).
-
-## Slack
-
-List visible conversations:
-
-```bash
-toolmux slack conversations ls
-```
-
-Send a message:
-
-```bash
-toolmux slack message send --channel C123456 --text "deploy is done"
-```
-
-Search messages when the Slack app was granted search access:
-
-```bash
-toolmux slack search --query "from:me deploy"
-```
 
 ## Output For Humans And Scripts
 
@@ -92,8 +76,8 @@ selectors.
 Use structured output when another program is reading the result:
 
 ```bash
-toolmux --output json slack search --query "deploy"
-toolmux --output yaml status slack
+toolmux --output json mcp ls -R
+toolmux --output yaml mcp catalog
 ```
 
 JSON and YAML output are stable and undecorated: no ANSI escapes, prompts,
@@ -117,18 +101,18 @@ Use `--read-only` to block commands with local or remote write effects before
 provider credentials are read:
 
 ```bash
-toolmux --read-only slack conversations ls
-toolmux --read-only slack message send --channel C123456 --text "deploy"
+toolmux --read-only mcp ls -R
+toolmux --read-only mcp add demo https://example.com/mcp --no-sync
 ```
 
-The first command can run. The second is blocked.
+The first command can run. The second is blocked because it writes config.
 
 For project-specific guardrails, create a local policy file:
 
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "slack conversations ls"
+toolmux policy check --command "mcp ls"
 ```
 
 Policy discovery order:
@@ -189,12 +173,12 @@ toolmux mcp disable gemini
 Limit which tools agents can see with MCP profiles:
 
 ```bash
-toolmux mcp profile set slack-read \
-  --tool 'slack.*' \
+toolmux mcp profile set readonly \
+  --tool 'grafana.*' \
   --exclude-tool '*.send'
 
-toolmux mcp profile default slack-read
-toolmux mcp configure codex --mcp-profile slack-read --read-only
+toolmux mcp profile default readonly
+toolmux mcp configure codex --mcp-profile readonly --read-only
 ```
 
 ## Import Remote MCP Servers
@@ -331,7 +315,7 @@ expressed as flags. Use `toolmux schema <server> <tool>` or
 
 ## Token Custody
 
-For native provider OAuth:
+For native provider OAuth integrations:
 
 1. `toolmuxd` starts a browser OAuth flow.
 2. The provider redirects back to `toolmuxd`.
@@ -349,7 +333,7 @@ store or transient process memory.
 
 ```bash
 toolmux --help
-toolmux <provider> --help
+toolmux <remote> --help
 toolmux mcp --help
 toolmux doctor
 ```

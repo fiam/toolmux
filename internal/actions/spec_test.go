@@ -4,8 +4,8 @@ import "testing"
 
 func TestLeafSpecsResolveProviderTree(t *testing.T) {
 	t.Parallel()
-	tree := Group("slack",
-		Short("Operate Slack"),
+	tree := Group("linear",
+		Short("Operate Linear"),
 		Children(
 			Group("message",
 				Short("Operate messages"),
@@ -15,12 +15,12 @@ func TestLeafSpecsResolveProviderTree(t *testing.T) {
 			),
 		),
 	)
-	specs := LeafSpecs("slack", tree)
+	specs := LeafSpecs("linear", tree)
 	if len(specs) != 1 {
 		t.Fatalf("expected one spec, got %d", len(specs))
 	}
 	spec := specs[0]
-	if spec.ID != "slack.message.send" {
+	if spec.ID != "linear.message.send" {
 		t.Fatalf("unexpected action id %q", spec.ID)
 	}
 	if spec.RemoteEffect != string(EffectWrite) || spec.LocalEffect != string(EffectNone) {
@@ -29,7 +29,7 @@ func TestLeafSpecsResolveProviderTree(t *testing.T) {
 	if spec.Effect != string(EffectWrite) {
 		t.Fatalf("unexpected broad effect: %#v", spec)
 	}
-	expectedPath := []string{"slack", "message", "send"}
+	expectedPath := []string{"linear", "message", "send"}
 	if !equalStrings(spec.Path, expectedPath) {
 		t.Fatalf("expected path %#v, got %#v", expectedPath, spec.Path)
 	}

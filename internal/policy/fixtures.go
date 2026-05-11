@@ -13,10 +13,10 @@ roles:
   operator:
     extends: ["reader"]
     allow:
-      - id: allow-slack-send
-        provider: "slack"
-        resources: ["message"]
-        actions: ["send"]
+      - id: allow-linear-create
+        provider: "linear"
+        resources: ["issue"]
+        actions: ["create"]
     deny:
       - id: deny-destructive
         risks: ["destructive"]

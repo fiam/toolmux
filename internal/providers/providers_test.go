@@ -11,9 +11,6 @@ import (
 func TestCommandSpecsHaveRequiredFields(t *testing.T) {
 	t.Parallel()
 	specs := providers.CommandSpecs()
-	if len(specs) == 0 {
-		t.Fatal("expected command specs")
-	}
 	seen := map[string]bool{}
 	for _, spec := range specs {
 		if spec.ID == "" || spec.Provider == "" || spec.Resource == "" || spec.Action == "" {
@@ -46,20 +43,15 @@ func TestCommandSpecsHaveRequiredFields(t *testing.T) {
 
 func TestCommandTreesHaveRequiredFields(t *testing.T) {
 	t.Parallel()
-	seenTree := false
 	for _, provider := range providers.All() {
 		if len(provider.Tree.Children) == 0 {
 			continue
 		}
-		seenTree = true
 		actions.Walk(actions.ProviderName(provider.ID), provider.Tree, func(spec actions.Spec) {
 			if len(spec.Children) > 0 && (len(spec.Path) == 0 || spec.Use == "" || spec.Short == "") {
 				t.Fatalf("incomplete command group for %s: %#v", provider.ID, spec)
 			}
 		})
-	}
-	if !seenTree {
-		t.Fatal("expected command trees")
 	}
 }
 

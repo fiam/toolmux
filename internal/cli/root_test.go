@@ -40,7 +40,7 @@ func TestPolicyCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "slack.message.send") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
+	if !strings.Contains(rendered, "mcp.add") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
 		t.Fatalf("expected action effects in catalog, got %q", rendered)
 	}
 	if strings.Contains(rendered, "gmail.send") {
@@ -64,42 +64,6 @@ func TestColorAlwaysColorsTableOutput(t *testing.T) {
 	}
 }
 
-func TestProviderHelpComesFromActionMetadata(t *testing.T) {
-	t.Parallel()
-	cmd := NewRootCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{"slack", "conversations", "--help"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	rendered := out.String()
-	if !strings.Contains(rendered, "Read Slack conversations") || !strings.Contains(rendered, "Usage:") {
-		t.Fatalf("expected generated provider help from metadata, got %q", rendered)
-	}
-}
-
-func TestProviderCommandFlagsComeFromActionMetadata(t *testing.T) {
-	t.Parallel()
-	cmd := NewRootCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{"slack", "conversations", "ls", "--help"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	rendered := out.String()
-	for _, want := range []string{"--include-archived", "--limit", "--team", "--types"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("expected generated provider help to contain %q, got %q", want, rendered)
-		}
-	}
-}
-
 func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommand()
@@ -119,7 +83,7 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	}
 }
 
-func TestReadOnlyModeBlocksMutatingProviderCommand(t *testing.T) {
+func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{
 		Credentials: credentials.NewMemoryStore(),
@@ -127,13 +91,13 @@ func TestReadOnlyModeBlocksMutatingProviderCommand(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"--read-only", "slack", "message", "send", "--channel", "C123456", "--text", "Draft", "--dry-run"})
+	cmd.SetArgs([]string{"--read-only", "mcp", "add", "demo", "https://example.com/mcp", "--no-sync", "--global"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected read-only denial")
 	}
-	if !strings.Contains(err.Error(), "read-only mode blocks command slack.message.send") {
+	if !strings.Contains(err.Error(), "read-only mode blocks command mcp.add") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -142,7 +106,7 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"SLACK_CLIENT_ID is required"}`))
+		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"JIRA_CLIENT_ID is required"}`))
 	}))
 	defer server.Close()
 
@@ -153,13 +117,13 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"connect", "slack"})
+	cmd.SetArgs([]string{"connect", "jira"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected connect error")
 	}
-	if !strings.Contains(err.Error(), "SLACK_CLIENT_ID is required") {
+	if !strings.Contains(err.Error(), "JIRA_CLIENT_ID is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(out.String(), "Usage:") {
@@ -172,12 +136,12 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 	store := credentials.NewMemoryStore()
 	err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
-		Provider:  "slack",
+		Provider:  "jira",
 		AccountID: "default",
 	}, credentials.OAuthTokens{
-		AccessToken: "slack-access-token",
+		AccessToken: "jira-access-token",
 		TokenType:   "bearer",
-		Scopes:      []string{"channels:read", "chat:write"},
+		Scopes:      []string{"read:jira-work", "write:jira-work"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -186,13 +150,13 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"status", "slack"})
+	cmd.SetArgs([]string{"status", "jira"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "chat:write") {
+	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "write:jira-work") {
 		t.Fatalf("expected connected status table with permissions, got %q", rendered)
 	}
 	if strings.Contains(rendered, "\x1b[") {
@@ -218,25 +182,5 @@ func TestDoctorTableRunsCoreAndProviderDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(rendered, "\x1b[") {
 		t.Fatalf("non-tty doctor output should not contain ANSI escape sequences: %q", rendered)
-	}
-}
-
-func TestProviderDryRunDoesNotRequireCredentials(t *testing.T) {
-	t.Parallel()
-	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{
-		"slack", "message", "send",
-		"--channel", "C123456",
-		"--text", "preview",
-		"--dry-run",
-	})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "slack.message.send") {
-		t.Fatalf("expected dry-run output, got %q", out.String())
 	}
 }

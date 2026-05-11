@@ -124,11 +124,11 @@ func TestMCPRemoteOAuthCallbackPageInfersKnownLogo(t *testing.T) {
 	page := mcpRemoteOAuthCallbackPageFor(mcpRemoteServerEntry{
 		Name: "workspace",
 		Server: mcpRemoteServer{
-			URL: "https://mcp.slack.com/mcp",
+			URL: "https://mcp.grafana.com/mcp",
 		},
 	}, mcpRemoteOAuthDiscovery{})
-	if page.DisplayName != "Slack" || page.LogoSlug != "slack" || page.LogoText != "S" {
-		t.Fatalf("expected Slack page metadata, got %#v", page)
+	if page.DisplayName != "Grafana" || page.LogoSlug != "grafana" || page.LogoText != "G" {
+		t.Fatalf("expected Grafana page metadata, got %#v", page)
 	}
 }
 

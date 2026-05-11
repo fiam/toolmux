@@ -362,7 +362,7 @@ func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemo
 
 func mcpRemoteKnownLogoSlug(values ...string) string {
 	target := strings.ToLower(strings.Join(values, " "))
-	for _, known := range []string{"slack", "cloudflare", "grafana", "linear", "miro", "notion", "atlassian"} {
+	for _, known := range []string{"cloudflare", "grafana", "linear", "miro", "notion", "atlassian"} {
 		if strings.Contains(target, known) {
 			return known
 		}
@@ -384,8 +384,6 @@ func mcpRemoteKnownLogoName(slug string) string {
 		return "Miro"
 	case "notion":
 		return "Notion"
-	case "slack":
-		return "Slack"
 	default:
 		return ""
 	}
@@ -568,18 +566,7 @@ var mcpRemoteOAuthCallbackTemplate = template.Must(template.New("mcp-remote-oaut
   <main>
     <header>
       <div class="logo logo-{{.Page.LogoSlug}}" aria-label="{{.Page.DisplayName}} logo">
-        {{if eq .Page.LogoSlug "slack"}}
-        <svg viewBox="0 0 122.8 122.8" aria-hidden="true" focusable="false">
-          <path fill="#E01E5A" d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9z"/>
-          <path fill="#E01E5A" d="M32.3 77.6c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6z"/>
-          <path fill="#36C5F0" d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2z"/>
-          <path fill="#36C5F0" d="M45.2 32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3z"/>
-          <path fill="#2EB67D" d="M97 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97V45.2z"/>
-          <path fill="#2EB67D" d="M90.5 45.2c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.7 5.8 70.5 0 77.6 0s12.9 5.8 12.9 12.9v32.3z"/>
-          <path fill="#ECB22E" d="M77.6 97c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97h12.9z"/>
-          <path fill="#ECB22E" d="M77.6 90.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6z"/>
-        </svg>
-        {{else if eq .Page.LogoSlug "cloudflare"}}
+        {{if eq .Page.LogoSlug "cloudflare"}}
         <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
           <path fill="#f6821f" d="M42.6 42.8H17.1c-4.7 0-8.6-3.8-8.6-8.6 0-4.3 3.2-7.9 7.4-8.5 1.9-7.4 8.6-12.6 16.5-12.6 8.7 0 15.9 6.5 16.9 14.9 3.5.9 6.1 4.1 6.1 7.9 0 3.8-2.6 7-6.2 7.8l-6.6-.9z"/>
           <path fill="#ffb74d" d="M37.8 30.8c1.4-1.2 3.3-1.9 5.3-1.9h6c3.6 0 6.5 2.9 6.5 6.5s-2.9 6.5-6.5 6.5H25.7l12.1-11.1z"/>

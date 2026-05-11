@@ -155,8 +155,8 @@ Fake upstreams should emulate:
 2. Token refresh, refresh rotation, revocation, and missing scopes.
 3. Provider API success, pagination, permission denied, rate limits, malformed
    responses, empty responses, 5xx errors, and retries.
-4. Slack, Jira, Linear, Google Docs, Google Drive, Gmail, and other behavior
-   needed by implemented native commands.
+4. Jira, Linear, Google Docs, Google Drive, Gmail, and other behavior needed by
+   implemented native commands.
 5. Remote MCP OAuth protected-resource metadata, authorization-server metadata,
    dynamic client registration, loopback callbacks, resource parameters, PKCE,
    and refresh behavior.
@@ -172,7 +172,7 @@ parallel tests.
 
 Provider integration tests that exercise the `toolmux` command surface should
 live with the provider package, usually as external tests such as
-`internal/providers/slack/client` package `client_test`. Use
+`internal/providers/<provider>/client` package `client_test`. Use
 `internal/testutil/toolmuxtest` for command execution helpers instead of
 creating provider-specific `runToolmux` wrappers.
 
@@ -298,11 +298,6 @@ scraping, or provider-policy bypasses. If Toolmux needs to support a local or
 self-hosted MCP server that accepts tokens, require explicit user-supplied
 credentials through the OS credential store, `mcp auth set`, OAuth, or the
 server's own documented setup flow.
-
-The initial Slack native surface is brokered OAuth v2 user-token auth plus
-`slack conversations ls`, `slack message send`, and `slack search`. Keep Slack
-scopes aligned with `docs/providers/slack-app.md`, do not request bot scopes by
-default, and preserve token rotation through `toolmuxd` before Slack API calls.
 
 ## Hosted Broker
 

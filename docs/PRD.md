@@ -8,8 +8,8 @@ Toolmux is an open-source CLI that lets users connect and operate common SaaS
 services from one command surface. The provider strategy is MCP-first: import
 remote MCP servers when a provider already offers a usable MCP surface, and
 build native integrations only for providers or workflows without an adequate
-MCP path. The current native MVP is Slack; Notion is handled through the
-remote MCP catalog rather than a native Toolmux OAuth integration.
+MCP path. The current product path is remote MCP catalog first; native
+providers are deferred until a provider-specific workflow clearly needs one.
 
 The first release optimizes for a simple connection experience without asking users to create personal API keys or provider developer apps. Provider tokens are stored locally by default; Toolmux does not provide cloud token storage in the initial release.
 
@@ -30,7 +30,7 @@ The first release optimizes for a simple connection experience without asking us
 1. No Toolmux-hosted token vault in the initial release.
 2. No team-shared connections.
 3. No scheduled cloud workflows or background jobs.
-4. No Slack bot/workspace automation as the default Slack experience.
+4. No native workspace bot automation by default.
 5. No unrestricted Google Drive indexing/search in the initial release, because broad Drive scopes are restricted and increase verification/compliance burden.
 6. No Gmail inbox search, message body reads, mailbox modification, forwarding, or admin settings in the initial release, because those scopes are restricted and increase verification/security-assessment burden.
 7. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
@@ -104,24 +104,24 @@ Policy commands:
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "slack conversations ls"
-toolmux policy explain --command "slack message send --channel C123 --text Draft"
+toolmux policy check --command "mcp ls"
+toolmux policy explain --command "linear issue create --title Draft"
 toolmux policy doctor
 ```
 
 Each command must declare metadata that the policy engine can evaluate:
 
 ```text
-command: slack.message.send
-provider: slack
-resource: message
-action: send
+command: linear.issue.create
+provider: linear
+resource: issue
+action: create
 remote_effect: write
 local_effect: none
-risk: message-send
+risk: issue-create
 account: <resolved account id>
 profile: <toolmux profile>
-scopes: [chat:write]
+scopes: [issues:create]
 args: provider-specific normalized arguments
 ```
 
@@ -140,9 +140,9 @@ roles:
   operator:
     extends: ["reader"]
     allow:
-      - provider: "slack"
-        resources: ["message"]
-        actions: ["send"]
+      - provider: "linear"
+        resources: ["issue"]
+        actions: ["create"]
     deny:
       - risks: ["destructive"]
 
@@ -209,8 +209,8 @@ Human UX requirements:
 4. Error messages should explain what failed, why it likely failed, the policy/provider detail behind it, and the exact command to retry or inspect.
 5. Common workflows may have ergonomic shortcuts that map to canonical commands.
 6. Shell completion should cover static commands and dynamic provider values
-   such as profiles, Jira projects, Linear teams, Slack channels, remote MCP
-   server names/tool names, and Google accounts.
+   such as profiles, Jira projects, Linear teams, remote MCP server names/tool
+   names, and Google accounts.
 7. Users should be able to define aliases for provider-specific ids so command lines remain readable.
 8. Commands that return web resources should support `--open` to launch the provider URL in a browser.
 
@@ -248,7 +248,6 @@ Human-oriented examples:
 ```bash
 toolmux linear mine
 toolmux jira open PROJ-123
-toolmux slack send '#ops' 'deploy is done'
 toolmux mcp catalog --enable notion
 toolmux notion
 toolmux linear issue create --title "Fix login" --dry-run
@@ -268,7 +267,6 @@ Alias commands:
 
 ```bash
 toolmux alias set jira.default OPS
-toolmux alias set slack.ops C123456
 toolmux alias ls
 ```
 
@@ -290,17 +288,16 @@ Baseline commands:
 
 ```bash
 toolmux connect jira
-toolmux connect slack
 toolmux connect linear
 toolmux connect google
 toolmux mcp add notion
 
 toolmux status
-toolmux status slack jira
+toolmux status jira
 toolmux doctor
-toolmux doctor slack jira
+toolmux doctor jira
 toolmux connections ls
-toolmux disconnect slack
+toolmux disconnect jira
 toolmux mcp remove notion
 ```
 
@@ -357,11 +354,10 @@ CLI retrieves bundle once over HTTPS and stores it locally
 toolmuxd deletes the handoff material
 ```
 
-Initial providers:
+Initial native provider candidates when MCP is insufficient:
 
 1. Jira.
-2. Slack user-token mode.
-3. Slack bot/workspace-install mode, if enabled after user-token MVP.
+2. Google Workspace.
 
 toolmuxd must not store provider access tokens or refresh tokens in durable storage.
 
@@ -458,36 +454,6 @@ Out of scope for MVP:
 1. Jira Data Center OAuth variants.
 2. Jira administration APIs.
 3. Bulk issue mutation.
-
-### Slack
-
-Auth:
-
-1. Default MVP path is brokered Slack OAuth v2 user-token auth through `toolmuxd`.
-2. Slack bot scopes are not requested by the initial command set.
-3. Slack token rotation is enabled when the app issues refresh tokens.
-4. Slack bot/workspace install can be added through toolmuxd as a separate `--mode bot` path.
-
-Candidate user scopes:
-
-1. `chat:write` for posting as the connected user.
-2. `channels:read`, `groups:read`, `im:read`, and `mpim:read` for listing visible conversations, subject to Slack approval rules.
-3. `search:read` for user-level message search if accepted by the app review and target workspaces.
-
-MVP commands:
-
-```bash
-toolmux slack conversations ls
-toolmux slack message send --channel <id-or-name> --text "..."
-toolmux slack search --query "from:me deploy"
-```
-
-Out of scope for MVP:
-
-1. Slack Events API ingestion.
-2. Socket Mode.
-3. Bot mentions and automations.
-4. Admin, Audit Logs, Legal Holds, or SCIM APIs.
 
 ### Linear
 
@@ -701,8 +667,8 @@ MVP success:
 ## Risks
 
 1. Google verification can block or delay broad Docs/Drive/Gmail features.
-2. Slack user-token capabilities may not cover desired bot/workspace workflows.
-3. toolmuxd availability affects Jira and Slack refresh flows even though tokens are local.
+2. Native provider OAuth scope reviews can block or delay useful workflows.
+3. toolmuxd availability affects brokered native refresh flows even though tokens are local.
 4. Provider OAuth policies can change and may require re-review.
 5. Local keychains behave differently in headless Linux and CI environments.
 6. Local policy files are useful guardrails but can be bypassed by users who control their machine or working directory.
@@ -710,29 +676,25 @@ MVP success:
 
 ## Open Questions
 
-1. Should Slack MVP be user-token only, or should toolmuxd-backed bot install be included in the first public beta?
-2. Should Google Docs and Drive be separate top-level commands or grouped under `toolmux google`?
-3. Should Gmail commands be top-level as `toolmux gmail`, grouped under `toolmux google gmail`, or both?
-4. Which providers with MCP support still need a native fallback, and what
+1. Should Google Docs and Drive be separate top-level commands or grouped under `toolmux google`?
+2. Should Gmail commands be top-level as `toolmux gmail`, grouped under `toolmux google gmail`, or both?
+3. Which providers with MCP support still need a native fallback, and what
    product gap justifies that work?
-5. Should Jira write commands be enabled in MVP or gated behind a second auth scope escalation?
-6. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
-7. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
-8. Should aliases be stored per profile, per provider account, or both?
-9. What are the preferred hosted `toolmuxd` domains for production, staging, and local development?
-10. Should hosted Toolmux deploy `toolmuxd` to Lambda as a container image, a wrapped generic image, or a Lambda-specific private image?
+4. Should Jira write commands be enabled in MVP or gated behind a second auth scope escalation?
+5. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
+6. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
+7. Should aliases be stored per profile, per provider account, or both?
+8. What are the preferred hosted `toolmuxd` domains for production, staging, and local development?
+9. Should hosted Toolmux deploy `toolmuxd` to Lambda as a container image, a wrapped generic image, or a Lambda-specific private image?
 
 ## Source References
 
 1. Atlassian Jira OAuth 2.0 3LO: https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
 2. Atlassian Jira OAuth scopes: https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/
-3. Slack OAuth v2: https://docs.slack.dev/authentication/installing-with-oauth/
-4. Slack PKCE: https://docs.slack.dev/authentication/using-pkce/
-5. Slack token rotation: https://docs.slack.dev/authentication/using-token-rotation/
-6. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
-7. Linear GraphQL API: https://linear.app/developers/graphql
-8. Google desktop OAuth: https://developers.google.com/identity/protocols/oauth2/native-app
-9. Google Docs API scopes: https://developers.google.com/workspace/docs/api/auth
+3. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
+4. Linear GraphQL API: https://linear.app/developers/graphql
+5. Google desktop OAuth: https://developers.google.com/identity/protocols/oauth2/native-app
+6. Google Docs API scopes: https://developers.google.com/workspace/docs/api/auth
 10. Google Drive API scopes: https://developers.google.com/workspace/drive/api/guides/api-specific-auth
 11. Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
 12. Gmail sending guide: https://developers.google.com/gmail/api/guides/sending

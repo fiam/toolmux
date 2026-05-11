@@ -107,7 +107,7 @@ func TestKeyringStoreLoadMissingReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	store := newKeyringStore(newFakeKeyring(), "toolmux-test", []string{"keychain"})
 	_, err := store.LoadOAuthTokens(context.Background(), ConnectionRef{
-		Provider:  "slack",
+		Provider:  "example",
 		AccountID: "team-1",
 	})
 	if !errors.Is(err, ErrNotFound) {
@@ -119,7 +119,7 @@ func TestKeyringStoreDeleteMissingIsIdempotent(t *testing.T) {
 	t.Parallel()
 	store := newKeyringStore(newFakeKeyring(), "toolmux-test", []string{"keychain"})
 	err := store.DeleteOAuthTokens(context.Background(), ConnectionRef{
-		Provider:  "slack",
+		Provider:  "example",
 		AccountID: "team-1",
 	})
 	if err != nil {

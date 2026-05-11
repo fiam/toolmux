@@ -103,7 +103,6 @@ behind HTTPS in production:
 
 ```text
 https://auth.example.com/oauth/jira/callback
-https://auth.example.com/oauth/slack/callback
 ```
 
 The reverse proxy or hosting platform should terminate TLS and forward requests
@@ -122,10 +121,6 @@ TOOLMUX_PUBLIC_URL=https://auth.example.com
 ATLASSIAN_CLIENT_ID=...
 ATLASSIAN_CLIENT_SECRET=...
 ATLASSIAN_REDIRECT_URI=https://auth.example.com/oauth/jira/callback
-
-SLACK_CLIENT_ID=...
-SLACK_CLIENT_SECRET=...
-SLACK_REDIRECT_URI=https://auth.example.com/oauth/slack/callback
 ```
 
 Do not commit secrets, Cloudflare tunnel tokens, tunnel URLs, OAuth codes,
@@ -170,6 +165,7 @@ need and a threat model for it.
 Self-hosters need their own provider OAuth apps:
 
 1. Jira: Atlassian OAuth 2.0 3LO app with your callback URL.
-2. Slack: Slack OAuth app with your callback URL.
 
-See provider-specific docs under `docs/providers/`.
+Remote MCP servers may use their own OAuth flows and do not require a native
+provider app in `toolmuxd` unless Toolmux adds a provider-specific broker for
+that service.

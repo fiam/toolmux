@@ -487,7 +487,7 @@ func addMCPToolSelectionFlags(cmd *cobra.Command, selection *mcpToolSelection) {
 }
 
 func addMCPToolPatternFlags(cmd *cobra.Command, selection *mcpToolSelection) {
-	cmd.Flags().StringArrayVar(&selection.Tools, "tool", nil, "shell-style tool glob to include, such as slack.*")
+	cmd.Flags().StringArrayVar(&selection.Tools, "tool", nil, "shell-style tool glob to include, such as linear.*")
 	cmd.Flags().StringArrayVar(&selection.ToolRegex, "tool-regex", nil, "regular expression for tool IDs to include")
 	cmd.Flags().StringArrayVar(&selection.ExcludeTools, "exclude-tool", nil, "shell-style tool glob to exclude")
 	cmd.Flags().StringArrayVar(&selection.ExcludeToolRegex, "exclude-tool-regex", nil, "regular expression for tool IDs to exclude")

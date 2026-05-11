@@ -1220,9 +1220,9 @@ func TestMCPRemoteServerRegistrationRejectsNativeCommandCollision(t *testing.T) 
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"mcp", "add", "slack", upstream.URL, "--global"})
+	cmd.SetArgs([]string{"mcp", "add", "status", upstream.URL, "--global"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), `MCP server name "slack" conflicts`) {
+	if err == nil || !strings.Contains(err.Error(), `MCP server name "status" conflicts`) {
 		t.Fatalf("expected collision error, got %v", err)
 	}
 }
@@ -1242,18 +1242,18 @@ func TestMCPRemoteServerCommandSurfaceIsFlat(t *testing.T) {
 func TestMCPRemoteServerStartupConflictPrintsRenameCommand(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	writeRemoteTestConfig(t, env, map[string]mcpRemoteServer{
-		"slack": {URL: "https://example.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		"status": {URL: "https://example.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
 	})
 
 	cmd := rootForRemoteTest(env)
 	cmd.SetArgs([]string{"status"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "toolmux mcp rename slack <new-name>") {
+	if err == nil || !strings.Contains(err.Error(), "toolmux mcp rename status <new-name>") {
 		t.Fatalf("expected rename guidance, got %v", err)
 	}
 
-	out := runRootForRemoteTest(t, env, "mcp", "rename", "slack", "slack2")
-	if !strings.Contains(out, "renamed MCP server slack to slack2") {
+	out := runRootForRemoteTest(t, env, "mcp", "rename", "status", "status2")
+	if !strings.Contains(out, "renamed MCP server status to status2") {
 		t.Fatalf("expected rename output, got %q", out)
 	}
 }
