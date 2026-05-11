@@ -31,6 +31,7 @@ const (
 	mcpRemoteTransportStreamableHTTP = "streamable-http"
 	mcpRemoteCacheVersion            = 1
 	mcpRemoteCacheMaxAge             = 24 * time.Hour
+	mcpRemoteToolsListMaxPages       = 128
 	mcpRemoteTraceBodyLimit          = 8 << 20
 	mcpRemoteCompactDescriptionLimit = 120
 	mcpRemoteServerAnnotation        = "toolmux.remote_mcp.server"
@@ -69,9 +70,15 @@ type mcpRemoteCache struct {
 }
 
 type mcpRemoteTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"inputSchema,omitempty"`
+	Name         string           `json:"name"`
+	Title        string           `json:"title,omitempty"`
+	Description  string           `json:"description,omitempty"`
+	InputSchema  map[string]any   `json:"inputSchema,omitempty"`
+	OutputSchema map[string]any   `json:"outputSchema,omitempty"`
+	Annotations  map[string]any   `json:"annotations,omitempty"`
+	Icons        []map[string]any `json:"icons,omitempty"`
+	Execution    map[string]any   `json:"execution,omitempty"`
+	Meta         map[string]any   `json:"_meta,omitempty"`
 }
 
 type mcpRemoteToolRef struct {
@@ -144,6 +151,7 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	var transport string
 	var noSync bool
+	var verboseHTTP bool
 	cmd := &cobra.Command{
 		Use:     "add <name> [url]",
 		Aliases: []string{"register"},
@@ -225,7 +233,8 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 				Path:   configPath,
 				Server: server,
 			}
-			cache, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args)
+			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
+			cache, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args, trace)
 			if err != nil {
 				return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
 			}
@@ -238,12 +247,14 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&transport, "transport", mcpRemoteTransportStreamableHTTP, "remote MCP transport: streamable-http")
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "register without immediately syncing tools")
+	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
 }
 
 func mcpRemoteSyncCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var verboseHTTP bool
+	cmd := &cobra.Command{
 		Use:   "sync <name>",
 		Short: "Introspect and cache a remote MCP server",
 		Args:  cobra.ExactArgs(1),
@@ -259,7 +270,8 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
 			}
-			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
+			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 			if err != nil {
 				return err
 			}
@@ -267,6 +279,8 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
+	return cmd
 }
 
 func mcpRemoteRenameCommand(opts *options) *cobra.Command {
@@ -1384,7 +1398,7 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 	}
 	if syncEnabled {
 		for _, entry := range enabled {
-			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, []string{entry.Name})
+			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, []string{entry.Name}, nil)
 			if err != nil {
 				return err
 			}
@@ -1523,6 +1537,7 @@ func mcpBuiltinRemoteServers() map[string]mcpRemoteServer {
 	return map[string]mcpRemoteServer{
 		"atlassian":  {URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
 		"cloudflare": {URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		"grafana":    {URL: "https://mcp.grafana.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
 		"iterate":    {URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP},
 		"linear":     {URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP},
 		"miro":       {URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP},
@@ -1759,7 +1774,7 @@ func removeMCPRemoteCache(configuredDir, name string) error {
 	return nil
 }
 
-func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string) (mcpRemoteCache, error) {
+func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, error) {
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), args); err != nil {
 		return mcpRemoteCache{}, err
 	}
@@ -1767,7 +1782,7 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	if err != nil {
 		return mcpRemoteCache{}, err
 	}
-	cache, err := syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, token, nil)
+	cache, err := syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, token, trace)
 	if err != nil {
 		return mcpRemoteCache{}, err
 	}
@@ -1777,8 +1792,8 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	return cache, nil
 }
 
-func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string) (mcpRemoteCache, error) {
-	cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, error) {
+	cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 	if err == nil {
 		return cache, nil
 	}
@@ -1806,7 +1821,7 @@ func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemo
 		return mcpRemoteCache{}, saveErr
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", entry.Name)
-	return syncMCPRemoteCacheExplicit(cmd, opts, entry, args)
+	return syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 }
 
 func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool) {
@@ -1863,20 +1878,10 @@ func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemo
 		ServerInfo      map[string]any `json:"serverInfo"`
 	}
 	_ = json.Unmarshal(initResult, &init)
-	toolsResult, _, err := callMCPRemote(ctx, client, entry.Server, bearerToken, sessionID, "tools/list", nil, trace)
+	tools, toolsResult, err := listMCPRemoteTools(ctx, client, entry.Server, bearerToken, sessionID, trace)
 	if err != nil {
 		return mcpRemoteCache{}, err
 	}
-	var decoded struct {
-		Tools *[]mcpRemoteTool `json:"tools"`
-	}
-	if err := json.Unmarshal(toolsResult, &decoded); err != nil {
-		return mcpRemoteCache{}, fmt.Errorf("decode remote MCP tools/list: %w", err)
-	}
-	if decoded.Tools == nil {
-		return mcpRemoteCache{}, fmt.Errorf("remote MCP tools/list returned no tools array")
-	}
-	tools := *decoded.Tools
 	for i := range tools {
 		tools[i].Name = strings.TrimSpace(tools[i].Name)
 		if tools[i].InputSchema == nil {
@@ -1921,6 +1926,60 @@ func mcpRemoteMetadataHash(data []byte) string {
 	return fmt.Sprintf("%016x", hash)
 }
 
+func listMCPRemoteTools(ctx context.Context, client *http.Client, server mcpRemoteServer, bearerToken, sessionID string, trace *mcpRemoteHTTPTrace) ([]mcpRemoteTool, json.RawMessage, error) {
+	var tools []mcpRemoteTool
+	var pages []json.RawMessage
+	var cursor *string
+	for page := 0; page < mcpRemoteToolsListMaxPages; page++ {
+		var params any
+		if cursor != nil {
+			params = map[string]any{"cursor": *cursor}
+		}
+		result, responseSessionID, err := callMCPRemote(ctx, client, server, bearerToken, sessionID, "tools/list", params, trace)
+		if err != nil {
+			return nil, nil, err
+		}
+		if responseSessionID != "" {
+			sessionID = responseSessionID
+		}
+		var decoded struct {
+			Tools      *[]mcpRemoteTool `json:"tools"`
+			NextCursor *string          `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(result, &decoded); err != nil {
+			return nil, nil, fmt.Errorf("decode remote MCP tools/list: %w", err)
+		}
+		if decoded.Tools == nil {
+			return nil, nil, fmt.Errorf("remote MCP tools/list returned no tools array")
+		}
+		tools = append(tools, (*decoded.Tools)...)
+		pages = append(pages, result)
+		if decoded.NextCursor == nil {
+			return tools, aggregateMCPRemoteToolsListResult(tools, pages), nil
+		}
+		cursor = decoded.NextCursor
+	}
+	return nil, nil, fmt.Errorf("remote MCP tools/list exceeded %d pages", mcpRemoteToolsListMaxPages)
+}
+
+func aggregateMCPRemoteToolsListResult(tools []mcpRemoteTool, pages []json.RawMessage) json.RawMessage {
+	if len(pages) == 1 {
+		return pages[0]
+	}
+	result := struct {
+		Tools []mcpRemoteTool   `json:"tools"`
+		Pages []json.RawMessage `json:"pages,omitempty"`
+	}{
+		Tools: tools,
+		Pages: pages,
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 func initializeMCPRemoteSession(ctx context.Context, client *http.Client, server mcpRemoteServer, bearerToken string, trace *mcpRemoteHTTPTrace) (json.RawMessage, string, error) {
 	initResult, sessionID, err := callMCPRemote(ctx, client, server, bearerToken, "", "initialize", mcpRemoteInitializeParams(), trace)
 	if err != nil {
@@ -1934,11 +1993,19 @@ func initializeMCPRemoteSession(ctx context.Context, client *http.Client, server
 
 func mcpRemoteInitializeParams() map[string]any {
 	return map[string]any{
-		"protocolVersion": mcpProtocolVersion,
+		"protocolVersion": mcpRemoteClientProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo": map[string]string{
-			"name":    "toolmux",
-			"version": version.Version,
+		"clientInfo": map[string]any{
+			"name":        "toolmux",
+			"title":       "Toolmux",
+			"version":     version.Version,
+			"description": "Policy-aware local CLI and agent bridge for SaaS tools and MCP servers.",
+			"websiteUrl":  "https://github.com/fiam/toolmux",
+			"icons": []map[string]any{{
+				"src":      "https://raw.githubusercontent.com/fiam/toolmux/main/docs/assets/toolmux-icon.png",
+				"mimeType": "image/png",
+				"sizes":    []string{"1254x1254"},
+			}},
 		},
 	}
 }
@@ -2040,7 +2107,7 @@ func postMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteSer
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+	req.Header.Set("Mcp-Protocol-Version", mcpRemoteClientProtocolVersion)
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
@@ -2247,10 +2314,14 @@ func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemote
 		return mcpCallToolResult{}, err
 	}
 	var callResult mcpCallToolResult
-	if err := json.Unmarshal(result, &callResult); err == nil && len(callResult.Content) > 0 {
+	if err := json.Unmarshal(result, &callResult); err == nil && mcpRemoteCallToolResultHasPayload(callResult) {
 		return callResult, nil
 	}
 	return mcpTextToolResult(string(result)), nil
+}
+
+func mcpRemoteCallToolResultHasPayload(result mcpCallToolResult) bool {
+	return len(result.Content) > 0 || result.StructuredContent != nil || result.IsError || len(result.Meta) > 0
 }
 
 func registerCachedMCPRemoteCommands(root *cobra.Command, opts *options) []mcpRemoteNameConflict {
@@ -2840,13 +2911,36 @@ func (server mcpServer) remoteMCPTools(ctx context.Context) []any {
 		if !server.selector.matches(spec) {
 			continue
 		}
-		tools = append(tools, map[string]any{
-			"name":        spec.ID,
-			"description": ref.Tool.Description,
-			"inputSchema": ref.Tool.InputSchema,
-		})
+		tools = append(tools, mcpRemoteToolForServe(spec.ID, ref.Tool))
 	}
 	return tools
+}
+
+func mcpRemoteToolForServe(name string, tool mcpRemoteTool) map[string]any {
+	out := map[string]any{
+		"name":        name,
+		"description": tool.Description,
+		"inputSchema": tool.InputSchema,
+	}
+	if tool.Title != "" {
+		out["title"] = tool.Title
+	}
+	if tool.OutputSchema != nil {
+		out["outputSchema"] = tool.OutputSchema
+	}
+	if tool.Annotations != nil {
+		out["annotations"] = tool.Annotations
+	}
+	if len(tool.Icons) > 0 {
+		out["icons"] = tool.Icons
+	}
+	if tool.Execution != nil {
+		out["execution"] = tool.Execution
+	}
+	if tool.Meta != nil {
+		out["_meta"] = tool.Meta
+	}
+	return out
 }
 
 func (server mcpServer) remoteMCPToolRefs(ctx context.Context) []mcpRemoteToolRef {

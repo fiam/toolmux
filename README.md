@@ -219,6 +219,7 @@ Built-in remote MCP catalog names:
 ```text
 atlassian
 cloudflare
+grafana
 iterate
 linear
 miro
@@ -245,6 +246,16 @@ toolmux mcp sync cloudflare
 toolmux cloudflare
 ```
 
+Grafana Cloud uses hosted OAuth. The browser flow may ask for your Grafana
+Cloud stack URL before consent:
+
+```bash
+toolmux mcp catalog --enable grafana --global
+toolmux mcp auth login grafana
+toolmux mcp sync grafana
+toolmux grafana
+```
+
 Register a custom endpoint:
 
 ```bash
@@ -267,6 +278,10 @@ toolmux linear-work --full-help
 toolmux mcp ls linear-work --full-descriptions
 toolmux mcp ls -R --full-descriptions
 ```
+
+Use `-v`/`--verbose` on `toolmux mcp add`, `toolmux mcp sync`, or a remote
+tool command to print redacted Streamable HTTP requests and responses for
+debugging.
 
 Non-interactive output and JSON/YAML output keep the full cached metadata for
 agents and scripts.

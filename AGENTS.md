@@ -239,10 +239,12 @@ sync returns an auth-required response and no auth is stored, it must start MCP
 OAuth, store auth, retry sync, and only then write the server config. Failed or
 cancelled OAuth must not leave a registered server behind. Keep `--no-sync`
 available for registration without auth or sync. Custom URL adds must use the
-single `mcp add <name> <url>` form. `toolmux mcp remove` and `rm` must accept
-one or more server names and must delete stored auth for removed server names
-in the active Toolmux profile/account. `toolmux mcp auth remove` must still
-delete matching stored auth after the server entry has already been removed.
+single `mcp add <name> <url>` form. `toolmux mcp add`, `toolmux mcp sync`, and
+remote tool commands must support `-v`/`--verbose` redacted HTTP tracing for
+debugging. `toolmux mcp remove` and `rm` must accept one or more server names
+and must delete stored auth for removed server names in the active Toolmux
+profile/account. `toolmux mcp auth remove` must still delete matching stored
+auth after the server entry has already been removed.
 Stale remote caches should refresh
 opportunistically after about 24 hours without making existing cached
 commands unusable when a refresh attempt fails. `toolmux mcp catalog` must list

@@ -27,7 +27,10 @@ import (
 	"github.com/fiam/toolmux/internal/version"
 )
 
-const mcpProtocolVersion = "2025-06-18"
+const (
+	mcpProtocolVersion             = "2025-06-18"
+	mcpRemoteClientProtocolVersion = "2025-11-25"
+)
 const toolmuxConfigRelPath = ".toolmux/config.yaml"
 const mcpDefaultProfileName = "default"
 
@@ -1218,13 +1221,24 @@ type mcpCallToolParams struct {
 }
 
 type mcpCallToolResult struct {
-	Content []mcpContent `json:"content"`
-	IsError bool         `json:"isError,omitempty"`
+	Content           []mcpContent   `json:"content"`
+	StructuredContent any            `json:"structuredContent,omitempty"`
+	IsError           bool           `json:"isError,omitempty"`
+	Meta              map[string]any `json:"_meta,omitempty"`
 }
 
 type mcpContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type        string         `json:"type"`
+	Text        string         `json:"text,omitempty"`
+	Data        string         `json:"data,omitempty"`
+	MimeType    string         `json:"mimeType,omitempty"`
+	URI         string         `json:"uri,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Resource    map[string]any `json:"resource,omitempty"`
+	Annotations map[string]any `json:"annotations,omitempty"`
+	Meta        map[string]any `json:"_meta,omitempty"`
 }
 
 func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) (mcpCallToolResult, error) {

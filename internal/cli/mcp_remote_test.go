@@ -353,6 +353,69 @@ func TestMCPRemoteCompactDescriptionUsesFirstLine(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteToolForServePreservesCachedMetadata(t *testing.T) {
+	t.Parallel()
+
+	served := mcpRemoteToolForServe("grafana.query_prometheus", mcpRemoteTool{
+		Name:        "query_prometheus",
+		Title:       "Query Prometheus",
+		Description: "Execute PromQL queries.",
+		InputSchema: map[string]any{
+			"type": "object",
+		},
+		OutputSchema: map[string]any{
+			"type": "object",
+		},
+		Annotations: map[string]any{
+			"readOnlyHint": true,
+		},
+		Icons: []map[string]any{{
+			"src":      "https://example.com/icon.png",
+			"mimeType": "image/png",
+		}},
+		Execution: map[string]any{
+			"taskSupport": "optional",
+		},
+		Meta: map[string]any{
+			"upstream": "grafana",
+		},
+	})
+
+	for _, key := range []string{"name", "title", "description", "inputSchema", "outputSchema", "annotations", "icons", "execution", "_meta"} {
+		if _, ok := served[key]; !ok {
+			t.Fatalf("expected served remote tool to include %q: %#v", key, served)
+		}
+	}
+	if served["name"] != "grafana.query_prometheus" || served["title"] != "Query Prometheus" {
+		t.Fatalf("unexpected served remote tool metadata: %#v", served)
+	}
+}
+
+func TestMCPRemoteCallToolResultPreservesStructuredAndNonTextContent(t *testing.T) {
+	t.Parallel()
+
+	var result mcpCallToolResult
+	raw := []byte(`{"content":[{"type":"image","data":"abc","mimeType":"image/png","annotations":{"audience":["user"]}}],"structuredContent":{"ok":true},"_meta":{"trace":"1"}}`)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if !mcpRemoteCallToolResultHasPayload(result) {
+		t.Fatal("expected remote call result payload to be recognized")
+	}
+	if result.StructuredContent == nil || result.Content[0].Data != "abc" || result.Content[0].MimeType != "image/png" {
+		t.Fatalf("unexpected decoded call result: %#v", result)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"structuredContent"`, `"mimeType":"image/png"`, `"_meta"`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("expected encoded call result to contain %q, got %s", want, encoded)
+		}
+	}
+}
+
 func TestRenderMCPRemoteRootCompactHelpUsesColorAndCompactDescriptions(t *testing.T) {
 	t.Parallel()
 
@@ -473,6 +536,172 @@ func TestMCPRemoteToolVerbosePrintsHTTPTrace(t *testing.T) {
 	}
 	if strings.Contains(output, "secret-token") {
 		t.Fatalf("verbose output leaked bearer token:\n%s", output)
+	}
+}
+
+func TestMCPRemoteAddVerbosePrintsHTTPTraceAndUsesLatestClientMetadata(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var sawInitialize bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Mcp-Protocol-Version") != mcpRemoteClientProtocolVersion {
+			t.Fatalf("expected MCP protocol header %q, got %q", mcpRemoteClientProtocolVersion, r.Header.Get("Mcp-Protocol-Version"))
+		}
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			var params struct {
+				ProtocolVersion string         `json:"protocolVersion"`
+				ClientInfo      map[string]any `json:"clientInfo"`
+			}
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				t.Fatalf("decode initialize params: %v", err)
+			}
+			if params.ProtocolVersion != mcpRemoteClientProtocolVersion {
+				t.Fatalf("expected initialize protocol %q, got %q", mcpRemoteClientProtocolVersion, params.ProtocolVersion)
+			}
+			if params.ClientInfo["title"] != "Toolmux" || params.ClientInfo["websiteUrl"] != "https://github.com/fiam/toolmux" {
+				t.Fatalf("unexpected clientInfo: %#v", params.ClientInfo)
+			}
+			icons, _ := params.ClientInfo["icons"].([]any)
+			if len(icons) != 1 {
+				t.Fatalf("expected clientInfo icon, got %#v", params.ClientInfo["icons"])
+			}
+			sawInitialize = true
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpRemoteClientProtocolVersion,
+					"serverInfo":      map[string]any{"name": "metadata-test"},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			if !sawInitialize {
+				t.Fatal("tools/list called before initialize")
+			}
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"tools": []map[string]any{fakeMCPCreateIssueTool()},
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer upstream.Close()
+
+	output := runRootForRemoteTest(t, env, "mcp", "add", "debug", upstream.URL, "--global", "-v")
+	for _, want := range []string{
+		"----- MCP HTTP request -----",
+		"Mcp-Protocol-Version: " + mcpRemoteClientProtocolVersion,
+		`"protocolVersion":"` + mcpRemoteClientProtocolVersion + `"`,
+		`"title":"Toolmux"`,
+		`"method":"tools/list"`,
+		"synced MCP server debug: 1 tools",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected add verbose output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestSyncMCPRemoteServerFollowsToolsListPagination(t *testing.T) {
+	t.Parallel()
+
+	var initialized atomic.Bool
+	var cursors []*string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpRemoteClientProtocolVersion,
+					"serverInfo":      map[string]any{"name": "paged-tools"},
+				},
+			})
+		case "notifications/initialized":
+			initialized.Store(true)
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			if !initialized.Load() {
+				t.Fatal("tools/list called before notifications/initialized")
+			}
+			var params struct {
+				Cursor *string `json:"cursor"`
+			}
+			if len(req.Params) > 0 {
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Fatalf("decode tools/list params: %v", err)
+				}
+			}
+			cursors = append(cursors, params.Cursor)
+			if len(cursors) == 1 {
+				_ = json.NewEncoder(w).Encode(mcpResponse{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: map[string]any{
+						"tools":      []map[string]any{fakeMCPCreateIssueTool()},
+						"nextCursor": "",
+					},
+				})
+				return
+			}
+			if params.Cursor == nil || *params.Cursor != "" {
+				t.Fatalf("expected empty-string cursor on second page, got %#v", params.Cursor)
+			}
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"tools": []map[string]any{fakeMCPCalculateTool()},
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer upstream.Close()
+
+	cache, err := syncMCPRemoteServer(context.Background(), upstream.Client(), mcpRemoteServerEntry{
+		Name: "paged",
+		Server: mcpRemoteServer{
+			URL:       upstream.URL,
+			Transport: mcpRemoteTransportStreamableHTTP,
+		},
+	}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.Tools) != 2 || cache.Tools[0].Name != "calculate" || cache.Tools[1].Name != "create_issue" {
+		t.Fatalf("unexpected paginated tools: %#v", cache.Tools)
+	}
+	if len(cursors) != 2 || cursors[0] != nil || cursors[1] == nil || *cursors[1] != "" {
+		t.Fatalf("unexpected cursor sequence: %#v", cursors)
+	}
+	var raw struct {
+		Tools []mcpRemoteTool   `json:"tools"`
+		Pages []json.RawMessage `json:"pages"`
+	}
+	if err := json.Unmarshal(cache.Raw["tools_list"], &raw); err != nil {
+		t.Fatalf("decode cached tools_list raw: %v", err)
+	}
+	if len(raw.Tools) != 2 || len(raw.Pages) != 2 {
+		t.Fatalf("expected aggregated raw tools and pages, got %#v", raw)
 	}
 }
 

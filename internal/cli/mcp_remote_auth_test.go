@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -127,4 +130,79 @@ func TestMCPRemoteOAuthCallbackPageInfersKnownLogo(t *testing.T) {
 	if page.DisplayName != "Slack" || page.LogoSlug != "slack" || page.LogoText != "S" {
 		t.Fatalf("expected Slack page metadata, got %#v", page)
 	}
+}
+
+func TestFetchMCPRemoteAuthorizationServerMetadataFallsBackToOIDC(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	var mu sync.Mutex
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path != "/tenant/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                 upstreamURL(r) + "/tenant",
+			"authorization_endpoint": upstreamURL(r) + "/tenant/authorize",
+			"token_endpoint":         upstreamURL(r) + "/tenant/token",
+		})
+	}))
+	defer upstream.Close()
+
+	metadata, err := fetchMCPRemoteAuthorizationServerMetadata(context.Background(), upstream.Client(), upstream.URL+"/tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.AuthorizationEndpoint != upstream.URL+"/tenant/authorize" || metadata.TokenEndpoint != upstream.URL+"/tenant/token" {
+		t.Fatalf("unexpected OIDC metadata: %#v", metadata)
+	}
+	mu.Lock()
+	gotRequests := append([]string(nil), requests...)
+	mu.Unlock()
+	want := []string{
+		"/.well-known/oauth-authorization-server/tenant",
+		"/.well-known/openid-configuration/tenant",
+		"/tenant/.well-known/openid-configuration",
+	}
+	if strings.Join(gotRequests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected metadata discovery order:\ngot:\n%s\nwant:\n%s", strings.Join(gotRequests, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestDefaultMCPRemoteOAuthScopesUsesResourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	scopes := defaultMCPRemoteOAuthScopes(mcpRemoteOAuthDiscovery{
+		Resource: mcpRemoteProtectedResourceMetadata{
+			ScopesSupported: []string{"grafana:read grafana:write", "grafana:read"},
+		},
+		Authorization: mcpRemoteAuthorizationServerMetadata{
+			ScopesSupported: []string{"fallback"},
+		},
+	})
+	if strings.Join(scopes, " ") != "grafana:read grafana:write" {
+		t.Fatalf("unexpected default OAuth scopes: %#v", scopes)
+	}
+
+	scopes = defaultMCPRemoteOAuthScopes(mcpRemoteOAuthDiscovery{
+		Authorization: mcpRemoteAuthorizationServerMetadata{
+			ScopesSupported: []string{"fallback"},
+		},
+	})
+	if strings.Join(scopes, " ") != "fallback" {
+		t.Fatalf("unexpected authorization fallback scopes: %#v", scopes)
+	}
+}
+
+func upstreamURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }

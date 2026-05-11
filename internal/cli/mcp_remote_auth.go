@@ -59,6 +59,7 @@ type mcpRemoteAuthorizationServerMetadata struct {
 	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
 	TokenEndpoint                     string   `json:"token_endpoint"`
 	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
+	ClientIDMetadataDocumentSupported bool     `json:"client_id_metadata_document_supported,omitempty"`
 	ScopesSupported                   []string `json:"scopes_supported,omitempty"`
 	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`
 	ResponseTypesSupported            []string `json:"response_types_supported,omitempty"`
@@ -162,6 +163,9 @@ func loginMCPRemoteOAuth(cmd *cobra.Command, opts *options, entry mcpRemoteServe
 		return credentials.OAuthTokens{}, err
 	}
 	scopes := cleanMCPRemoteOAuthScopes(login.Scopes)
+	if len(scopes) == 0 {
+		scopes = defaultMCPRemoteOAuthScopes(discovery)
+	}
 	authURL, err := mcpRemoteOAuthAuthorizationURL(discovery.Authorization.AuthorizationEndpoint, oauthClient.ClientID, callback.redirectURI, state, challenge, discovery.ResourceURI, scopes)
 	if err != nil {
 		return credentials.OAuthTokens{}, err
@@ -355,7 +359,7 @@ func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemo
 
 func mcpRemoteKnownLogoSlug(values ...string) string {
 	target := strings.ToLower(strings.Join(values, " "))
-	for _, known := range []string{"slack", "cloudflare", "linear", "miro", "notion", "atlassian"} {
+	for _, known := range []string{"slack", "cloudflare", "grafana", "linear", "miro", "notion", "atlassian"} {
 		if strings.Contains(target, known) {
 			return known
 		}
@@ -369,6 +373,8 @@ func mcpRemoteKnownLogoName(slug string) string {
 		return "Atlassian"
 	case "cloudflare":
 		return "Cloudflare"
+	case "grafana":
+		return "Grafana"
 	case "linear":
 		return "Linear"
 	case "miro":
@@ -483,6 +489,10 @@ var mcpRemoteOAuthCallbackTemplate = template.Must(template.New("mcp-remote-oaut
     }
     .logo-atlassian {
       background: #0052cc;
+    }
+    .logo-grafana {
+      background: #f46800;
+      color: #ffffff;
     }
     .logo-generic {
       background: #1d9a8a;
@@ -762,24 +772,57 @@ func selectMCPRemoteAuthorizationServer(servers []string, override string) (stri
 }
 
 func fetchMCPRemoteAuthorizationServerMetadata(ctx context.Context, client *http.Client, issuer string) (mcpRemoteAuthorizationServerMetadata, error) {
-	metadataURL, err := wellKnownOAuthMetadataURL(issuer, "oauth-authorization-server")
+	metadataURLs, err := mcpRemoteAuthorizationServerMetadataURLs(issuer)
 	if err != nil {
 		return mcpRemoteAuthorizationServerMetadata{}, err
 	}
-	var metadata mcpRemoteAuthorizationServerMetadata
-	if err := getMCPRemoteOAuthJSON(ctx, client, metadataURL, &metadata); err != nil {
-		return metadata, err
+	var lastErr error
+	for _, metadataURL := range metadataURLs {
+		var metadata mcpRemoteAuthorizationServerMetadata
+		if err := getMCPRemoteOAuthJSON(ctx, client, metadataURL, &metadata); err != nil {
+			lastErr = err
+			continue
+		}
+		if metadata.Issuer == "" {
+			metadata.Issuer = strings.TrimSpace(issuer)
+		}
+		if metadata.AuthorizationEndpoint == "" {
+			return metadata, fmt.Errorf("authorization server metadata did not include authorization_endpoint")
+		}
+		if metadata.TokenEndpoint == "" {
+			return metadata, fmt.Errorf("authorization server metadata did not include token_endpoint")
+		}
+		return metadata, nil
 	}
-	if metadata.Issuer == "" {
-		metadata.Issuer = strings.TrimSpace(issuer)
+	if lastErr != nil {
+		return mcpRemoteAuthorizationServerMetadata{}, lastErr
 	}
-	if metadata.AuthorizationEndpoint == "" {
-		return metadata, fmt.Errorf("authorization server metadata did not include authorization_endpoint")
+	return mcpRemoteAuthorizationServerMetadata{}, fmt.Errorf("authorization server metadata discovery had no candidates")
+}
+
+func mcpRemoteAuthorizationServerMetadataURLs(issuer string) ([]string, error) {
+	var urls []string
+	seen := map[string]bool{}
+	add := func(raw string, err error) error {
+		if err != nil {
+			return err
+		}
+		if !seen[raw] {
+			seen[raw] = true
+			urls = append(urls, raw)
+		}
+		return nil
 	}
-	if metadata.TokenEndpoint == "" {
-		return metadata, fmt.Errorf("authorization server metadata did not include token_endpoint")
+	if err := add(wellKnownOAuthMetadataURL(issuer, "oauth-authorization-server")); err != nil {
+		return nil, err
 	}
-	return metadata, nil
+	if err := add(wellKnownOAuthMetadataURL(issuer, "openid-configuration")); err != nil {
+		return nil, err
+	}
+	if err := add(wellKnownOpenIDAppendedMetadataURL(issuer)); err != nil {
+		return nil, err
+	}
+	return urls, nil
 }
 
 func getMCPRemoteOAuthJSON(ctx context.Context, client *http.Client, rawURL string, target any) error {
@@ -789,7 +832,7 @@ func getMCPRemoteOAuthJSON(ctx context.Context, client *http.Client, rawURL stri
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+	req.Header.Set("Mcp-Protocol-Version", mcpRemoteClientProtocolVersion)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -1067,6 +1110,13 @@ func cleanMCPRemoteOAuthScopes(values []string) []string {
 	return scopes
 }
 
+func defaultMCPRemoteOAuthScopes(discovery mcpRemoteOAuthDiscovery) []string {
+	if scopes := cleanMCPRemoteOAuthScopes(discovery.Resource.ScopesSupported); len(scopes) > 0 {
+		return scopes
+	}
+	return cleanMCPRemoteOAuthScopes(discovery.Authorization.ScopesSupported)
+}
+
 func cloneMCPRemoteStringMap(value map[string]string) map[string]string {
 	if len(value) == 0 {
 		return nil
@@ -1202,6 +1252,22 @@ func wellKnownOAuthMetadataURL(resourceOrIssuer, suffix string) (string, error) 
 	}
 	parsed.Path = "/.well-known/" + suffix + pathPart
 	parsed.RawPath = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func wellKnownOpenIDAppendedMetadataURL(issuer string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("metadata issuer must include scheme and host")
+	}
+	pathPart := strings.TrimRight(parsed.EscapedPath(), "/")
+	parsed.Path = pathPart + "/.well-known/openid-configuration"
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil
 }
