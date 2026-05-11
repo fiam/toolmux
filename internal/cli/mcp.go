@@ -80,6 +80,7 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(mcpRemoteListCommand(opts))
 	cmd.AddCommand(mcpRemoteShowCommand(opts))
 	cmd.AddCommand(mcpRemoteCatalogCommand(opts))
+	cmd.AddCommand(mcpRemoteDefaultsCommand(opts))
 	cmd.AddCommand(mcpProfileCommand(opts))
 	return cmd
 }
@@ -773,16 +774,16 @@ func mcpProfileWritePath(scope mcpProfileScopeOptions) (string, string, error) {
 	if scope.Global && scope.Project {
 		return "", "", fmt.Errorf("use only one of --global or --project")
 	}
-	if scope.Global {
-		path, err := globalToolmuxConfigPath()
-		return path, "global", err
+	if scope.Project {
+		if path, ok, err := discoverToolmuxConfigFile(""); err != nil {
+			return "", "", err
+		} else if ok {
+			return path, "project", nil
+		}
+		return toolmuxConfigRelPath, "project", nil
 	}
-	if path, ok, err := discoverToolmuxConfigFile(""); err != nil {
-		return "", "", err
-	} else if ok {
-		return path, "project", nil
-	}
-	return toolmuxConfigRelPath, "project", nil
+	path, err := globalToolmuxConfigPath()
+	return path, "global", err
 }
 
 func lookupMCPProfile(name, startDir string) (mcpProfileEntry, bool, error) {
@@ -1297,6 +1298,7 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	if err != nil {
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: err.Error()}
 	}
+	arguments = mcpRemoteMergeDefaultArguments(arguments, ref.Entry.Server.DefaultArguments, ref.Tool.InputSchema)
 	spec := mcpRemoteActionSpec(ref.Entry.Name, ref.Tool)
 	if err := authorize(server.cmd, server.opts, spec, nil); err != nil {
 		return mcpErrorToolResult(err), nil

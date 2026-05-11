@@ -60,6 +60,78 @@ func TestMCPRemoteServerSyncAndTopLevelCommand(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteDefaultArgumentsApplyToToolCalls(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteCloudServer(t, &called)
+	defer upstream.Close()
+
+	runRootForRemoteTest(t, env, "mcp", "add", "jira", upstream.URL)
+	setOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "set", "jira", "cloudId", "cloud-123")
+	if !strings.Contains(setOutput, "set default argument cloudId") {
+		t.Fatalf("expected defaults set output, got %q", setOutput)
+	}
+	listOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "ls", "jira")
+	if !strings.Contains(listOutput, "cloudId") || !strings.Contains(listOutput, "cloud-123") {
+		t.Fatalf("expected defaults list output to include cloudId, got %q", listOutput)
+	}
+
+	output := runRootForRemoteTest(t, env, "jira", "search", "--jql", "project = DEMO")
+	if !strings.Contains(output, "called search: cloud-123") {
+		t.Fatalf("expected default cloudId output, got %q", output)
+	}
+	if called["cloudId"] != "cloud-123" || called["jql"] != "project = DEMO" {
+		t.Fatalf("unexpected defaulted arguments: %#v", called)
+	}
+
+	output = runRootForRemoteTest(t, env, "jira", "search", "--jql", "project = DEMO", "--cloudId", "cloud-456")
+	if !strings.Contains(output, "called search: cloud-456") {
+		t.Fatalf("expected overridden cloudId output, got %q", output)
+	}
+	if called["cloudId"] != "cloud-456" {
+		t.Fatalf("expected explicit cloudId to override default: %#v", called)
+	}
+
+	removeOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "rm", "jira", "cloudId")
+	if !strings.Contains(removeOutput, "removed default arguments") {
+		t.Fatalf("expected defaults remove output, got %q", removeOutput)
+	}
+	_, err := runRootForRemoteTestError(t, env, "jira", "search", "--jql", "project = DEMO")
+	if err == nil || !strings.Contains(err.Error(), "missing required MCP tool arguments: cloudId") {
+		t.Fatalf("expected missing cloudId after removing default, got %v", err)
+	}
+}
+
+func TestMCPRemoteDefaultArgumentHintComesFromCatalogMetadata(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	atlassian := mcpBuiltinRemoteServers()["atlassian"]
+	writeRemoteTestConfig(t, env, map[string]mcpRemoteServer{
+		"atlassian": atlassian,
+	})
+	if err := writeMCPRemoteCache(env.CacheDir, "atlassian", mcpRemoteCache{
+		Name:      "atlassian",
+		URL:       atlassian.URL,
+		Transport: atlassian.Transport,
+		Tools:     []mcpRemoteTool{fakeMCPCloudSearchRemoteTool()},
+		SyncedAt:  time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	catalogOutput := runRootForRemoteTest(t, env, "-o", "json", "mcp", "catalog")
+	if !strings.Contains(catalogOutput, "default_argument_hints") || !strings.Contains(catalogOutput, "cloudId") {
+		t.Fatalf("expected catalog output to include cloudId default hint, got %q", catalogOutput)
+	}
+	_, err := runRootForRemoteTestError(t, env, "atlassian", "search", "--jql", "project = DEMO")
+	if err == nil {
+		t.Fatal("expected missing cloudId error")
+	}
+	want := "toolmux mcp defaults set atlassian cloudId <cloud-id>"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected default cloudId hint %q, got %v", want, err)
+	}
+}
+
 func TestMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
 	server, ok := mcpBuiltinRemoteServers()["atlassian"]
 	if !ok {
@@ -197,18 +269,25 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	defer upstream.Close()
 
 	addOutput := runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL)
-	if !strings.Contains(addOutput, "registered project MCP server linear") {
-		t.Fatalf("expected project registration output, got %q", addOutput)
+	if !strings.Contains(addOutput, "registered global MCP server linear") {
+		t.Fatalf("expected global registration output, got %q", addOutput)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MCP.Servers["linear"].AuthRequired == nil || *config.MCP.Servers["linear"].AuthRequired {
+		t.Fatalf("expected no-auth server to record auth_required false, got %#v", config.MCP.Servers["linear"])
 	}
 
 	listOutput := runRootForRemoteTest(t, env, "--color", "always", "mcp", "ls")
-	for _, want := range []string{"linear", "synced", "project", "2"} {
+	for _, want := range []string{"linear", "synced", "global", "2"} {
 		if !strings.Contains(listOutput, want) {
 			t.Fatalf("expected mcp ls output to contain %q, got:\n%s", want, listOutput)
 		}
 	}
 	if strings.Contains(listOutput, "local") {
-		t.Fatalf("expected mcp ls output to use project scope, got:\n%s", listOutput)
+		t.Fatalf("expected mcp ls output to use normalized scope labels, got:\n%s", listOutput)
 	}
 	if !strings.Contains(listOutput, "\x1b[") {
 		t.Fatalf("expected mcp ls output to include color when forced, got:\n%s", listOutput)
@@ -219,7 +298,7 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOutput), &listItems); err != nil {
 		t.Fatalf("decode mcp ls json output: %v\n%s", err, jsonOutput)
 	}
-	if len(listItems) != 1 || listItems[0].Name != "linear" || listItems[0].Scope != "project" || listItems[0].Status != "synced" {
+	if len(listItems) != 1 || listItems[0].Name != "linear" || listItems[0].Scope != "global" || listItems[0].Status != "synced" {
 		t.Fatalf("unexpected mcp ls json output: %+v", listItems)
 	}
 
@@ -391,6 +470,30 @@ func TestMCPRemoteToolForServePreservesCachedMetadata(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteToolForServeMarksDefaultArgumentsOptional(t *testing.T) {
+	t.Parallel()
+
+	served := mcpRemoteToolForServeWithDefaults("atlassian.search", fakeMCPCloudSearchRemoteTool(), map[string]any{
+		"cloudId": "cloud-123",
+	})
+	schema, ok := served["inputSchema"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected input schema map, got %#v", served["inputSchema"])
+	}
+	required := mcpRemoteRequiredSet(schema)
+	if required["cloudId"] {
+		t.Fatalf("expected cloudId to be optional in served schema: %#v", schema["required"])
+	}
+	if !required["jql"] {
+		t.Fatalf("expected jql to remain required: %#v", schema["required"])
+	}
+	properties := mcpRemoteSchemaProperties(schema)
+	cloudID, ok := properties["cloudId"].(map[string]any)
+	if !ok || cloudID["default"] != "cloud-123" {
+		t.Fatalf("expected cloudId default in served schema: %#v", properties["cloudId"])
+	}
+}
+
 func TestMCPRemoteCallToolResultPreservesStructuredAndNonTextContent(t *testing.T) {
 	t.Parallel()
 
@@ -520,6 +623,13 @@ func TestMCPRemoteToolVerbosePrintsHTTPTrace(t *testing.T) {
 
 	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global", "--no-sync")
 	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MCP.Servers["linear"].AuthRequired == nil || !*config.MCP.Servers["linear"].AuthRequired {
+		t.Fatalf("expected bearer auth set to record auth_required true, got %#v", config.MCP.Servers["linear"])
+	}
 	runRootForRemoteTest(t, env, "mcp", "sync", "linear")
 
 	output := runRootForRemoteTest(t, env, "linear", "create_issue", "--title", "Trace", "-v")
@@ -866,6 +976,13 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	authStatus := runRootForRemoteTest(t, env, "mcp", "auth", "status", "linear")
 	if !strings.Contains(authStatus, "stored OAuth token") {
 		t.Fatalf("expected stored OAuth status, got %q", authStatus)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MCP.Servers["linear"].AuthRequired == nil || !*config.MCP.Servers["linear"].AuthRequired {
+		t.Fatalf("expected OAuth server to record auth_required true, got %#v", config.MCP.Servers["linear"])
 	}
 
 	output := runRootForRemoteTest(t, env, "linear", "create_issue", "--title", "OAuth")
@@ -1387,6 +1504,71 @@ func newFakeMCPRemoteServerWithBearer(t *testing.T, called *map[string]any, bear
 	}))
 }
 
+func newFakeMCPRemoteCloudServer(t *testing.T, called *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpProtocolVersion,
+					"serverInfo":      map[string]any{"name": "fake-cloud"},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"tools": []map[string]any{fakeMCPCloudSearchTool()},
+				},
+			})
+		case "tools/call":
+			var params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				t.Fatalf("decode call params: %v", err)
+			}
+			if params.Name != "search" {
+				t.Fatalf("unexpected tool name %q", params.Name)
+			}
+			if called != nil {
+				*called = params.Arguments
+			}
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: mcpCallToolResult{
+					Content: []mcpContent{{
+						Type: "text",
+						Text: "called search: " + params.Arguments["cloudId"].(string),
+					}},
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &mcpError{Code: -32601, Message: "method not found"},
+			})
+		}
+	}))
+}
+
 func newFakeMCPRemoteOAuthRequiredWithoutMetadataServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1796,6 +1978,37 @@ func fakeMCPCalculateTool() map[string]any {
 				},
 			},
 		},
+	}
+}
+
+func fakeMCPCloudSearchTool() map[string]any {
+	return map[string]any{
+		"name":        "search",
+		"description": "Search cloud resources",
+		"inputSchema": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"cloudId", "jql"},
+			"properties": map[string]any{
+				"cloudId": map[string]any{
+					"type":        "string",
+					"description": "Cloud site ID",
+				},
+				"jql": map[string]any{
+					"type":        "string",
+					"description": "Search query",
+				},
+			},
+		},
+	}
+}
+
+func fakeMCPCloudSearchRemoteTool() mcpRemoteTool {
+	tool := fakeMCPCloudSearchTool()
+	return mcpRemoteTool{
+		Name:        tool["name"].(string),
+		Description: tool["description"].(string),
+		InputSchema: tool["inputSchema"].(map[string]any),
 	}
 }
 

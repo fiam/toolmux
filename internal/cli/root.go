@@ -1094,6 +1094,9 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpRemoteShowSpec(),
 		mcpRemoteCatalogListSpec(),
 		mcpRemoteCatalogManageSpec(),
+		mcpRemoteDefaultsListSpec(),
+		mcpRemoteDefaultsSetSpec(),
+		mcpRemoteDefaultsRemoveSpec(),
 		mcpRemoteAuthLoginSpec(),
 		mcpRemoteAuthSetSpec(),
 		mcpRemoteAuthRemoveSpec(),
@@ -1189,6 +1192,18 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 				return mcpRemoteCatalogManageSpec(), true
 			}
 			return mcpRemoteCatalogListSpec(), true
+		case "defaults", "default-args":
+			if len(parts) < 3 {
+				return policy.CommandSpec{}, false
+			}
+			switch parts[2] {
+			case "ls", "list", "show":
+				return mcpRemoteDefaultsListSpec(), true
+			case "set":
+				return mcpRemoteDefaultsSetSpec(), true
+			case "remove", "rm", "unset":
+				return mcpRemoteDefaultsRemoveSpec(), true
+			}
 		case "auth":
 			if len(parts) < 3 {
 				return policy.CommandSpec{}, false

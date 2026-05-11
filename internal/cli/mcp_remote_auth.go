@@ -118,6 +118,9 @@ func mcpRemoteAuthLoginCommand(opts *options) *cobra.Command {
 			if err := store.SaveOAuthTokens(commandContext(cmd), mcpRemoteCredentialRef(opts, entry.Name), tokens); err != nil {
 				return err
 			}
+			if err := writeMCPRemoteAuthRequired(entry, true); err != nil {
+				return err
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", entry.Name)
 			return nil
 		},

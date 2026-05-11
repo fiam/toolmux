@@ -46,8 +46,10 @@ var (
 )
 
 type mcpRemoteServer struct {
-	URL       string `json:"url" yaml:"url"`
-	Transport string `json:"transport,omitempty" yaml:"transport,omitempty"`
+	URL              string         `json:"url" yaml:"url"`
+	Transport        string         `json:"transport,omitempty" yaml:"transport,omitempty"`
+	AuthRequired     *bool          `json:"auth_required,omitempty" yaml:"auth_required,omitempty"`
+	DefaultArguments map[string]any `json:"default_arguments,omitempty" yaml:"default_arguments,omitempty"`
 }
 
 type mcpRemoteServerEntry struct {
@@ -135,23 +137,56 @@ type mcpRemoteSSEStreamItem struct {
 	Err     error
 }
 
+type mcpRemoteMissingRequiredArgumentsError struct {
+	Names []string
+}
+
+func (err mcpRemoteMissingRequiredArgumentsError) Error() string {
+	return "missing required MCP tool arguments: " + strings.Join(err.Names, ", ")
+}
+
 type mcpRemoteCatalogEntry struct {
-	Name            string   `json:"name" yaml:"name"`
-	Status          string   `json:"status" yaml:"status"`
-	Registered      bool     `json:"registered" yaml:"registered"`
-	RegisteredNames []string `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
-	Scope           string   `json:"scope,omitempty" yaml:"scope,omitempty"`
-	Scopes          []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
-	Path            string   `json:"path,omitempty" yaml:"path,omitempty"`
-	Tools           *int     `json:"tools,omitempty" yaml:"tools,omitempty"`
-	URL             string   `json:"url" yaml:"url"`
-	Transport       string   `json:"transport" yaml:"transport"`
-	Reason          string   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Name                    string                         `json:"name" yaml:"name"`
+	Status                  string                         `json:"status" yaml:"status"`
+	Registered              bool                           `json:"registered" yaml:"registered"`
+	RegisteredNames         []string                       `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
+	Scope                   string                         `json:"scope,omitempty" yaml:"scope,omitempty"`
+	Scopes                  []string                       `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Path                    string                         `json:"path,omitempty" yaml:"path,omitempty"`
+	Tools                   *int                           `json:"tools,omitempty" yaml:"tools,omitempty"`
+	URL                     string                         `json:"url" yaml:"url"`
+	Transport               string                         `json:"transport" yaml:"transport"`
+	DefaultArgumentHints    []mcpRemoteDefaultArgumentHint `json:"default_argument_hints,omitempty" yaml:"default_argument_hints,omitempty"`
+	MissingDefaultArguments []string                       `json:"missing_default_arguments,omitempty" yaml:"missing_default_arguments,omitempty"`
+	Reason                  string                         `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 type mcpRemoteCatalogEnable struct {
 	CatalogName    string
 	RegisteredName string
+}
+
+type mcpRemoteCatalogDefinition struct {
+	Server               mcpRemoteServer
+	DefaultArgumentHints []mcpRemoteDefaultArgumentHint
+}
+
+type mcpRemoteDefaultArgumentHint struct {
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Example     string `json:"example,omitempty" yaml:"example,omitempty"`
+}
+
+type mcpRemoteDefaultArgumentItem struct {
+	Name  string `json:"name" yaml:"name"`
+	Value any    `json:"value" yaml:"value"`
+}
+
+type mcpRemoteDefaultArgumentsResult struct {
+	Server    string                         `json:"server" yaml:"server"`
+	Scope     string                         `json:"scope" yaml:"scope"`
+	Path      string                         `json:"path" yaml:"path"`
+	Arguments []mcpRemoteDefaultArgumentItem `json:"arguments" yaml:"arguments"`
 }
 
 func mcpRemoteAddCommand(opts *options) *cobra.Command {
@@ -228,6 +263,7 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "registered %s MCP server %s in %s\n", scopeName, name, configPath)
+				writeMCPRemoteDefaultArgumentSuggestions(cmd.OutOrStdout(), name, server)
 				return nil
 			}
 			if noSync {
@@ -241,10 +277,11 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 				Server: server,
 			}
 			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
-			cache, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args, trace)
+			cache, authRequired, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args, trace)
 			if err != nil {
 				return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
 			}
+			server.AuthRequired = mcpRemoteBoolPtr(authRequired)
 			if err := register(); err != nil {
 				return err
 			}
@@ -278,8 +315,11 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 				return fmt.Errorf("MCP server %q is not registered", name)
 			}
 			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
-			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+			cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 			if err != nil {
+				return err
+			}
+			if err := writeMCPRemoteAuthRequired(entry, authRequired); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "synced MCP server %s: %d tools\n", name, len(cache.Tools))
@@ -526,6 +566,9 @@ func mcpRemoteAuthSetCommand(opts *options) *cobra.Command {
 			if err := store.SaveOAuthTokens(commandContext(cmd), mcpRemoteCredentialRef(opts, name), mcpRemoteBearerTokens(token, entry)); err != nil {
 				return err
 			}
+			if err := writeMCPRemoteAuthRequired(entry, true); err != nil {
+				return err
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "stored bearer token for MCP server %s\n", name)
 			return nil
 		},
@@ -711,6 +754,330 @@ func mcpRemoteShowCommand(opts *options) *cobra.Command {
 	}
 }
 
+func mcpRemoteDefaultsCommand(opts *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "defaults",
+		Aliases: []string{"default-args"},
+		Short:   "Manage default arguments for remote MCP tools",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown mcp defaults command %q", args[0])
+			}
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(mcpRemoteDefaultsListCommand(opts))
+	cmd.AddCommand(mcpRemoteDefaultsSetCommand(opts))
+	cmd.AddCommand(mcpRemoteDefaultsRemoveCommand(opts))
+	return cmd
+}
+
+func mcpRemoteDefaultsListCommand(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls <name>",
+		Aliases: []string{"list", "show"},
+		Short:   "List default arguments for a remote MCP server",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := cleanMCPRemoteName(args[0])
+			if err != nil {
+				return err
+			}
+			entry, ok, err := lookupMCPRemoteServer(name, "")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("MCP server %q is not registered", name)
+			}
+			if err := authorize(cmd, opts, mcpRemoteDefaultsListSpec(), args); err != nil {
+				return err
+			}
+			result := mcpRemoteDefaultArgumentsResult{
+				Server:    entry.Name,
+				Scope:     mcpRemoteScopeLabel(entry.Scope),
+				Path:      entry.Path,
+				Arguments: mcpRemoteDefaultArgumentItems(entry.Server.DefaultArguments),
+			}
+			return writeValue(cmd, opts, result, func(w io.Writer) {
+				renderMCPRemoteDefaultsTable(w, cmd, opts, result)
+			})
+		},
+	}
+}
+
+func mcpRemoteDefaultsSetCommand(opts *options) *cobra.Command {
+	var scope mcpProfileScopeOptions
+	var jsonValue bool
+	cmd := &cobra.Command{
+		Use:   "set <name> <argument> <value>",
+		Short: "Set a default argument for a remote MCP server",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := cleanMCPRemoteName(args[0])
+			if err != nil {
+				return err
+			}
+			key, err := cleanMCPRemoteDefaultArgumentName(args[1])
+			if err != nil {
+				return err
+			}
+			value, err := parseMCPRemoteDefaultArgumentValue(args[2], jsonValue)
+			if err != nil {
+				return err
+			}
+			target, err := mcpRemoteDefaultArgumentsWriteTargetForScope(name, scope, true)
+			if err != nil {
+				return err
+			}
+			if err := authorize(cmd, opts, mcpRemoteDefaultsSetSpec(), args); err != nil {
+				return err
+			}
+			if target.Server.DefaultArguments == nil {
+				target.Server.DefaultArguments = map[string]any{}
+			}
+			target.Server.DefaultArguments[key] = value
+			target.Config.MCP.Servers[name] = target.Server
+			if err := writeToolmuxConfigFile(target.Path, target.Config); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "set default argument %s for MCP server %s in %s\n", key, name, target.Path)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonValue, "json", false, "parse value as JSON instead of a string")
+	addMCPProfileScopeFlags(cmd, &scope)
+	return cmd
+}
+
+func mcpRemoteDefaultsRemoveCommand(opts *options) *cobra.Command {
+	var scope mcpProfileScopeOptions
+	cmd := &cobra.Command{
+		Use:     "remove <name> <argument> [argument...]",
+		Aliases: []string{"rm", "unset"},
+		Short:   "Remove default arguments for a remote MCP server",
+		Args:    cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := cleanMCPRemoteName(args[0])
+			if err != nil {
+				return err
+			}
+			keys := make([]string, 0, len(args)-1)
+			for _, arg := range args[1:] {
+				key, err := cleanMCPRemoteDefaultArgumentName(arg)
+				if err != nil {
+					return err
+				}
+				keys = append(keys, key)
+			}
+			target, err := mcpRemoteDefaultArgumentsWriteTargetForScope(name, scope, false)
+			if err != nil {
+				return err
+			}
+			if err := authorize(cmd, opts, mcpRemoteDefaultsRemoveSpec(), args); err != nil {
+				return err
+			}
+			for _, key := range keys {
+				delete(target.Server.DefaultArguments, key)
+			}
+			if len(target.Server.DefaultArguments) == 0 {
+				target.Server.DefaultArguments = nil
+			}
+			target.Config.MCP.Servers[name] = target.Server
+			if err := writeToolmuxConfigFile(target.Path, target.Config); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "removed default arguments for MCP server %s in %s\n", name, target.Path)
+			return nil
+		},
+	}
+	addMCPProfileScopeFlags(cmd, &scope)
+	return cmd
+}
+
+type mcpRemoteDefaultArgumentsWriteTarget struct {
+	Path   string
+	Scope  string
+	Config toolmuxConfigFile
+	Server mcpRemoteServer
+}
+
+func mcpRemoteDefaultArgumentsWriteTargetForScope(name string, scope mcpProfileScopeOptions, createFromEffective bool) (mcpRemoteDefaultArgumentsWriteTarget, error) {
+	configPath, scopeName, err := mcpProfileWritePath(scope)
+	if err != nil {
+		return mcpRemoteDefaultArgumentsWriteTarget{}, err
+	}
+	config, err := readToolmuxConfigFile(configPath)
+	if err != nil && (!createFromEffective || !errors.Is(err, os.ErrNotExist)) {
+		return mcpRemoteDefaultArgumentsWriteTarget{}, err
+	}
+	if config.MCP.Servers == nil {
+		config.MCP.Servers = map[string]mcpRemoteServer{}
+	}
+	server, exists := config.MCP.Servers[name]
+	if !exists {
+		if !createFromEffective {
+			return mcpRemoteDefaultArgumentsWriteTarget{}, fmt.Errorf("MCP server %q is not registered in %s", name, configPath)
+		}
+		entry, ok, err := lookupMCPRemoteServer(name, "")
+		if err != nil {
+			return mcpRemoteDefaultArgumentsWriteTarget{}, err
+		}
+		if !ok {
+			return mcpRemoteDefaultArgumentsWriteTarget{}, fmt.Errorf("MCP server %q is not registered", name)
+		}
+		server = entry.Server
+	}
+	return mcpRemoteDefaultArgumentsWriteTarget{
+		Path:   configPath,
+		Scope:  scopeName,
+		Config: config,
+		Server: server,
+	}, nil
+}
+
+func cleanMCPRemoteDefaultArgumentName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("default argument name is required")
+	}
+	if strings.HasPrefix(name, "-") {
+		return "", fmt.Errorf("invalid default argument name %q", name)
+	}
+	return name, nil
+}
+
+func parseMCPRemoteDefaultArgumentValue(raw string, jsonValue bool) (any, error) {
+	if !jsonValue {
+		return raw, nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil, fmt.Errorf("default argument value must be valid JSON: %w", err)
+	}
+	return value, nil
+}
+
+func mcpRemoteDefaultArgumentItems(arguments map[string]any) []mcpRemoteDefaultArgumentItem {
+	names := make([]string, 0, len(arguments))
+	for name := range arguments {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	items := make([]mcpRemoteDefaultArgumentItem, 0, len(names))
+	for _, name := range names {
+		items = append(items, mcpRemoteDefaultArgumentItem{Name: name, Value: arguments[name]})
+	}
+	return items
+}
+
+func renderMCPRemoteDefaultsTable(w io.Writer, cmd *cobra.Command, opts *options, result mcpRemoteDefaultArgumentsResult) {
+	human := humanOutputOptions(cmd, opts)
+	rows := make([][]string, 0, len(result.Arguments))
+	for _, item := range result.Arguments {
+		rows = append(rows, []string{
+			output.ToneText(human, output.ToneInfo, item.Name),
+			output.Value(mcpRemoteFormatDefaultArgumentValue(item.Value)),
+		})
+	}
+	output.RenderTable(w, human, output.Table{
+		Headers: []string{"Argument", "Value"},
+		Rows:    rows,
+		Empty:   "no default arguments for " + result.Server,
+	})
+}
+
+func mcpRemoteFormatDefaultArgumentValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
+}
+
+func writeMCPRemoteDefaultArgumentSuggestions(w io.Writer, serverName string, server mcpRemoteServer) {
+	for _, hint := range mcpRemoteMissingDefaultArgumentHints(mcpRemoteServerEntry{Name: serverName, Server: server}) {
+		example := firstNonEmpty(hint.Example, "<value>")
+		fmt.Fprintf(w, "hint: set a default %s with `toolmux mcp defaults set %s %s %s`\n", hint.Name, serverName, hint.Name, example)
+	}
+}
+
+func mcpRemoteDefaultArgumentErrorWithHint(err error, entry mcpRemoteServerEntry) error {
+	var missing mcpRemoteMissingRequiredArgumentsError
+	if !errors.As(err, &missing) {
+		return err
+	}
+	missingSet := map[string]bool{}
+	for _, name := range missing.Names {
+		missingSet[name] = true
+	}
+	for _, hint := range mcpRemoteMissingDefaultArgumentHints(entry) {
+		if !missingSet[hint.Name] {
+			continue
+		}
+		example := firstNonEmpty(hint.Example, "<value>")
+		return fmt.Errorf("%w\nhint: set a default %s with `toolmux mcp defaults set %s %s %s`", err, hint.Name, entry.Name, hint.Name, example)
+	}
+	return err
+}
+
+func mcpRemoteMissingDefaultArgumentHints(entry mcpRemoteServerEntry) []mcpRemoteDefaultArgumentHint {
+	_, definition, ok := mcpRemoteCatalogDefinitionForServer(entry.Name, entry.Server)
+	if !ok {
+		return nil
+	}
+	var missing []mcpRemoteDefaultArgumentHint
+	for _, hint := range definition.DefaultArgumentHints {
+		if strings.TrimSpace(hint.Name) == "" {
+			continue
+		}
+		if _, exists := entry.Server.DefaultArguments[hint.Name]; exists {
+			continue
+		}
+		missing = append(missing, hint)
+	}
+	return missing
+}
+
+func mcpRemoteMissingDefaultArgumentNames(entry mcpRemoteServerEntry, hints []mcpRemoteDefaultArgumentHint) []string {
+	var missing []string
+	for _, hint := range hints {
+		if strings.TrimSpace(hint.Name) == "" {
+			continue
+		}
+		if _, exists := entry.Server.DefaultArguments[hint.Name]; exists {
+			continue
+		}
+		missing = append(missing, hint.Name)
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func mcpRemoteCatalogDefinitionForServer(serverName string, server mcpRemoteServer) (string, mcpRemoteCatalogDefinition, bool) {
+	catalog := mcpBuiltinRemoteCatalog()
+	if definition, ok := catalog[serverName]; ok && sameMCPRemoteServer(server, definition.Server) {
+		return serverName, definition, true
+	}
+	names := make([]string, 0, len(catalog))
+	for name := range catalog {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		definition := catalog[name]
+		if sameMCPRemoteServer(server, definition.Server) {
+			return name, definition, true
+		}
+	}
+	return "", mcpRemoteCatalogDefinition{}, false
+}
+
 func mcpRemoteCatalogCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	var enable []string
@@ -758,7 +1125,7 @@ func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCat
 	if err != nil {
 		return nil, err
 	}
-	builtins := mcpBuiltinRemoteServers()
+	builtins := mcpBuiltinRemoteCatalog()
 	names := make([]string, 0, len(builtins))
 	for name := range builtins {
 		names = append(names, name)
@@ -766,13 +1133,15 @@ func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCat
 	sort.Strings(names)
 	entries := make([]mcpRemoteCatalogEntry, 0, len(names))
 	for _, name := range names {
-		server := normalizeMCPRemoteServer(builtins[name])
+		definition := builtins[name]
+		server := normalizeMCPRemoteServer(definition.Server)
 		entry := mcpRemoteCatalogEntry{
-			Name:       name,
-			Status:     "available",
-			Registered: false,
-			URL:        server.URL,
-			Transport:  server.Transport,
+			Name:                 name,
+			Status:               "available",
+			Registered:           false,
+			URL:                  server.URL,
+			Transport:            server.Transport,
+			DefaultArgumentHints: definition.DefaultArgumentHints,
 		}
 		matches := matchingMCPRemoteCatalogRegistrations(name, server, registered)
 		if len(matches) > 0 {
@@ -796,6 +1165,7 @@ func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCat
 			entry.Path = registeredEntry.Path
 			entry.URL = registeredEntry.Server.URL
 			entry.Transport = registeredEntry.Server.Transport
+			entry.MissingDefaultArguments = mcpRemoteMissingDefaultArgumentNames(registeredEntry, definition.DefaultArgumentHints)
 			if cache, ok, _ := readMCPRemoteCacheIfExists(opts.mcpCacheDir, registeredEntry.Name); ok {
 				tools := len(cache.Tools)
 				entry.Tools = &tools
@@ -1391,6 +1761,7 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 				} else {
 					fmt.Fprintf(cmd.OutOrStdout(), "enabled %s MCP server %s as %s in %s\n", entry.Scope, catalogName, entry.Name, configPath)
 				}
+				writeMCPRemoteDefaultArgumentSuggestions(cmd.OutOrStdout(), entry.Name, entry.Server)
 			}
 		}
 	}
@@ -1405,8 +1776,11 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 	}
 	if syncEnabled {
 		for _, entry := range enabled {
-			cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, []string{entry.Name}, nil)
+			cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, []string{entry.Name}, nil)
 			if err != nil {
+				return err
+			}
+			if err := writeMCPRemoteAuthRequired(entry, authRequired); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "synced MCP server %s: %d tools\n", entry.Name, len(cache.Tools))
@@ -1541,14 +1915,30 @@ func mcpRemoteCatalogCommandModifies(parts []string) bool {
 }
 
 func mcpBuiltinRemoteServers() map[string]mcpRemoteServer {
-	return map[string]mcpRemoteServer{
-		"atlassian":  {URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
-		"cloudflare": {URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
-		"grafana":    {URL: "https://mcp.grafana.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
-		"iterate":    {URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP},
-		"linear":     {URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP},
-		"miro":       {URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP},
-		"notion":     {URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+	catalog := mcpBuiltinRemoteCatalog()
+	servers := make(map[string]mcpRemoteServer, len(catalog))
+	for name, definition := range catalog {
+		servers[name] = definition.Server
+	}
+	return servers
+}
+
+func mcpBuiltinRemoteCatalog() map[string]mcpRemoteCatalogDefinition {
+	return map[string]mcpRemoteCatalogDefinition{
+		"atlassian": {
+			Server: mcpRemoteServer{URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
+			DefaultArgumentHints: []mcpRemoteDefaultArgumentHint{{
+				Name:        "cloudId",
+				Description: "Atlassian Cloud site ID used by many Atlassian MCP tools.",
+				Example:     "<cloud-id>",
+			}},
+		},
+		"cloudflare": {Server: mcpRemoteServer{URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"grafana":    {Server: mcpRemoteServer{URL: "https://mcp.grafana.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"iterate":    {Server: mcpRemoteServer{URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP}},
+		"linear":     {Server: mcpRemoteServer{URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"miro":       {Server: mcpRemoteServer{URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP}},
+		"notion":     {Server: mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
 	}
 }
 
@@ -1696,6 +2086,24 @@ func normalizeMCPRemoteServer(server mcpRemoteServer) mcpRemoteServer {
 	return server
 }
 
+func writeMCPRemoteAuthRequired(entry mcpRemoteServerEntry, required bool) error {
+	config, err := readToolmuxConfigFile(entry.Path)
+	if err != nil {
+		return err
+	}
+	server, exists := config.MCP.Servers[entry.Name]
+	if !exists {
+		return fmt.Errorf("MCP server %q is not registered in %s", entry.Name, entry.Path)
+	}
+	server.AuthRequired = mcpRemoteBoolPtr(required)
+	config.MCP.Servers[entry.Name] = server
+	return writeToolmuxConfigFile(entry.Path, config)
+}
+
+func mcpRemoteBoolPtr(value bool) *bool {
+	return &value
+}
+
 func mcpRemoteCacheDir(configured string) (string, error) {
 	if configured != "" {
 		return configured, nil
@@ -1781,54 +2189,55 @@ func removeMCPRemoteCache(configuredDir, name string) error {
 	return nil
 }
 
-func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, error) {
+func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), args); err != nil {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, false, err
 	}
 	token, err := loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
 	if err != nil {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, false, err
 	}
 	cache, err := syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, token, trace)
 	if err != nil {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, false, err
 	}
 	if err := writeMCPRemoteCache(opts.mcpCacheDir, entry.Name, cache); err != nil {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, false, err
 	}
-	return cache, nil
+	return cache, strings.TrimSpace(token) != "", nil
 }
 
-func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, error) {
-	cache, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
+	cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 	if err == nil {
-		return cache, nil
+		return cache, authRequired, nil
 	}
 	if !mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, false, err
 	}
 	if _, ok, loadErr := loadMCPRemoteStoredTokens(commandContext(cmd), opts, entry.Name); loadErr != nil {
-		return mcpRemoteCache{}, loadErr
+		return mcpRemoteCache{}, false, loadErr
 	} else if ok {
-		return mcpRemoteCache{}, err
+		return mcpRemoteCache{}, true, err
 	}
 	if authErr := authorize(cmd, opts, mcpRemoteAuthLoginSpec(), []string{entry.Name}); authErr != nil {
-		return mcpRemoteCache{}, fmt.Errorf("%s; OAuth login was denied: %w", err.Error(), authErr)
+		return mcpRemoteCache{}, true, fmt.Errorf("%s; OAuth login was denied: %w", err.Error(), authErr)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "MCP server %s requires auth; starting OAuth login\n", entry.Name)
 	tokens, loginErr := loginMCPRemoteOAuth(cmd, opts, entry, mcpRemoteAuthLoginOptions{Timeout: 2 * time.Minute})
 	if loginErr != nil {
-		return mcpRemoteCache{}, fmt.Errorf("%s; OAuth login failed: %w", err.Error(), loginErr)
+		return mcpRemoteCache{}, true, fmt.Errorf("%s; OAuth login failed: %w", err.Error(), loginErr)
 	}
 	store, storeErr := opts.credentials()
 	if storeErr != nil {
-		return mcpRemoteCache{}, storeErr
+		return mcpRemoteCache{}, true, storeErr
 	}
 	if saveErr := store.SaveOAuthTokens(commandContext(cmd), mcpRemoteCredentialRef(opts, entry.Name), tokens); saveErr != nil {
-		return mcpRemoteCache{}, saveErr
+		return mcpRemoteCache{}, true, saveErr
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", entry.Name)
-	return syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+	cache, _, err = syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+	return cache, true, err
 }
 
 func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool) {
@@ -2481,9 +2890,9 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 		Long:  description,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			arguments, err := decodeMCPRemoteCLIArguments(cmd, rawJSON, tool)
+			arguments, err := decodeMCPRemoteCLIArguments(cmd, rawJSON, tool, entry.Server.DefaultArguments)
 			if err != nil {
-				return err
+				return mcpRemoteDefaultArgumentErrorWithHint(err, entry)
 			}
 			if err := authorize(cmd, opts, spec, nil); err != nil {
 				return err
@@ -2510,7 +2919,7 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 	}
 	cmd.Flags().StringVar(&rawJSON, "json", "", "JSON object with remote MCP tool arguments, or @path")
 	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
-	addMCPRemoteToolFlags(cmd, tool)
+	addMCPRemoteToolFlags(cmd, tool, entry.Server.DefaultArguments)
 	setMCPRemoteToolHelp(cmd, entry, tool)
 	return cmd
 }
@@ -2654,9 +3063,14 @@ func lookupMCPRemoteToolForSchema(ctx context.Context, cmd *cobra.Command, opts 
 	return mcpRemoteToolRef{Entry: entry, Cache: cache, Tool: tool}, true, nil
 }
 
-func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool) {
+func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool, defaultArguments ...map[string]any) {
 	properties := mcpRemoteSchemaProperties(tool.InputSchema)
 	required := mcpRemoteRequiredSet(tool.InputSchema)
+	if len(defaultArguments) > 0 {
+		for name := range mcpRemoteDefaultArgumentsForTool(defaultArguments[0], tool.InputSchema) {
+			delete(required, name)
+		}
+	}
 	names := make([]string, 0, len(properties))
 	for name := range properties {
 		names = append(names, name)
@@ -2689,8 +3103,8 @@ func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool) {
 	}
 }
 
-func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRemoteTool) (map[string]any, error) {
-	arguments := map[string]any{}
+func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRemoteTool, defaultArguments map[string]any) (map[string]any, error) {
+	arguments := mcpRemoteDefaultArgumentsForTool(defaultArguments, tool.InputSchema)
 	rawJSON = strings.TrimSpace(rawJSON)
 	if rawJSON != "" {
 		data := []byte(rawJSON)
@@ -2701,11 +3115,15 @@ func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRem
 			}
 			data = read
 		}
-		if err := json.Unmarshal(data, &arguments); err != nil {
+		var rawArguments map[string]any
+		if err := json.Unmarshal(data, &rawArguments); err != nil {
 			return nil, fmt.Errorf("--json must be a JSON object: %w", err)
 		}
-		if arguments == nil {
+		if rawArguments == nil {
 			return nil, fmt.Errorf("--json must be a JSON object")
+		}
+		for name, value := range rawArguments {
+			arguments[name] = value
 		}
 	}
 	properties := mcpRemoteSchemaProperties(tool.InputSchema)
@@ -2770,6 +3188,73 @@ func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRem
 		return nil, err
 	}
 	return arguments, nil
+}
+
+func mcpRemoteDefaultArgumentsForTool(defaultArguments map[string]any, schema map[string]any) map[string]any {
+	arguments := map[string]any{}
+	if len(defaultArguments) == 0 {
+		return arguments
+	}
+	properties := mcpRemoteSchemaProperties(schema)
+	for name, value := range defaultArguments {
+		if _, ok := properties[name]; ok {
+			arguments[name] = value
+		}
+	}
+	return arguments
+}
+
+func mcpRemoteMergeDefaultArguments(arguments map[string]any, defaultArguments map[string]any, schema map[string]any) map[string]any {
+	merged := mcpRemoteDefaultArgumentsForTool(defaultArguments, schema)
+	for name, value := range arguments {
+		merged[name] = value
+	}
+	return merged
+}
+
+func mcpRemoteInputSchemaWithDefaults(schema map[string]any, defaultArguments map[string]any) map[string]any {
+	effectiveDefaults := mcpRemoteDefaultArgumentsForTool(defaultArguments, schema)
+	if len(effectiveDefaults) == 0 {
+		return schema
+	}
+	cloned := cloneMCPRemoteMap(schema)
+	properties := mcpRemoteSchemaProperties(cloned)
+	for name, value := range effectiveDefaults {
+		property, ok := properties[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		property["default"] = value
+	}
+	if required := mcpRemoteRequiredNames(cloned); len(required) > 0 {
+		filtered := make([]string, 0, len(required))
+		for _, name := range required {
+			if _, ok := effectiveDefaults[name]; !ok {
+				filtered = append(filtered, name)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(cloned, "required")
+		} else {
+			cloned["required"] = filtered
+		}
+	}
+	return cloned
+}
+
+func cloneMCPRemoteMap(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var cloned map[string]any
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return value
+	}
+	return cloned
 }
 
 func mcpRemoteSchemaType(property map[string]any) string {
@@ -2907,16 +3392,16 @@ func validateMCPRemoteRequiredArguments(arguments map[string]any, schema map[str
 		return nil
 	}
 	sort.Strings(missing)
-	return fmt.Errorf("missing required MCP tool arguments: %s", strings.Join(missing, ", "))
+	return mcpRemoteMissingRequiredArgumentsError{Names: missing}
 }
 
-func mcpRemoteRequiredSet(schema map[string]any) map[string]bool {
-	required := map[string]bool{}
+func mcpRemoteRequiredNames(schema map[string]any) []string {
+	var required []string
 	switch values := schema["required"].(type) {
 	case []string:
 		for _, value := range values {
 			if value = strings.TrimSpace(value); value != "" {
-				required[value] = true
+				required = append(required, value)
 			}
 		}
 	case []any:
@@ -2924,10 +3409,18 @@ func mcpRemoteRequiredSet(schema map[string]any) map[string]bool {
 			value, ok := item.(string)
 			if ok {
 				if value = strings.TrimSpace(value); value != "" {
-					required[value] = true
+					required = append(required, value)
 				}
 			}
 		}
+	}
+	return required
+}
+
+func mcpRemoteRequiredSet(schema map[string]any) map[string]bool {
+	required := map[string]bool{}
+	for _, value := range mcpRemoteRequiredNames(schema) {
+		required[value] = true
 	}
 	return required
 }
@@ -3010,16 +3503,20 @@ func (server mcpServer) remoteMCPTools(ctx context.Context) []any {
 		if !server.selector.matches(spec) {
 			continue
 		}
-		tools = append(tools, mcpRemoteToolForServe(spec.ID, ref.Tool))
+		tools = append(tools, mcpRemoteToolForServeWithDefaults(spec.ID, ref.Tool, ref.Entry.Server.DefaultArguments))
 	}
 	return tools
 }
 
 func mcpRemoteToolForServe(name string, tool mcpRemoteTool) map[string]any {
+	return mcpRemoteToolForServeWithDefaults(name, tool, nil)
+}
+
+func mcpRemoteToolForServeWithDefaults(name string, tool mcpRemoteTool, defaultArguments map[string]any) map[string]any {
 	out := map[string]any{
 		"name":        name,
 		"description": tool.Description,
-		"inputSchema": tool.InputSchema,
+		"inputSchema": mcpRemoteInputSchemaWithDefaults(tool.InputSchema, defaultArguments),
 	}
 	if tool.Title != "" {
 		out["title"] = tool.Title
@@ -3271,6 +3768,32 @@ func mcpRemoteCatalogManageSpec() actions.Spec {
 		actions.Short("Enable or disable known remote MCP servers"),
 		actions.RBAC("mcp_server", actions.VerbUpdate, actions.EffectRead, actions.EffectWrite),
 		actions.Risks("mcp-config", "remote-mcp"),
+	)
+}
+
+func mcpRemoteDefaultsListSpec() actions.Spec {
+	return actions.Command("mcp.defaults.ls", "ls",
+		actions.Use("mcp defaults ls <name>"),
+		actions.Short("List default arguments for a remote MCP server"),
+		actions.RBAC("mcp_server_defaults", actions.VerbList, actions.EffectNone, actions.EffectRead),
+	)
+}
+
+func mcpRemoteDefaultsSetSpec() actions.Spec {
+	return actions.Command("mcp.defaults.set", "set",
+		actions.Use("mcp defaults set <name> <argument> <value>"),
+		actions.Short("Set a default argument for a remote MCP server"),
+		actions.RBAC("mcp_server_defaults", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
+		actions.Risks("mcp-config"),
+	)
+}
+
+func mcpRemoteDefaultsRemoveSpec() actions.Spec {
+	return actions.Command("mcp.defaults.remove", "remove",
+		actions.Use("mcp defaults remove <name> <argument> [argument...]"),
+		actions.Short("Remove default arguments for a remote MCP server"),
+		actions.RBAC("mcp_server_defaults", actions.VerbDelete, actions.EffectNone, actions.EffectWrite),
+		actions.Risks("mcp-config"),
 	)
 }
 

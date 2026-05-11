@@ -230,7 +230,7 @@ Use the Notion catalog entry for Notion work instead of a native Toolmux
 integration:
 
 ```bash
-toolmux mcp catalog --enable notion --global
+toolmux mcp catalog --enable notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion
@@ -240,7 +240,7 @@ Manage built-ins from the catalog:
 
 ```bash
 toolmux mcp catalog
-toolmux mcp catalog --enable cloudflare --global
+toolmux mcp catalog --enable cloudflare
 toolmux mcp auth login cloudflare
 toolmux mcp sync cloudflare
 toolmux cloudflare
@@ -250,7 +250,7 @@ Grafana Cloud uses hosted OAuth. The browser flow may ask for your Grafana
 Cloud stack URL before consent:
 
 ```bash
-toolmux mcp catalog --enable grafana --global
+toolmux mcp catalog --enable grafana
 toolmux mcp auth login grafana
 toolmux mcp sync grafana
 toolmux grafana
@@ -268,6 +268,21 @@ toolmux linear-work
 The registered name becomes the command namespace. Registering `linear-work`
 exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
 `linear-work.<tool-name>`.
+
+For repeated non-secret tool arguments, configure defaults on the registered
+remote. Defaults apply only to tools whose input schema has that argument, and
+explicit `--json` values or flags override them. The Atlassian catalog entry
+will suggest setting `cloudId` when it is missing:
+
+```bash
+toolmux mcp defaults set atlassian cloudId <cloud-id>
+toolmux mcp defaults ls atlassian
+toolmux atlassian <tool-name>
+```
+
+Remote MCP config writes default to the global Toolmux config. Add `--project`
+when you intentionally want a project-local server, profile, or default
+argument.
 
 In an interactive terminal, remote MCP command help and tool listings keep
 upstream descriptions compact and lightly styled so the command list stays

@@ -86,7 +86,13 @@ profile selection.
 Imported remote MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool
 metadata in the user cache directory. Use `toolmux mcp add`, `sync`,
-`rename`, `remove`, `ls`, `show`, and `catalog` for server definitions. Use
+`rename`, `remove`, `ls`, `show`, `catalog`, and `defaults` for server
+definitions. Default arguments are non-secret config values applied only to
+remote tool schemas with matching top-level properties; explicit tool
+arguments override configured defaults. MCP config write commands default to
+the global config; require `--project` for project-local writes. Server config
+should record `auth_required` after sync or auth setup when the requirement is
+known. Use
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
 registration, and `toolmux mcp auth set` for externally issued bearer tokens.
 `toolmux mcp remove` and its `rm` alias should accept one or more server names.

@@ -229,8 +229,14 @@ must live only in the credential store or transient process memory. Remote tool
 commands are generated from
 cached remote metadata under the registered server name, and they must run
 policy and `--read-only` checks before stored auth is read or remote HTTP calls
-are made. Streamable HTTP clients must handle JSON and `text/event-stream`
-responses and preserve `Mcp-Session-Id` headers for sessionful remote servers.
+are made. Remote server default arguments are non-secret config, must apply
+only to matching top-level tool schema properties, and must be overridden by
+explicit `--json` or flag arguments. MCP config write commands must default to
+global config; use `--project` only for explicit project-local writes. Server
+config should record `auth_required` after sync or auth setup when the
+requirement is known. Streamable HTTP clients must handle JSON and
+`text/event-stream` responses and preserve `Mcp-Session-Id` headers for
+sessionful remote servers.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
 client registration when advertised; keep `--client-id` available for servers
