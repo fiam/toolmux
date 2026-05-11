@@ -99,6 +99,11 @@ display only `project` or `global` scope labels, support `mcp ls <name>` for
 cached tools on one server, and support `mcp ls -R` for a tree of registered
 servers and cached tools. Running a registered remote namespace such as
 `toolmux linear` without a tool should show help with available cached tools.
+Interactive human output should compact remote MCP tool descriptions and may
+use shared color tones for command names, arguments, and secondary text. Keep
+full upstream descriptions available through non-interactive output,
+JSON/YAML, `toolmux <server> --full-help`, and the `--full-descriptions` flag
+on `toolmux mcp ls`.
 Do not store bearer tokens, OAuth tokens, refresh tokens, dynamic client
 secrets, client secrets, auth codes, or authorization headers in YAML config or
 test fixtures. Remote Streamable HTTP support must handle both JSON and

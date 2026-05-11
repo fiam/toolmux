@@ -32,11 +32,15 @@ const (
 	mcpRemoteCacheVersion            = 1
 	mcpRemoteCacheMaxAge             = 24 * time.Hour
 	mcpRemoteTraceBodyLimit          = 8 << 20
+	mcpRemoteCompactDescriptionLimit = 120
 	mcpRemoteServerAnnotation        = "toolmux.remote_mcp.server"
 	mcpRemoteCredentialProvider      = "mcp_remote"
 )
 
-var mcpRemoteNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+var (
+	mcpRemoteNamePattern         = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	mcpRemoteMarkdownLinkPattern = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+)
 
 type mcpRemoteServer struct {
 	URL       string `json:"url" yaml:"url"`
@@ -576,6 +580,7 @@ func mcpRemoteAuthStatusCommand(opts *options) *cobra.Command {
 
 func mcpRemoteListCommand(opts *options) *cobra.Command {
 	var recursive bool
+	var fullDescriptions bool
 	cmd := &cobra.Command{
 		Use:     "ls [name]",
 		Aliases: []string{"list"},
@@ -605,7 +610,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 				if recursive {
 					items := mcpRemoteTreeItems([]mcpRemoteServerEntry{entry}, map[string]mcpRemoteCache{name: cache})
 					return writeValue(cmd, opts, items, func(w io.Writer) {
-						renderMCPRemoteTree(w, cmd, opts, items)
+						renderMCPRemoteTree(w, cmd, opts, items, fullDescriptions)
 					})
 				}
 				result := mcpRemoteToolList{
@@ -613,7 +618,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 					Tools:  sortedMCPRemoteTools(cache.Tools),
 				}
 				return writeValue(cmd, opts, result, func(w io.Writer) {
-					renderMCPRemoteToolTable(w, cmd, opts, entry.Name, result.Tools)
+					renderMCPRemoteToolTable(w, cmd, opts, entry.Name, result.Tools, fullDescriptions)
 				})
 			}
 			if recursive {
@@ -625,7 +630,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 				}
 				items := mcpRemoteTreeItems(entries, caches)
 				return writeValue(cmd, opts, items, func(w io.Writer) {
-					renderMCPRemoteTree(w, cmd, opts, items)
+					renderMCPRemoteTree(w, cmd, opts, items, fullDescriptions)
 				})
 			}
 			items := mcpRemoteListItems(opts, entries)
@@ -635,6 +640,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "recursively list tools under registered MCP servers")
+	cmd.Flags().BoolVar(&fullDescriptions, "full-descriptions", false, "show full remote MCP tool descriptions")
 	return cmd
 }
 
@@ -861,14 +867,14 @@ func renderMCPRemoteListTable(w io.Writer, cmd *cobra.Command, opts *options, it
 	})
 }
 
-func renderMCPRemoteToolTable(w io.Writer, cmd *cobra.Command, opts *options, serverName string, tools []mcpRemoteTool) {
+func renderMCPRemoteToolTable(w io.Writer, cmd *cobra.Command, opts *options, serverName string, tools []mcpRemoteTool, fullDescriptions bool) {
 	human := humanOutputOptions(cmd, opts)
 	rows := make([][]string, 0, len(tools))
 	for _, tool := range tools {
 		rows = append(rows, []string{
 			output.ToneText(human, output.ToneInfo, tool.Name),
-			mcpRemoteToolArgumentsLabel(tool),
-			output.Value(tool.Description),
+			output.ToneText(human, output.ToneMuted, mcpRemoteToolArgumentsLabel(tool)),
+			output.Value(mcpRemoteDisplayDescription(cmd, opts, tool.Description, fullDescriptions)),
 		})
 	}
 	output.RenderTable(w, human, output.Table{
@@ -899,7 +905,7 @@ func mcpRemoteTreeItems(entries []mcpRemoteServerEntry, caches map[string]mcpRem
 	return items
 }
 
-func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items []mcpRemoteTreeItem) {
+func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items []mcpRemoteTreeItem, fullDescriptions bool) {
 	if len(items) == 0 {
 		fmt.Fprintln(w, output.ToneText(humanOutputOptions(cmd, opts), output.ToneMuted, "no remote MCP servers registered"))
 		return
@@ -927,9 +933,9 @@ func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items [
 			}
 			description := ""
 			if strings.TrimSpace(tool.Description) != "" {
-				description = " " + output.ToneText(human, output.ToneMuted, "- "+tool.Description)
+				description = " " + output.ToneText(human, output.ToneMuted, "- "+mcpRemoteDisplayDescription(cmd, opts, tool.Description, fullDescriptions))
 			}
-			fmt.Fprintf(w, "%s %s%s%s\n", connector, tool.Name, args, description)
+			fmt.Fprintf(w, "%s %s%s%s\n", connector, output.ToneText(human, output.ToneInfo, tool.Name), args, description)
 		}
 		if entryIndex != len(items)-1 {
 			fmt.Fprintln(w)
@@ -1038,6 +1044,171 @@ func mcpRemoteToolArgumentsLabel(tool mcpRemoteTool) string {
 		labels = append(labels, label)
 	}
 	return strings.Join(labels, ", ")
+}
+
+func mcpRemoteDisplayDescription(cmd *cobra.Command, opts *options, description string, full bool) string {
+	if !full && mcpRemoteCompactDescriptions(cmd, opts) {
+		return mcpRemoteCompactDescription(description)
+	}
+	return description
+}
+
+func mcpRemoteCompactDescriptions(cmd *cobra.Command, opts *options) bool {
+	return opts != nil && interactiveCommand(cmd, opts)
+}
+
+func mcpRemoteCompactDescription(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+	lines := strings.Split(description, "\n")
+	for index, line := range lines {
+		if mcpRemoteDescriptionHeading(line) {
+			continue
+		}
+		line = mcpRemoteCleanDescriptionLine(line)
+		if line == "" {
+			continue
+		}
+		if mcpRemoteGenericDescriptionLine(line) {
+			continue
+		}
+		if strings.HasSuffix(line, ":") {
+			if combined := mcpRemoteCompactColonDescription(line, lines[index+1:]); combined != "" {
+				return truncateMCPRemoteDescription(combined, mcpRemoteCompactDescriptionLimit)
+			}
+			line = strings.TrimSpace(strings.TrimSuffix(line, ":"))
+			if mcpRemoteIncompleteDescriptionLine(line) {
+				continue
+			}
+		}
+		return truncateMCPRemoteDescription(line, mcpRemoteCompactDescriptionLimit)
+	}
+	return truncateMCPRemoteDescription(strings.Join(strings.Fields(description), " "), mcpRemoteCompactDescriptionLimit)
+}
+
+func mcpRemoteDescriptionHeading(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, "#")
+}
+
+func mcpRemoteCleanDescriptionLine(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+		return ""
+	}
+	for strings.HasPrefix(line, ">") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, ">"))
+	}
+	line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+	line = mcpRemoteStripListMarker(line)
+	line = strings.TrimSpace(line)
+	for _, checkbox := range []string{"[ ] ", "[x] ", "[X] "} {
+		line = strings.TrimPrefix(line, checkbox)
+	}
+	line = mcpRemoteMarkdownLinkPattern.ReplaceAllString(line, "$1")
+	replacer := strings.NewReplacer("`", "", "**", "", "__", "")
+	line = replacer.Replace(line)
+	return strings.Join(strings.Fields(line), " ")
+}
+
+func mcpRemoteStripListMarker(line string) string {
+	line = strings.TrimSpace(line)
+	if len(line) >= 2 && strings.ContainsRune("-*+", rune(line[0])) && (line[1] == ' ' || line[1] == '\t') {
+		return strings.TrimSpace(line[1:])
+	}
+	for i, r := range line {
+		if r < '0' || r > '9' {
+			if i > 0 && (r == '.' || r == ')') && len(line) > i+1 && (line[i+1] == ' ' || line[i+1] == '\t') {
+				return strings.TrimSpace(line[i+1:])
+			}
+			break
+		}
+	}
+	return line
+}
+
+func mcpRemoteDescriptionListItem(line string) bool {
+	line = strings.TrimSpace(line)
+	if len(line) >= 2 && strings.ContainsRune("-*+", rune(line[0])) && (line[1] == ' ' || line[1] == '\t') {
+		return true
+	}
+	for i, r := range line {
+		if r < '0' || r > '9' {
+			return i > 0 && (r == '.' || r == ')') && len(line) > i+1 && (line[i+1] == ' ' || line[i+1] == '\t')
+		}
+	}
+	return false
+}
+
+func mcpRemoteGenericDescriptionLine(line string) bool {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(line)), ":. ")
+	switch normalized {
+	case "overview", "summary", "description", "details", "usage", "examples", "example", "notes", "note", "instructions":
+		return true
+	default:
+		return false
+	}
+}
+
+func mcpRemoteIncompleteDescriptionLine(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return true
+	}
+	switch strings.ToLower(fields[len(fields)-1]) {
+	case "for", "from", "in", "into", "of", "on", "over", "to", "using", "with":
+		return true
+	default:
+		return len(fields) <= 3
+	}
+}
+
+func mcpRemoteCompactColonDescription(prefix string, following []string) string {
+	prefix = strings.TrimSpace(strings.TrimSuffix(prefix, ":"))
+	var bullets []string
+	for _, line := range following {
+		if strings.TrimSpace(line) == "" {
+			if len(bullets) == 0 {
+				continue
+			}
+			break
+		}
+		if !mcpRemoteDescriptionListItem(line) {
+			if len(bullets) == 0 && (mcpRemoteDescriptionHeading(line) || mcpRemoteGenericDescriptionLine(mcpRemoteCleanDescriptionLine(line))) {
+				continue
+			}
+			break
+		}
+		bullet := mcpRemoteCleanDescriptionLine(line)
+		if bullet == "" {
+			continue
+		}
+		bullets = append(bullets, bullet)
+		if len(bullets) == 3 {
+			break
+		}
+	}
+	if len(bullets) == 0 {
+		return ""
+	}
+	description := prefix + " " + strings.Join(bullets, ", ")
+	if !strings.ContainsAny(description[len(description)-1:], ".!?") {
+		description += "."
+	}
+	return description
+}
+
+func truncateMCPRemoteDescription(description string, limit int) string {
+	if limit <= 0 || len(description) <= limit {
+		return description
+	}
+	cut := strings.LastIndexAny(description[:limit+1], " \t")
+	if cut <= 0 {
+		cut = limit
+	}
+	return strings.TrimSpace(description[:cut]) + "..."
 }
 
 func manageMCPRemoteCatalogInteractive(cmd *cobra.Command, opts *options, scope mcpProfileScopeOptions, syncEnabled bool) error {
@@ -2101,6 +2272,7 @@ func registerCachedMCPRemoteCommands(root *cobra.Command, opts *options) []mcpRe
 
 func mcpRemoteRootCommand(opts *options, entry mcpRemoteServerEntry) *cobra.Command {
 	cache, ok, _ := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
+	var fullHelp bool
 	cmd := &cobra.Command{
 		Use:   entry.Name,
 		Short: "Imported remote MCP server " + entry.Name,
@@ -2114,6 +2286,8 @@ func mcpRemoteRootCommand(opts *options, entry mcpRemoteServerEntry) *cobra.Comm
 			return fmt.Errorf("MCP server %q has no command %q; run `toolmux mcp sync %s` to refresh cached tools", entry.Name, strings.Join(args, " "), entry.Name)
 		},
 	}
+	cmd.Flags().BoolVar(&fullHelp, "full-help", false, "show full upstream MCP tool descriptions")
+	setMCPRemoteRootHelp(cmd, opts, &fullHelp)
 	if !ok {
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("MCP server %q has no cached tools; run `toolmux mcp sync %s`", entry.Name, entry.Name)
@@ -2130,9 +2304,11 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 	var rawJSON string
 	var verboseHTTP bool
 	spec := mcpRemoteActionSpec(entry.Name, tool)
+	description := firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name)
 	cmd := &cobra.Command{
 		Use:   tool.Name,
-		Short: firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name),
+		Short: description,
+		Long:  description,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arguments, err := decodeMCPRemoteCLIArguments(cmd, rawJSON, tool)
@@ -2167,6 +2343,77 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 	addMCPRemoteToolFlags(cmd, tool)
 	setMCPRemoteToolHelp(cmd, entry, tool)
 	return cmd
+}
+
+func setMCPRemoteRootHelp(cmd *cobra.Command, opts *options, fullHelp *bool) {
+	defaultHelp := cmd.HelpFunc()
+	cmd.SetHelpFunc(func(helpCmd *cobra.Command, args []string) {
+		if mcpRemoteFullHelp(helpCmd, fullHelp) || !mcpRemoteCompactDescriptions(helpCmd, opts) {
+			defaultHelp(helpCmd, args)
+			return
+		}
+		renderMCPRemoteRootCompactHelp(helpCmd, opts)
+	})
+}
+
+func mcpRemoteFullHelp(cmd *cobra.Command, fullHelp *bool) bool {
+	if fullHelp != nil && *fullHelp {
+		return true
+	}
+	value, err := cmd.Flags().GetBool("full-help")
+	return err == nil && value
+}
+
+func renderMCPRemoteRootCompactHelp(cmd *cobra.Command, opts *options) {
+	w := cmd.OutOrStdout()
+	human := humanOutputOptions(cmd, opts)
+	if cmd.Short != "" {
+		fmt.Fprintln(w, cmd.Short)
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, output.ToneText(human, output.ToneMuted, "Usage:"))
+	fmt.Fprintf(w, "  %s <tool> [flags]\n", cmd.CommandPath())
+	children := mcpRemoteHelpCommands(cmd)
+	if len(children) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, output.ToneText(human, output.ToneMuted, "Available Commands:"))
+		width := 0
+		for _, child := range children {
+			width = max(width, len(child.Name()))
+		}
+		for _, child := range children {
+			name := fmt.Sprintf("%-*s", width, child.Name())
+			description := output.Value(mcpRemoteCompactDescription(child.Short))
+			fmt.Fprintf(w, "  %s  %s\n",
+				output.ToneText(human, output.ToneInfo, name),
+				output.ToneText(human, output.ToneMuted, description),
+			)
+		}
+	}
+	if flags := strings.TrimRight(cmd.LocalFlags().FlagUsages(), "\n"); flags != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, output.ToneText(human, output.ToneMuted, "Flags:"))
+		fmt.Fprintln(w, flags)
+	}
+	if flags := strings.TrimRight(cmd.InheritedFlags().FlagUsages(), "\n"); flags != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, output.ToneText(human, output.ToneMuted, "Global Flags:"))
+		fmt.Fprintln(w, flags)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Use %q for full upstream descriptions.\n", cmd.CommandPath()+" --full-help")
+	fmt.Fprintf(w, "Use %q for one tool's flags and schema hint.\n", cmd.CommandPath()+" <tool> --help")
+}
+
+func mcpRemoteHelpCommands(cmd *cobra.Command) []*cobra.Command {
+	children := slices.Clone(cmd.Commands())
+	children = slices.DeleteFunc(children, func(child *cobra.Command) bool {
+		return !child.IsAvailableCommand()
+	})
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].Name() < children[j].Name()
+	})
+	return children
 }
 
 func schemaCommand(opts *options) *cobra.Command {

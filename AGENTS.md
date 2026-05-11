@@ -256,7 +256,11 @@ can be registered under a non-conflicting command namespace.
 cached tools, and support `mcp ls -R` for a tree of all registered servers and
 their cached tools. Running a registered remote namespace such as
 `toolmux linear` without a tool must show command help with available cached
-tools.
+tools. Interactive human output must compact remote MCP tool descriptions and
+may use shared color tones for command names, arguments, and secondary text.
+Keep full upstream descriptions available through non-interactive output,
+JSON/YAML, `toolmux <server> --full-help`, and the `--full-descriptions` flag
+on `toolmux mcp ls`.
 
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output

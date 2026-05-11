@@ -258,6 +258,19 @@ The registered name becomes the command namespace. Registering `linear-work`
 exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
 `linear-work.<tool-name>`.
 
+In an interactive terminal, remote MCP command help and tool listings keep
+upstream descriptions compact and lightly styled so the command list stays
+scannable. Use full descriptions when you need the original upstream text:
+
+```bash
+toolmux linear-work --full-help
+toolmux mcp ls linear-work --full-descriptions
+toolmux mcp ls -R --full-descriptions
+```
+
+Non-interactive output and JSON/YAML output keep the full cached metadata for
+agents and scripts.
+
 Rename or remove registered remotes:
 
 ```bash

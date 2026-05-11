@@ -328,6 +328,77 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteCompactDescriptionUsesFirstLine(t *testing.T) {
+	t.Parallel()
+
+	description := "  First line with   extra spacing.  \n\nSecond line with details that should remain available elsewhere."
+	if got := mcpRemoteCompactDescription(description); got != "First line with extra spacing." {
+		t.Fatalf("unexpected compact description %q", got)
+	}
+
+	markdown := "## Overview\n\nCreate pages in a Notion database from markdown."
+	if got := mcpRemoteCompactDescription(markdown); got != "Create pages in a Notion database from markdown." {
+		t.Fatalf("unexpected markdown compact description %q", got)
+	}
+
+	colonList := "Perform a search over:\n\n- pages\n- databases\n- data sources\n- comments"
+	if got := mcpRemoteCompactDescription(colonList); got != "Perform a search over pages, databases, data sources." {
+		t.Fatalf("unexpected colon-list compact description %q", got)
+	}
+
+	long := strings.Repeat("word ", 40)
+	got := mcpRemoteCompactDescription(long)
+	if len(got) > mcpRemoteCompactDescriptionLimit+3 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected truncated compact description, got %q", got)
+	}
+}
+
+func TestRenderMCPRemoteRootCompactHelpUsesColorAndCompactDescriptions(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	opts := &options{output: "table", color: "always"}
+	cmd := &cobra.Command{
+		Use:   "notion",
+		Short: "Imported remote MCP server notion",
+	}
+	cmd.SetOut(&out)
+	cmd.Flags().Bool("full-help", false, "show full upstream MCP tool descriptions")
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "notion-create-pages",
+			Short: "## Overview\n\nCreate pages in a Notion database from markdown.\n\nAdditional details for agents.",
+			Run:   func(cmd *cobra.Command, args []string) {},
+		},
+		&cobra.Command{
+			Use:   "notion-search",
+			Short: "Perform a search over:\n\n- pages\n- databases\n- data sources\n- comments",
+			Run:   func(cmd *cobra.Command, args []string) {},
+		},
+	)
+
+	renderMCPRemoteRootCompactHelp(cmd, opts)
+
+	help := out.String()
+	for _, want := range []string{
+		"\x1b[",
+		"Available Commands:",
+		"notion-create-pages",
+		"Create pages in a Notion database from markdown.",
+		"Perform a search over pages, databases, data sources.",
+		`Use "notion --full-help" for full upstream descriptions.`,
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("expected compact help to contain %q, got:\n%s", want, help)
+		}
+	}
+	for _, unwanted := range []string{"## Overview", "Additional details for agents.", "comments"} {
+		if strings.Contains(help, unwanted) {
+			t.Fatalf("expected compact help to omit %q, got:\n%s", unwanted, help)
+		}
+	}
+}
+
 func TestSyncMCPRemoteServerRejectsMissingToolsArray(t *testing.T) {
 	t.Parallel()
 
