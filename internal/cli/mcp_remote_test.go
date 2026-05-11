@@ -971,6 +971,89 @@ func TestReadMCPRemoteSSEResponseSkipsNotifications(t *testing.T) {
 	}
 }
 
+func TestReadMCPRemoteSSEResponseReturnsBeforeStreamCloses(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	type result struct {
+		message []byte
+		err     error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		message, err := readMCPRemoteSSEResponse(reader, json.RawMessage("1"), 2*time.Second)
+		resultCh <- result{message: message, err: err}
+	}()
+
+	_, err := io.WriteString(writer, strings.Join([]string{
+		`event: message`,
+		`data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{}}`,
+		``,
+	}, "\n")+"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	_, err = io.WriteString(writer, strings.Join([]string{
+		`event: message`,
+		`data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"query_prometheus","inputSchema":{"type":"object"}}]}}`,
+		``,
+	}, "\n")+"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if !strings.Contains(string(result.message), "query_prometheus") {
+			t.Fatalf("expected final tools/list response, got %s", result.message)
+		}
+	case <-time.After(750 * time.Millisecond):
+		t.Fatal("timed out waiting for matching SSE response before stream close")
+	}
+}
+
+func TestReadMCPRemoteSSEResponseTimesOutWhenStreamGoesIdle(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := readMCPRemoteSSEResponse(reader, json.RawMessage("1"), 100*time.Millisecond)
+		errCh <- err
+	}()
+
+	_, err := io.WriteString(writer, strings.Join([]string{
+		`event: message`,
+		`data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{}}`,
+		``,
+	}, "\n")+"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected idle timeout error")
+		}
+		if !strings.Contains(err.Error(), "timed out waiting for response message") {
+			t.Fatalf("expected idle timeout error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for idle SSE response error")
+	}
+}
+
 func TestMCPRemoteServerRefreshesStaleCacheOnCommand(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any

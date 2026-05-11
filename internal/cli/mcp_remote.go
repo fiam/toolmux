@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -32,6 +33,7 @@ const (
 	mcpRemoteCacheVersion            = 1
 	mcpRemoteCacheMaxAge             = 24 * time.Hour
 	mcpRemoteToolsListMaxPages       = 128
+	mcpRemoteSSEIdleTimeout          = 30 * time.Second
 	mcpRemoteTraceBodyLimit          = 8 << 20
 	mcpRemoteCompactDescriptionLimit = 120
 	mcpRemoteServerAnnotation        = "toolmux.remote_mcp.server"
@@ -126,6 +128,11 @@ type mcpRemoteHTTPStatusError struct {
 	Method     string
 	StatusCode int
 	Body       string
+}
+
+type mcpRemoteSSEStreamItem struct {
+	Message []byte
+	Err     error
 }
 
 type mcpRemoteCatalogEntry struct {
@@ -2264,64 +2271,116 @@ func mcpRemoteResponseIsSSE(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
 
-func readMCPRemoteSSEResponse(reader io.Reader, expectedID json.RawMessage) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(reader, 8<<20))
-	if err != nil {
-		return nil, err
+func readMCPRemoteSSEResponse(reader io.Reader, expectedID json.RawMessage, idleTimeouts ...time.Duration) ([]byte, error) {
+	idleTimeout := mcpRemoteSSEIdleTimeout
+	if len(idleTimeouts) > 0 && idleTimeouts[0] > 0 {
+		idleTimeout = idleTimeouts[0]
 	}
-	eventName := ""
-	var dataLines []string
-	flush := func() ([]byte, bool, error) {
-		if len(dataLines) == 0 || (eventName != "" && eventName != "message") {
-			return nil, false, nil
+	done := make(chan struct{})
+	defer close(done)
+	activity := make(chan struct{}, 1)
+	messages := make(chan mcpRemoteSSEStreamItem, 4)
+	go scanMCPRemoteSSEMessages(reader, done, activity, messages)
+
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
+	resetTimer := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
-		message := []byte(strings.Join(dataLines, "\n"))
-		matches, err := mcpRemoteSSEMessageIsResponse(message, expectedID)
-		if err != nil {
-			return nil, false, err
-		}
-		if matches {
-			return message, true, nil
-		}
-		return nil, false, nil
+		timer.Reset(idleTimeout)
 	}
-	for rawLine := range strings.SplitSeq(string(data), "\n") {
-		line := strings.TrimSuffix(rawLine, "\r")
-		if line == "" {
-			message, ok, err := flush()
+
+	for {
+		select {
+		case <-activity:
+			resetTimer()
+		case item, ok := <-messages:
+			resetTimer()
+			if !ok {
+				return nil, fmt.Errorf("no response message event found")
+			}
+			if item.Err != nil {
+				return nil, item.Err
+			}
+			matches, err := mcpRemoteSSEMessageIsResponse(item.Message, expectedID)
 			if err != nil {
 				return nil, err
 			}
-			if ok {
-				return message, nil
+			if matches {
+				return item.Message, nil
 			}
-			eventName = ""
-			dataLines = nil
-			continue
-		}
-		if strings.HasPrefix(line, ":") {
-			continue
-		}
-		field, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		value = strings.TrimPrefix(value, " ")
-		switch field {
-		case "event":
-			eventName = value
-		case "data":
-			dataLines = append(dataLines, value)
+		case <-timer.C:
+			if closer, ok := reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+			return nil, fmt.Errorf("timed out waiting for response message after %s of inactivity", idleTimeout)
 		}
 	}
-	message, ok, err := flush()
-	if err != nil {
-		return nil, err
+}
+
+func scanMCPRemoteSSEMessages(reader io.Reader, done <-chan struct{}, activity chan<- struct{}, messages chan<- mcpRemoteSSEStreamItem) {
+	defer close(messages)
+	stream := bufio.NewReader(io.LimitReader(reader, 8<<20))
+	eventName := ""
+	var dataLines []string
+	notifyActivity := func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
 	}
-	if ok {
-		return message, nil
+	send := func(item mcpRemoteSSEStreamItem) bool {
+		select {
+		case messages <- item:
+			return true
+		case <-done:
+			return false
+		}
 	}
-	return nil, fmt.Errorf("no response message event found")
+	flush := func() bool {
+		if len(dataLines) == 0 || (eventName != "" && eventName != "message") {
+			return true
+		}
+		return send(mcpRemoteSSEStreamItem{Message: []byte(strings.Join(dataLines, "\n"))})
+	}
+	for {
+		rawLine, err := stream.ReadString('\n')
+		if rawLine != "" {
+			notifyActivity()
+			line := strings.TrimSuffix(rawLine, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			if line == "" {
+				if !flush() {
+					return
+				}
+				eventName = ""
+				dataLines = nil
+			} else if !strings.HasPrefix(line, ":") {
+				field, value, ok := strings.Cut(line, ":")
+				if ok {
+					value = strings.TrimPrefix(value, " ")
+					switch field {
+					case "event":
+						eventName = value
+					case "data":
+						dataLines = append(dataLines, value)
+					}
+				}
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				_ = flush()
+				return
+			}
+			_ = send(mcpRemoteSSEStreamItem{Err: err})
+			return
+		}
+	}
 }
 
 func mcpRemoteSSEMessageIsResponse(message []byte, expectedID json.RawMessage) (bool, error) {
