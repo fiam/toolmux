@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +325,56 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	}
 	if called["operation"] != "multiply" || called["a"] != float64(6) || called["b"] != float64(7) {
 		t.Fatalf("unexpected calculate arguments: %#v", called)
+	}
+}
+
+func TestSyncMCPRemoteServerRejectsMissingToolsArray(t *testing.T) {
+	t.Parallel()
+
+	var initialized atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpProtocolVersion,
+					"serverInfo":      map[string]any{"name": "null-tools"},
+				},
+			})
+		case "notifications/initialized":
+			initialized.Store(true)
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			if !initialized.Load() {
+				t.Fatal("tools/list called before notifications/initialized")
+			}
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  nil,
+			})
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer upstream.Close()
+
+	_, err := syncMCPRemoteServer(context.Background(), upstream.Client(), mcpRemoteServerEntry{
+		Name: "null-tools",
+		Server: mcpRemoteServer{
+			URL:       upstream.URL,
+			Transport: mcpRemoteTransportStreamableHTTP,
+		},
+	}, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "tools/list returned no tools array") {
+		t.Fatalf("expected missing tools array error, got %v", err)
 	}
 }
 

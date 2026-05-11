@@ -1697,24 +1697,28 @@ func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemo
 		return mcpRemoteCache{}, err
 	}
 	var decoded struct {
-		Tools []mcpRemoteTool `json:"tools"`
+		Tools *[]mcpRemoteTool `json:"tools"`
 	}
 	if err := json.Unmarshal(toolsResult, &decoded); err != nil {
 		return mcpRemoteCache{}, fmt.Errorf("decode remote MCP tools/list: %w", err)
 	}
-	for i := range decoded.Tools {
-		decoded.Tools[i].Name = strings.TrimSpace(decoded.Tools[i].Name)
-		if decoded.Tools[i].InputSchema == nil {
-			decoded.Tools[i].InputSchema = map[string]any{"type": "object"}
+	if decoded.Tools == nil {
+		return mcpRemoteCache{}, fmt.Errorf("remote MCP tools/list returned no tools array")
+	}
+	tools := *decoded.Tools
+	for i := range tools {
+		tools[i].Name = strings.TrimSpace(tools[i].Name)
+		if tools[i].InputSchema == nil {
+			tools[i].InputSchema = map[string]any{"type": "object"}
 		}
 	}
-	decoded.Tools = slices.DeleteFunc(decoded.Tools, func(tool mcpRemoteTool) bool {
+	tools = slices.DeleteFunc(tools, func(tool mcpRemoteTool) bool {
 		return tool.Name == ""
 	})
-	sort.Slice(decoded.Tools, func(i, j int) bool {
-		return decoded.Tools[i].Name < decoded.Tools[j].Name
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name < tools[j].Name
 	})
-	fingerprint := mcpRemoteToolsFingerprint(decoded.Tools)
+	fingerprint := mcpRemoteToolsFingerprint(tools)
 	return mcpRemoteCache{
 		Version:         mcpRemoteCacheVersion,
 		Name:            entry.Name,
@@ -1722,7 +1726,7 @@ func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemo
 		Transport:       entry.Server.Transport,
 		ProtocolVersion: init.ProtocolVersion,
 		ServerInfo:      init.ServerInfo,
-		Tools:           decoded.Tools,
+		Tools:           tools,
 		SyncedAt:        time.Now().UTC(),
 		Fingerprint:     fingerprint,
 		Raw: map[string]json.RawMessage{
@@ -1751,10 +1755,8 @@ func initializeMCPRemoteSession(ctx context.Context, client *http.Client, server
 	if err != nil {
 		return nil, "", err
 	}
-	if sessionID != "" {
-		if err := notifyMCPRemoteInitialized(ctx, client, server, bearerToken, sessionID, trace); err != nil {
-			return nil, "", err
-		}
+	if err := notifyMCPRemoteInitialized(ctx, client, server, bearerToken, sessionID, trace); err != nil {
+		return nil, "", err
 	}
 	return initResult, sessionID, nil
 }
