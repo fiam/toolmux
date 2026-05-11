@@ -937,6 +937,40 @@ func TestMCPRemoteServerSupportsSSEAndSessionID(t *testing.T) {
 	}
 }
 
+func TestReadMCPRemoteSSEResponseSkipsNotifications(t *testing.T) {
+	t.Parallel()
+
+	stream := strings.Join([]string{
+		`event: message`,
+		`data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{}}`,
+		``,
+		`event: message`,
+		`data: {"jsonrpc":"2.0","id":99,"result":{"ignored":true}}`,
+		``,
+		`event: message`,
+		`data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"query_prometheus","inputSchema":{"type":"object"}}]}}`,
+		``,
+	}, "\n")
+	message, err := readMCPRemoteSSEResponse(strings.NewReader(stream), json.RawMessage("1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response mcpResponse
+	if err := json.Unmarshal(message, &response); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(response.ID, json.RawMessage("1")) {
+		t.Fatalf("expected response id 1, got %s", response.ID)
+	}
+	data, err := json.Marshal(response.Result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "query_prometheus") {
+		t.Fatalf("expected final tools/list response, got %s", data)
+	}
+}
+
 func TestMCPRemoteServerRefreshesStaleCacheOnCommand(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any

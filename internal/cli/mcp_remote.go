@@ -2051,9 +2051,10 @@ func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteSer
 		}
 		rawParams = data
 	}
+	requestID := json.RawMessage("1")
 	body, err := json.Marshal(mcpRequest{
 		JSONRPC: "2.0",
-		ID:      json.RawMessage("1"),
+		ID:      requestID,
 		Method:  method,
 		Params:  rawParams,
 	})
@@ -2077,7 +2078,7 @@ func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteSer
 			Body:       strings.TrimSpace(string(data)),
 		}
 	}
-	result, err := decodeMCPRemoteResponse(resp, method)
+	result, err := decodeMCPRemoteResponse(resp, method, requestID)
 	if err != nil {
 		return nil, responseSessionID, err
 	}
@@ -2236,10 +2237,10 @@ func mcpRemoteReadAndRestoreResponseBody(resp *http.Response) ([]byte, bool, err
 	return data, truncated, nil
 }
 
-func decodeMCPRemoteResponse(resp *http.Response, method string) (json.RawMessage, error) {
+func decodeMCPRemoteResponse(resp *http.Response, method string, expectedID json.RawMessage) (json.RawMessage, error) {
 	var decoded mcpResponse
 	if mcpRemoteResponseIsSSE(resp.Header.Get("Content-Type")) {
-		eventData, err := readMCPRemoteSSEMessage(resp.Body)
+		eventData, err := readMCPRemoteSSEResponse(resp.Body, expectedID)
 		if err != nil {
 			return nil, fmt.Errorf("decode remote MCP %s SSE response: %w", method, err)
 		}
@@ -2263,18 +2264,36 @@ func mcpRemoteResponseIsSSE(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
 
-func readMCPRemoteSSEMessage(reader io.Reader) ([]byte, error) {
+func readMCPRemoteSSEResponse(reader io.Reader, expectedID json.RawMessage) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, 8<<20))
 	if err != nil {
 		return nil, err
 	}
 	eventName := ""
 	var dataLines []string
+	flush := func() ([]byte, bool, error) {
+		if len(dataLines) == 0 || (eventName != "" && eventName != "message") {
+			return nil, false, nil
+		}
+		message := []byte(strings.Join(dataLines, "\n"))
+		matches, err := mcpRemoteSSEMessageIsResponse(message, expectedID)
+		if err != nil {
+			return nil, false, err
+		}
+		if matches {
+			return message, true, nil
+		}
+		return nil, false, nil
+	}
 	for rawLine := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSuffix(rawLine, "\r")
 		if line == "" {
-			if len(dataLines) > 0 && (eventName == "" || eventName == "message") {
-				return []byte(strings.Join(dataLines, "\n")), nil
+			message, ok, err := flush()
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return message, nil
 			}
 			eventName = ""
 			dataLines = nil
@@ -2295,10 +2314,31 @@ func readMCPRemoteSSEMessage(reader io.Reader) ([]byte, error) {
 			dataLines = append(dataLines, value)
 		}
 	}
-	if len(dataLines) > 0 && (eventName == "" || eventName == "message") {
-		return []byte(strings.Join(dataLines, "\n")), nil
+	message, ok, err := flush()
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("no message event found")
+	if ok {
+		return message, nil
+	}
+	return nil, fmt.Errorf("no response message event found")
+}
+
+func mcpRemoteSSEMessageIsResponse(message []byte, expectedID json.RawMessage) (bool, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(message, &fields); err != nil {
+		return false, err
+	}
+	id, hasID := fields["id"]
+	if !hasID {
+		return false, nil
+	}
+	if len(expectedID) > 0 && !bytes.Equal(bytes.TrimSpace(id), bytes.TrimSpace(expectedID)) {
+		return false, nil
+	}
+	_, hasResult := fields["result"]
+	_, hasError := fields["error"]
+	return hasResult || hasError, nil
 }
 
 func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, bearerToken string, trace *mcpRemoteHTTPTrace) (mcpCallToolResult, error) {
