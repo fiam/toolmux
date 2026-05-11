@@ -1,21 +1,29 @@
-# Toolmux Initial Providers PRD
+# Toolmux MCP-First Provider PRD
 
-Last updated: 2026-05-07
+Last updated: 2026-05-11
 
 ## Summary
 
-Toolmux is an open-source CLI that lets users connect and operate common SaaS services from one command surface. The initial provider set is Notion, Jira, Slack, Linear, Google Docs, Google Drive, and Gmail. "Google driver" is treated as Google Drive.
+Toolmux is an open-source CLI that lets users connect and operate common SaaS
+services from one command surface. The provider strategy is MCP-first: import
+remote MCP servers when a provider already offers a usable MCP surface, and
+build native integrations only for providers or workflows without an adequate
+MCP path. The current native MVP is Slack; Notion is handled through the
+remote MCP catalog rather than a native Toolmux OAuth integration.
 
 The first release optimizes for a simple connection experience without asking users to create personal API keys or provider developer apps. Provider tokens are stored locally by default; Toolmux does not provide cloud token storage in the initial release.
 
 ## Goals
 
-1. Let users connect each initial provider with a browser-based OAuth flow.
+1. Let users connect supported native providers with a browser-based OAuth flow
+   when native integration is justified.
 2. Store long-lived provider credentials locally, protected by the user's operating system.
 3. Provide a consistent command model across providers for auth, listing, reading, creating, and updating common resources.
 4. Keep the hosted Toolmux server daemon, `toolmuxd`, open-source and minimized: its provider connection component may exchange/refresh tokens when provider client secrets are required, but it must not persist provider tokens.
 5. Make provider capability and scope limits explicit so users understand why some actions require reauthorization or are deferred.
 6. Keep Toolmux's production deployment infrastructure and provider secrets out of the OSS repo while publishing portable source and artifacts for CLI and server users.
+7. Make imported remote MCP servers feel like first-class CLI namespaces with
+   policy, `--read-only`, auth, cached schemas, and agent exposure.
 
 ## Non-Goals
 
@@ -27,6 +35,11 @@ The first release optimizes for a simple connection experience without asking us
 6. No Gmail inbox search, message body reads, mailbox modification, forwarding, or admin settings in the initial release, because those scopes are restricted and increase verification/security-assessment burden.
 7. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
 8. No AWS Lambda, DNS, certificate, production secret, or hosted deployment infrastructure in the OSS repo.
+9. No native Notion OAuth integration while Notion has a usable remote MCP
+   path; do not ask users or hosted Toolmux operators to register a Notion
+   public connection for native commands.
+10. No browser credential harvesting, cookie extraction, or session-token
+    scraping as an auth shortcut for MCP or native integrations.
 
 ## Users
 
@@ -91,24 +104,24 @@ Policy commands:
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "notion page read Roadmap"
-toolmux policy explain --command "notion page create --title Draft"
+toolmux policy check --command "slack conversations ls"
+toolmux policy explain --command "slack message send --channel C123 --text Draft"
 toolmux policy doctor
 ```
 
 Each command must declare metadata that the policy engine can evaluate:
 
 ```text
-command: notion.page.create
-provider: notion
-resource: page
-action: create
+command: slack.message.send
+provider: slack
+resource: message
+action: send
 remote_effect: write
 local_effect: none
-risk: content-write
+risk: message-send
 account: <resolved account id>
 profile: <toolmux profile>
-scopes: [insert_content]
+scopes: [chat:write]
 args: provider-specific normalized arguments
 ```
 
@@ -127,9 +140,9 @@ roles:
   operator:
     extends: ["reader"]
     allow:
-      - provider: "notion"
-        resources: ["page", "page_content", "data_source_row"]
-        actions: ["create", "update", "restore", "move"]
+      - provider: "slack"
+        resources: ["message"]
+        actions: ["send"]
     deny:
       - risks: ["destructive"]
 
@@ -195,7 +208,9 @@ Human UX requirements:
 3. Risky commands should support `--dry-run`, `--preview`, or `--confirm` patterns before mutation.
 4. Error messages should explain what failed, why it likely failed, the policy/provider detail behind it, and the exact command to retry or inspect.
 5. Common workflows may have ergonomic shortcuts that map to canonical commands.
-6. Shell completion should cover static commands and dynamic provider values such as profiles, Jira projects, Linear teams, Slack channels, Notion aliases, and Google accounts.
+6. Shell completion should cover static commands and dynamic provider values
+   such as profiles, Jira projects, Linear teams, Slack channels, remote MCP
+   server names/tool names, and Google accounts.
 7. Users should be able to define aliases for provider-specific ids so command lines remain readable.
 8. Commands that return web resources should support `--open` to launch the provider URL in a browser.
 
@@ -233,8 +248,9 @@ Human-oriented examples:
 ```bash
 toolmux linear mine
 toolmux jira open PROJ-123
-toolmux notion find roadmap
 toolmux slack send '#ops' 'deploy is done'
+toolmux mcp catalog --enable notion
+toolmux notion
 toolmux linear issue create --title "Fix login" --dry-run
 toolmux gmail send --to user@example.com --subject "Hi" --preview
 ```
@@ -273,18 +289,19 @@ separate application.
 Baseline commands:
 
 ```bash
-toolmux connect notion
 toolmux connect jira
 toolmux connect slack
 toolmux connect linear
 toolmux connect google
+toolmux mcp add notion
 
 toolmux status
-toolmux status notion jira
+toolmux status slack jira
 toolmux doctor
-toolmux doctor notion jira
+toolmux doctor slack jira
 toolmux connections ls
-toolmux disconnect notion
+toolmux disconnect slack
+toolmux mcp remove notion
 ```
 
 `google-docs` and `google-drive` may be supported as aliases, but they should create or update the same underlying Google connection.
@@ -342,10 +359,9 @@ toolmuxd deletes the handoff material
 
 Initial providers:
 
-1. Notion.
-2. Jira.
-3. Slack user-token mode.
-4. Slack bot/workspace-install mode, if enabled after user-token MVP.
+1. Jira.
+2. Slack user-token mode.
+3. Slack bot/workspace-install mode, if enabled after user-token MVP.
 
 toolmuxd must not store provider access tokens or refresh tokens in durable storage.
 
@@ -380,41 +396,37 @@ keyring enumeration.
 
 ## Provider MVPs
 
-### Notion
+### Remote MCP Providers
 
 Auth:
 
-1. toolmuxd OAuth through a Notion public connection.
-2. Token refresh uses toolmuxd because Notion requires client credentials for refresh.
-3. User grants access to selected pages/databases in Notion.
-4. The CLI defaults to hosted `https://api.toolmux.com` for toolmuxd and uses
-   `TOOLMUX_TOOLMUXD_URL` for local development or self-hosted deployments.
+1. Remote MCP servers are registered under the general Toolmux `mcp` config
+   key and authenticate with MCP OAuth, PKCE, dynamic client registration when
+   advertised, or externally issued bearer tokens.
+2. Server definitions and cached `tools/list` metadata are non-secret config.
+   OAuth tokens, refresh tokens, bearer tokens, dynamic client secrets, and
+   auth codes live only in the OS credential store or transient process
+   memory.
+3. Imported tool commands run policy and `--read-only` checks before stored
+   auth is read or a remote HTTP call is made.
 
 MVP commands:
 
 ```bash
-toolmux notion search roadmap
-toolmux notion search --query "roadmap"
-toolmux notion page get <page-id>
-toolmux notion page markdown <page-id>
-toolmux notion page create --parent <page-id> --title "..."
-toolmux notion page update <page-id> --title "..."
-toolmux notion page content insert <page-id> --file body.md
-toolmux notion page content replace <page-id> --file body.md
-toolmux notion page content update <page-id> --old "..." --new "..."
-toolmux notion page delete <page-id> --yes
-toolmux notion page restore <page-id>
-toolmux notion page move <page-id> --parent <page-id>
-toolmux notion data-source query <data-source-id>
-toolmux notion database data-sources <database-id>
+toolmux mcp catalog
+toolmux mcp catalog --enable notion
+toolmux mcp auth login notion
+toolmux mcp sync notion
+toolmux notion
+toolmux schema notion <tool>
 ```
 
 Out of scope for MVP:
 
-1. Full workspace crawling beyond pages/databases selected in Notion's permission flow.
-2. Permanent page deletion; Notion's API supports trash/restore, not hard delete.
-3. Complex block editing UI beyond markdown insert/replace/search-and-replace.
-4. Database or data-source schema migrations.
+1. Native provider-specific Notion commands.
+2. Bypassing provider admin approval, OAuth policy, or workspace governance.
+3. Scraping browser sessions, local browser storage, or copying tokens out of
+   provider-owned clients.
 
 ### Jira
 
@@ -646,6 +658,9 @@ All providers must support:
 8. `disconnect` must revoke remote tokens where the provider exposes a revocation endpoint, then delete local credentials.
 9. The OSS server repo must include secret scanning and clear documentation that deployment operators must provide provider client secrets out of band.
 10. Local policy denies must be checked before provider tokens are read from the OS credential store.
+11. Browser cookies, local browser databases, workspace session tokens, and
+    provider web-app bearer tokens are credential material and must not be
+    harvested or transformed into Toolmux credentials.
 
 ## Quality Requirements
 
@@ -666,13 +681,18 @@ Required quality gates:
 
 MVP success:
 
-1. A user can connect all seven providers without manually creating API keys.
-2. A user can run at least one read command and one write/create command for each provider, subject to provider-scope limits.
+1. A user can connect supported native providers and imported MCP servers
+   without manually creating provider API keys when those providers support
+   OAuth or external token issuance.
+2. A user can run at least one read command and one write/create command for
+   each implemented native provider or imported MCP server, subject to
+   provider-scope limits.
 3. 95% of successful OAuth flows complete in under 90 seconds after browser approval.
 4. Token refresh happens without user interaction for supported providers.
 5. Provider tokens are absent from server durable storage and logs in automated tests.
 6. The CLI can be installed as a signed binary on macOS, Linux, and Windows.
-7. A policy file can block write/destructive commands across all initial providers with consistent denial output.
+7. A policy file can block write/destructive commands across native and
+   imported MCP commands with consistent denial output.
 8. CI blocks unformatted code, failing linters, broken fake-provider integration tests, detected vulnerabilities, token leaks, and invalid commit messages.
 9. Non-interactive command runs never hang on prompts and always produce stable machine-readable output when `--output json` or `--output yaml` is used.
 10. Human default output is readable enough that users can complete common read/create/update flows without consulting raw JSON.
@@ -682,7 +702,7 @@ MVP success:
 
 1. Google verification can block or delay broad Docs/Drive/Gmail features.
 2. Slack user-token capabilities may not cover desired bot/workspace workflows.
-3. toolmuxd availability affects Notion/Jira refresh flows even though tokens are local.
+3. toolmuxd availability affects Jira and Slack refresh flows even though tokens are local.
 4. Provider OAuth policies can change and may require re-review.
 5. Local keychains behave differently in headless Linux and CI environments.
 6. Local policy files are useful guardrails but can be bypassed by users who control their machine or working directory.
@@ -693,7 +713,8 @@ MVP success:
 1. Should Slack MVP be user-token only, or should toolmuxd-backed bot install be included in the first public beta?
 2. Should Google Docs and Drive be separate top-level commands or grouped under `toolmux google`?
 3. Should Gmail commands be top-level as `toolmux gmail`, grouped under `toolmux google gmail`, or both?
-4. Should Notion write commands require an explicit `--parent` every time, or should users define a default workspace/page alias?
+4. Which providers with MCP support still need a native fallback, and what
+   product gap justifies that work?
 5. Should Jira write commands be enabled in MVP or gated behind a second auth scope escalation?
 6. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
 7. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
@@ -703,24 +724,23 @@ MVP success:
 
 ## Source References
 
-1. Notion public OAuth authorization: https://developers.notion.com/guides/get-started/authorization
-2. Atlassian Jira OAuth 2.0 3LO: https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
-3. Atlassian Jira OAuth scopes: https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/
-4. Slack OAuth v2: https://docs.slack.dev/authentication/installing-with-oauth/
-5. Slack PKCE: https://docs.slack.dev/authentication/using-pkce/
-6. Slack token rotation: https://docs.slack.dev/authentication/using-token-rotation/
-7. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
-8. Linear GraphQL API: https://linear.app/developers/graphql
-9. Google desktop OAuth: https://developers.google.com/identity/protocols/oauth2/native-app
-10. Google Docs API scopes: https://developers.google.com/workspace/docs/api/auth
-11. Google Drive API scopes: https://developers.google.com/workspace/drive/api/guides/api-specific-auth
-12. Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
-13. Gmail sending guide: https://developers.google.com/gmail/api/guides/sending
-14. Google Workspace API user data and developer policy: https://developers.google.com/gmail/api/policy
-15. Go 1.26 release notes: https://go.dev/doc/go1.26
-16. Go release history: https://go.dev/doc/devel/release
-17. Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
-18. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
-19. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
-20. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html
-21. 99designs Go keyring package: https://pkg.go.dev/github.com/99designs/keyring
+1. Atlassian Jira OAuth 2.0 3LO: https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
+2. Atlassian Jira OAuth scopes: https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/
+3. Slack OAuth v2: https://docs.slack.dev/authentication/installing-with-oauth/
+4. Slack PKCE: https://docs.slack.dev/authentication/using-pkce/
+5. Slack token rotation: https://docs.slack.dev/authentication/using-token-rotation/
+6. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
+7. Linear GraphQL API: https://linear.app/developers/graphql
+8. Google desktop OAuth: https://developers.google.com/identity/protocols/oauth2/native-app
+9. Google Docs API scopes: https://developers.google.com/workspace/docs/api/auth
+10. Google Drive API scopes: https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+11. Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
+12. Gmail sending guide: https://developers.google.com/gmail/api/guides/sending
+13. Google Workspace API user data and developer policy: https://developers.google.com/gmail/api/policy
+14. Go 1.26 release notes: https://go.dev/doc/go1.26
+15. Go release history: https://go.dev/doc/devel/release
+16. Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
+17. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
+18. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
+19. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html
+20. 99designs Go keyring package: https://pkg.go.dev/github.com/99designs/keyring

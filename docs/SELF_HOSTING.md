@@ -102,7 +102,6 @@ OAuth providers generally require exact redirect URI matching. Put `toolmuxd`
 behind HTTPS in production:
 
 ```text
-https://auth.example.com/oauth/notion/callback
 https://auth.example.com/oauth/jira/callback
 https://auth.example.com/oauth/slack/callback
 ```
@@ -119,10 +118,6 @@ facility:
 
 ```text
 TOOLMUX_PUBLIC_URL=https://auth.example.com
-
-NOTION_CLIENT_ID=...
-NOTION_CLIENT_SECRET=...
-NOTION_REDIRECT_URI=https://auth.example.com/oauth/notion/callback
 
 ATLASSIAN_CLIENT_ID=...
 ATLASSIAN_CLIENT_SECRET=...
@@ -174,8 +169,7 @@ need and a threat model for it.
 
 Self-hosters need their own provider OAuth apps:
 
-1. Notion: public connection with your callback URL.
-2. Jira: Atlassian OAuth 2.0 3LO app with your callback URL.
-3. Slack: Slack OAuth app with your callback URL.
+1. Jira: Atlassian OAuth 2.0 3LO app with your callback URL.
+2. Slack: Slack OAuth app with your callback URL.
 
 See provider-specific docs under `docs/providers/`.

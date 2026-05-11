@@ -11,7 +11,6 @@ import (
 	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/providers/brokers"
 	_ "github.com/fiam/toolmux/internal/providers/brokers/all"
-	"github.com/fiam/toolmux/internal/providers/notion"
 	"github.com/fiam/toolmux/internal/providers/slack"
 	"github.com/fiam/toolmux/internal/server"
 )
@@ -23,14 +22,20 @@ type Server struct {
 
 func New(t testing.TB, config server.Config) *Server {
 	t.Helper()
-	srv := httptest.NewServer(server.NewHandlerWithConfig(config))
+	srv := httptest.NewUnstartedServer(nil)
+	if config.PublicBaseURL == "" {
+		config.PublicBaseURL = "http://" + srv.Listener.Addr().String()
+	}
+	for id, providerConfig := range config.Providers {
+		if providerConfig.RedirectURI == "" {
+			providerConfig.RedirectURI = config.PublicBaseURL + "/oauth/" + string(id) + "/callback"
+			config.Providers[id] = providerConfig
+		}
+	}
+	srv.Config.Handler = server.NewHandlerWithConfig(config)
+	srv.Start()
 	t.Cleanup(srv.Close)
 	return &Server{URL: srv.URL, client: srv.Client()}
-}
-
-func NewNotion(t testing.TB, upstreamURL string, upstreamClient *http.Client) *Server {
-	t.Helper()
-	return New(t, NotionConfig(upstreamURL, upstreamClient))
 }
 
 func NewSlack(t testing.TB, upstreamURL string, upstreamClient *http.Client) *Server {
@@ -52,24 +57,6 @@ func (s *Server) Client() *http.Client {
 		return s.client
 	}
 	return http.DefaultClient
-}
-
-func NotionConfig(upstreamURL string, upstreamClient *http.Client) server.Config {
-	upstreamURL = strings.TrimRight(upstreamURL, "/")
-	return server.Config{
-		Providers: map[actions.ProviderName]brokers.Config{
-			notion.ProviderName: {
-				ClientID:   "client-id",
-				Secret:     "client-secret",
-				AuthURL:    upstreamURL + "/oauth/authorize",
-				TokenURL:   upstreamURL + "/oauth/token",
-				RevokeURL:  upstreamURL + "/oauth/revoke",
-				APIVersion: notion.DefaultVersion,
-			},
-		},
-		HTTPClient: upstreamClient,
-		SessionTTL: time.Minute,
-	}
 }
 
 func SlackConfig(upstreamURL string, upstreamClient *http.Client) server.Config {

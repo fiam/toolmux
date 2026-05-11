@@ -141,7 +141,6 @@ write_env_file() {
 export TOOLMUX_LOCAL_SERVER_URL=${LOCAL_URL}
 export TOOLMUX_PUBLIC_URL=${PUBLIC_URL}
 export TOOLMUX_TOOLMUXD_URL=${PUBLIC_URL}
-export NOTION_REDIRECT_URI=${PUBLIC_URL}/oauth/notion/callback
 export SLACK_REDIRECT_URI=${PUBLIC_URL}/oauth/slack/callback
 EOF
 }
@@ -304,7 +303,6 @@ ready
           ${CLOUDFLARED_LOG}
 
   callbacks:
-    ${PUBLIC_URL}/oauth/notion/callback
     ${PUBLIC_URL}/oauth/slack/callback
 
 Press Ctrl+C to stop.

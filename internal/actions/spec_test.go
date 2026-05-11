@@ -4,32 +4,32 @@ import "testing"
 
 func TestLeafSpecsResolveProviderTree(t *testing.T) {
 	t.Parallel()
-	tree := Group("notion",
-		Short("Operate Notion"),
+	tree := Group("slack",
+		Short("Operate Slack"),
 		Children(
-			Group("page",
-				Short("Operate pages"),
+			Group("message",
+				Short("Operate messages"),
 				Children(
-					Command("page.read", "read", RBAC("page", VerbRead, EffectRead), Short("Read a page")),
+					Command("message.send", "send", RBAC("message", VerbSend, EffectWrite), Short("Send a message")),
 				),
 			),
 		),
 	)
-	specs := LeafSpecs("notion", tree)
+	specs := LeafSpecs("slack", tree)
 	if len(specs) != 1 {
 		t.Fatalf("expected one spec, got %d", len(specs))
 	}
 	spec := specs[0]
-	if spec.ID != "notion.page.read" {
+	if spec.ID != "slack.message.send" {
 		t.Fatalf("unexpected action id %q", spec.ID)
 	}
-	if spec.RemoteEffect != string(EffectRead) || spec.LocalEffect != string(EffectNone) {
+	if spec.RemoteEffect != string(EffectWrite) || spec.LocalEffect != string(EffectNone) {
 		t.Fatalf("unexpected effects: %#v", spec)
 	}
-	if spec.Effect != string(EffectRead) {
+	if spec.Effect != string(EffectWrite) {
 		t.Fatalf("unexpected broad effect: %#v", spec)
 	}
-	expectedPath := []string{"notion", "page", "read"}
+	expectedPath := []string{"slack", "message", "send"}
 	if !equalStrings(spec.Path, expectedPath) {
 		t.Fatalf("expected path %#v, got %#v", expectedPath, spec.Path)
 	}

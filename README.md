@@ -17,9 +17,8 @@ Use Toolmux when you want to:
 5. Use `--read-only` and local policy files to block writes before auth is
    loaded.
 
-Toolmux is early software. Today it has native Notion support, an initial
-Slack command set, remote MCP imports, and agent setup for Codex, Claude Code,
-and Gemini CLI.
+Toolmux is early software. Today it has an initial native Slack command set,
+remote MCP imports, and agent setup for Codex, Claude Code, and Gemini CLI.
 
 ## Install
 
@@ -35,14 +34,6 @@ Release archives for macOS, Linux, and Windows are available from
 
 ## Connect Services
 
-Connect Notion:
-
-```bash
-toolmux connect notion
-toolmux status notion
-toolmux doctor notion
-```
-
 Connect Slack:
 
 ```bash
@@ -54,7 +45,7 @@ toolmux doctor slack
 Disconnect and remove the local token:
 
 ```bash
-toolmux disconnect notion --yes
+toolmux disconnect slack --yes
 ```
 
 Toolmux uses a hosted OAuth broker at `https://api.toolmux.com` by default for
@@ -66,56 +57,11 @@ To self-host the broker, point the CLI at your own `toolmuxd`:
 
 ```bash
 export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
-toolmux connect notion
+toolmux connect slack
 ```
 
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-Provider app setup notes are in
-[docs/providers/notion-app.md](docs/providers/notion-app.md) and
-[docs/providers/slack-app.md](docs/providers/slack-app.md).
-
-## Notion
-
-Search:
-
-```bash
-toolmux notion search roadmap
-toolmux notion search --query tasks --type data_source
-toolmux notion search --limit 10 --sort edited --direction desc
-```
-
-Read and navigate pages:
-
-```bash
-toolmux notion page read "Roadmap"
-toolmux notion page markdown "Roadmap"
-toolmux notion page links "Roadmap"
-toolmux notion page open "Roadmap"
-toolmux notion page tree "Roadmap" --depth 3
-```
-
-Create and update pages:
-
-```bash
-toolmux notion page create \
-  --parent-type workspace \
-  --title "Meeting Notes" \
-  --markdown "# Meeting Notes"
-
-toolmux notion page update "Meeting Notes" --title "Team Notes"
-toolmux notion page content insert "Team Notes" --markdown "## Followups"
-toolmux notion page content replace "Team Notes" \
-  --markdown "# Replacement" \
-  --yes
-```
-
-Work with data sources:
-
-```bash
-toolmux notion data-source query <data-source-id>
-toolmux notion data-source schema <data-source-id>
-toolmux notion data-source row create <data-source-id> --title "New Row"
-```
+Provider app setup notes are in [docs/providers/slack-app.md](docs/providers/slack-app.md).
 
 ## Slack
 
@@ -146,8 +92,8 @@ selectors.
 Use structured output when another program is reading the result:
 
 ```bash
-toolmux --output json notion page links "Roadmap"
-toolmux --output yaml status notion
+toolmux --output json slack search --query "deploy"
+toolmux --output yaml status slack
 ```
 
 JSON and YAML output are stable and undecorated: no ANSI escapes, prompts,
@@ -171,8 +117,8 @@ Use `--read-only` to block commands with local or remote write effects before
 provider credentials are read:
 
 ```bash
-toolmux --read-only notion page read "Roadmap"
-toolmux --read-only notion page content replace "Roadmap" --markdown "# New"
+toolmux --read-only slack conversations ls
+toolmux --read-only slack message send --channel C123456 --text "deploy"
 ```
 
 The first command can run. The second is blocked.
@@ -182,7 +128,7 @@ For project-specific guardrails, create a local policy file:
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "notion page read Roadmap"
+toolmux policy check --command "slack conversations ls"
 ```
 
 Policy discovery order:
@@ -243,14 +189,12 @@ toolmux mcp disable gemini
 Limit which tools agents can see with MCP profiles:
 
 ```bash
-toolmux mcp profile set notion-read \
-  --tool 'notion.*' \
-  --exclude-tool '*.create' \
-  --exclude-tool '*.update' \
-  --exclude-tool '*.delete'
+toolmux mcp profile set slack-read \
+  --tool 'slack.*' \
+  --exclude-tool '*.send'
 
-toolmux mcp profile default notion-read
-toolmux mcp configure codex --mcp-profile notion-read --read-only
+toolmux mcp profile default slack-read
+toolmux mcp configure codex --mcp-profile slack-read --read-only
 ```
 
 ## Import Remote MCP Servers
@@ -279,6 +223,16 @@ iterate
 linear
 miro
 notion
+```
+
+Use the Notion catalog entry for Notion work instead of a native Toolmux
+integration:
+
+```bash
+toolmux mcp catalog --enable notion --global
+toolmux mcp auth login notion
+toolmux mcp sync notion
+toolmux notion
 ```
 
 Manage built-ins from the catalog:

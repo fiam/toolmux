@@ -124,7 +124,6 @@ func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
 		"iterate",
 		"available",
 		"notion",
-		"alias required",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected catalog output to contain %q, got:\n%s", want, output)
@@ -162,18 +161,9 @@ func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
 		t.Fatalf("expected iterate to be available after disable, got:\n%s", output)
 	}
 
-	cmd := rootForRemoteTest(env)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"mcp", "catalog", "--enable", "notion"})
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), `MCP server name "notion" conflicts`) {
-		t.Fatalf("expected native conflict enabling notion, got %v", err)
-	}
-
-	aliasOutput := runRootForRemoteTest(t, env, "mcp", "catalog", "--enable", "notion=notion-mcp", "--global")
-	if !strings.Contains(aliasOutput, "enabled global MCP server notion as notion-mcp") {
-		t.Fatalf("expected alias enable output, got %q", aliasOutput)
+	notionOutput := runRootForRemoteTest(t, env, "mcp", "catalog", "--enable", "notion", "--global")
+	if !strings.Contains(notionOutput, "enabled global MCP server notion") {
+		t.Fatalf("expected Notion MCP enable output, got %q", notionOutput)
 	}
 	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "mcp", "catalog")
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
@@ -185,12 +175,12 @@ func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
 			notion = entry
 		}
 	}
-	if !notion.Registered || notion.Status != "registered" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion-mcp" {
-		t.Fatalf("expected notion registered as alias, got %#v", notion)
+	if !notion.Registered || notion.Status != "registered" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion" {
+		t.Fatalf("expected notion registered directly, got %#v", notion)
 	}
 	disableOutput = runRootForRemoteTest(t, env, "mcp", "catalog", "--disable", "notion")
-	if !strings.Contains(disableOutput, "disabled MCP server notion-mcp") {
-		t.Fatalf("expected alias disable by catalog name, got %q", disableOutput)
+	if !strings.Contains(disableOutput, "disabled MCP server notion") {
+		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
 
 	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp catalog --enable iterate")
@@ -645,9 +635,9 @@ func TestMCPRemoteServerRegistrationRejectsNativeCommandCollision(t *testing.T) 
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"mcp", "add", "notion", upstream.URL, "--global"})
+	cmd.SetArgs([]string{"mcp", "add", "slack", upstream.URL, "--global"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), `MCP server name "notion" conflicts`) {
+	if err == nil || !strings.Contains(err.Error(), `MCP server name "slack" conflicts`) {
 		t.Fatalf("expected collision error, got %v", err)
 	}
 }
@@ -667,18 +657,18 @@ func TestMCPRemoteServerCommandSurfaceIsFlat(t *testing.T) {
 func TestMCPRemoteServerStartupConflictPrintsRenameCommand(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	writeRemoteTestConfig(t, env, map[string]mcpRemoteServer{
-		"notion": {URL: "https://example.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		"slack": {URL: "https://example.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
 	})
 
 	cmd := rootForRemoteTest(env)
 	cmd.SetArgs([]string{"status"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "toolmux mcp rename notion <new-name>") {
+	if err == nil || !strings.Contains(err.Error(), "toolmux mcp rename slack <new-name>") {
 		t.Fatalf("expected rename guidance, got %v", err)
 	}
 
-	out := runRootForRemoteTest(t, env, "mcp", "rename", "notion", "notion2")
-	if !strings.Contains(out, "renamed MCP server notion to notion2") {
+	out := runRootForRemoteTest(t, env, "mcp", "rename", "slack", "slack2")
+	if !strings.Contains(out, "renamed MCP server slack to slack2") {
 		t.Fatalf("expected rename output, got %q", out)
 	}
 }

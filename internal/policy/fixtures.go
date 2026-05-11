@@ -13,10 +13,10 @@ roles:
   operator:
     extends: ["reader"]
     allow:
-      - id: allow-notion-write
-        provider: "notion"
-        resources: ["page", "page_content", "data_source_row"]
-        actions: ["create", "update", "restore", "move"]
+      - id: allow-slack-send
+        provider: "slack"
+        resources: ["message"]
+        actions: ["send"]
     deny:
       - id: deny-destructive
         risks: ["destructive"]

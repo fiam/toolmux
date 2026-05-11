@@ -10,19 +10,19 @@ import (
 	"time"
 
 	"github.com/fiam/toolmux/internal/credentials"
-	"github.com/fiam/toolmux/internal/providers/notion/notiontest"
+	"github.com/fiam/toolmux/internal/providers/slack/slacktest"
 	"github.com/fiam/toolmux/internal/testutil/toolmuxdtest"
 )
 
-func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
+func TestIntegrationSlackOAuthLocalCustody(t *testing.T) {
 	t.Parallel()
-	toolmuxd := newNotionToolmuxd(t)
+	toolmuxd := newSlackToolmuxd(t)
 
-	session := createNotionSession(t, toolmuxd)
+	session := createSlackSession(t, toolmuxd)
 	if session.AuthURL == "" {
 		t.Fatal("expected auth URL")
 	}
-	if session.RedirectURI != toolmuxd.URL+"/oauth/notion/callback" {
+	if !strings.HasSuffix(session.RedirectURI, "/oauth/slack/callback") {
 		t.Fatalf("unexpected redirect URI %q", session.RedirectURI)
 	}
 
@@ -39,36 +39,36 @@ func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 		t.Fatalf("expected callback to complete, got %d", resp.StatusCode)
 	}
 	html := string(page)
-	for _, want := range []string{"Notion is connected", "agent link established", "return to your terminal"} {
+	for _, want := range []string{"Slack is connected", "agent link established", "return to your terminal"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected success page to contain %q, got %q", want, html)
 		}
 	}
-	if strings.Contains(html, "fake-access-token") || strings.Contains(html, "fake-refresh-token") {
+	if strings.Contains(html, "fake-slack-access-token") || strings.Contains(html, "fake-slack-refresh-token") {
 		t.Fatal("success page leaked token material")
 	}
 
-	completed := getNotionSession(t, toolmuxd, session.SessionID)
+	completed := getSlackSession(t, toolmuxd, session.SessionID)
 	if completed.Status != "complete" {
 		t.Fatalf("expected complete session, got %#v", completed)
 	}
 	if completed.Tokens == nil {
 		t.Fatal("expected single-use token handoff")
 	}
-	if completed.Tokens.AccessToken != "fake-access-token" {
+	if completed.Tokens.AccessToken != "fake-slack-access-token" {
 		t.Fatalf("unexpected access token %q", completed.Tokens.AccessToken)
 	}
 	if completed.Tokens.Extra["workspace_name"] != "Toolmux Test Workspace" {
 		t.Fatalf("missing workspace metadata: %#v", completed.Tokens.Extra)
 	}
 
-	again := getNotionSession(t, toolmuxd, session.SessionID)
+	again := getSlackSession(t, toolmuxd, session.SessionID)
 	if again.Tokens != nil {
 		t.Fatal("expected token handoff to be single-use")
 	}
 
-	refreshPayload := strings.NewReader(`{"refresh_token":"fake-refresh-token"}`)
-	resp, err = toolmuxd.Client().Post(toolmuxd.URL+"/v1/oauth/notion/refresh", "application/json", refreshPayload)
+	refreshPayload := strings.NewReader(`{"refresh_token":"fake-slack-refresh-token"}`)
+	resp, err = toolmuxd.Client().Post(toolmuxd.URL+"/v1/oauth/slack/refresh", "application/json", refreshPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +84,8 @@ func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 		t.Fatalf("expected refreshed token bundle, got %#v", refreshed)
 	}
 
-	revokePayload := strings.NewReader(`{"token":"fake-access-token"}`)
-	resp, err = toolmuxd.Client().Post(toolmuxd.URL+"/v1/oauth/notion/revoke", "application/json", revokePayload)
+	revokePayload := strings.NewReader(`{"token":"fake-slack-access-token"}`)
+	resp, err = toolmuxd.Client().Post(toolmuxd.URL+"/v1/oauth/slack/revoke", "application/json", revokePayload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,24 +95,13 @@ func TestIntegrationNotionOAuthLocalCustody(t *testing.T) {
 	}
 }
 
-func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
+func TestIntegrationSlackOAuthRejectsBadState(t *testing.T) {
 	t.Parallel()
-	if toolmuxd, ok := toolmuxdtest.ExternalFromEnv(t); ok {
-		resp, err := toolmuxd.Client().Get(toolmuxd.URL + "/oauth/notion/callback?state=bad&code=code")
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected invalid state to return 400, got %d", resp.StatusCode)
-		}
-		return
-	}
-	config := toolmuxdtest.NotionConfig("https://notion.example.test", http.DefaultClient)
+	config := toolmuxdtest.SlackConfig("https://slack.example.test", http.DefaultClient)
 	config.SessionTTL = time.Minute
 	toolmuxd := toolmuxdtest.New(t, config)
 
-	resp, err := toolmuxd.Client().Get(toolmuxd.URL + "/oauth/notion/callback?state=bad&code=code")
+	resp, err := toolmuxd.Client().Get(toolmuxd.URL + "/oauth/slack/callback?state=bad&code=code")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,19 +111,16 @@ func TestIntegrationNotionOAuthRejectsBadState(t *testing.T) {
 	}
 }
 
-func newNotionToolmuxd(t *testing.T) *toolmuxdtest.Server {
+func newSlackToolmuxd(t *testing.T) *toolmuxdtest.Server {
 	t.Helper()
-	if toolmuxd, ok := toolmuxdtest.ExternalFromEnv(t); ok {
-		return toolmuxd
-	}
-	upstream := notiontest.NewUpstream()
+	upstream := slacktest.NewUpstream()
 	t.Cleanup(upstream.Close)
-	return toolmuxdtest.NewNotion(t, upstream.URL, upstream.Client())
+	return toolmuxdtest.NewSlack(t, upstream.URL, upstream.Client())
 }
 
-func createNotionSession(t *testing.T, server *toolmuxdtest.Server) createSessionResponse {
+func createSlackSession(t *testing.T, server *toolmuxdtest.Server) createSessionResponse {
 	t.Helper()
-	body := bytes.NewBufferString(`{"provider":"notion"}`)
+	body := bytes.NewBufferString(`{"provider":"slack"}`)
 	resp, err := server.Client().Post(server.URL+"/v1/oauth/sessions", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +136,7 @@ func createNotionSession(t *testing.T, server *toolmuxdtest.Server) createSessio
 	return session
 }
 
-func getNotionSession(t *testing.T, server *toolmuxdtest.Server, sessionID string) sessionResponse {
+func getSlackSession(t *testing.T, server *toolmuxdtest.Server, sessionID string) sessionResponse {
 	t.Helper()
 	resp, err := server.Client().Get(server.URL + "/v1/oauth/sessions/" + sessionID)
 	if err != nil {

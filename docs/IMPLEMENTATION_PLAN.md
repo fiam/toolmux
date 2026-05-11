@@ -1,10 +1,20 @@
-# Toolmux Initial Provider Implementation Plan
+# Toolmux MCP-First Implementation Plan
 
-Last updated: 2026-05-07
+Last updated: 2026-05-11
 
 ## Technical Direction
 
-Use Go for both the CLI and `toolmuxd`, the Toolmux server daemon. Keep provider logic in one repository at first so the CLI and server share token schemas, provider metadata, and test fixtures.
+Use Go for both the CLI and `toolmuxd`, the Toolmux server daemon. Keep native
+provider logic in one repository at first so the CLI and server share token
+schemas, provider metadata, and test fixtures. Prefer imported remote MCP
+servers over native provider code when a provider already exposes an adequate
+MCP surface.
+
+Do not build credential-harvesting flows for convenience. Local/self-hosted MCP
+servers may be supported through OAuth, documented provider tokens, explicit
+`toolmux mcp auth set` flows, or server-owned setup commands, but Toolmux must
+not scrape browser cookies, local browser storage, session tokens, or
+provider-owned client credentials.
 
 Use the latest stable Go release. As of 2026-05-07, `govulncheck` reports Go
 1.26.3 as the security-fix patch release for the Go 1.26 line. Set the module
@@ -26,9 +36,6 @@ internal/credentials/         # domain credential store over OS keyrings
 internal/oauth/               # PKCE, state, loopback, server handoff
 internal/providers/           # provider registry and common interfaces
 internal/providers/brokers/   # toolmuxd OAuth/token broker registry
-internal/providers/notion/
-internal/providers/notion/client/
-internal/providers/notion/broker/
 internal/providers/all/       # client provider side-effect imports
 internal/providers/brokers/all/ # server broker side-effect imports
 internal/providers/jira/
@@ -222,8 +229,8 @@ Initial policy commands:
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "notion page read Roadmap"
-toolmux policy explain --command "notion page create --title Draft"
+toolmux policy check --command "slack conversations ls"
+toolmux policy explain --command "slack message send --channel C123 --text Draft"
 toolmux policy doctor
 ```
 
@@ -345,8 +352,7 @@ The callback HTML should contain no token data.
 
 ### toolmuxd-Backed Local-Custody Flow
 
-Used for Notion, Jira, Slack user-token mode, and any future Slack
-bot/workspace mode.
+Used for Jira, Slack user-token mode, and any future Slack bot/workspace mode.
 
 toolmuxd OAuth endpoints:
 
@@ -364,7 +370,7 @@ Session creation:
 
 ```json
 {
-  "provider": "notion",
+  "provider": "slack",
   "mode": "default",
   "requested_scopes": [],
   "cli_public_key": "...",
@@ -378,7 +384,7 @@ Session response:
 ```json
 {
   "session_id": "...",
-  "auth_url": "https://api.toolmux.com/oauth/notion/start?session_id=...",
+  "auth_url": "https://api.toolmux.com/oauth/slack/start?session_id=...",
   "expires_at": "2026-05-06T12:01:00Z"
 }
 ```
@@ -482,45 +488,46 @@ Acceptance criteria:
    mistakes, leaked goroutines in tests, context misuse, unsafe formatting of
    host/port pairs, and insecure crypto defaults.
 
-### M2 - toolmuxd with Notion
+### M2 - toolmuxd with Slack and Remote MCP
 
 Why second:
 
-Notion validates the toolmuxd-backed local-custody model and has explicit page/database access constraints users need to understand.
+Slack validates the toolmuxd-backed local-custody model without requiring a
+native Notion public connection. Remote MCP import work lets Toolmux cover
+providers such as Notion through their MCP surfaces instead of duplicating
+manual provider command trees.
 
 Deliverables:
 
 1. toolmuxd session API.
 2. toolmuxd provider secret config via environment variables.
 3. Short-lived, single-use, in-memory token handoff.
-4. Notion provider in CLI.
-5. Notion toolmuxd exchange and refresh handlers.
-6. Notion commands:
+4. Slack provider in CLI.
+5. Slack toolmuxd exchange and refresh handlers.
+6. Remote MCP registration, auth, sync, catalog, and cached command execution.
+7. Slack commands:
 
 ```bash
-toolmux notion search
-toolmux status notion
-toolmux notion page get
-toolmux notion page markdown
-toolmux notion page create
-toolmux notion page update
-toolmux notion page content insert
-toolmux notion page content replace
-toolmux notion page content update
-toolmux notion page delete
-toolmux notion page restore
-toolmux notion page move
-toolmux notion data-source query
-toolmux notion database data-sources
+toolmux slack conversations ls
+toolmux slack message send
+toolmux slack search
+toolmux status slack
+toolmux mcp catalog --enable notion
+toolmux mcp auth login notion
+toolmux mcp sync notion
+toolmux notion
 ```
 
 Acceptance criteria:
 
 1. toolmuxd durable store contains no plaintext token fields.
 2. Handoff payload is single-use and expires.
-3. Token refresh path uses toolmuxd and updates local rotating tokens if Notion returns replacements.
-4. Notion "missing page access" errors suggest sharing the page/database with the Toolmux connection.
-5. Notion provider action specs include command paths, argument constraints,
+3. Slack token refresh path uses toolmuxd and updates local rotating tokens
+   when Slack returns replacements.
+4. Remote MCP server definitions and cached metadata are non-secret config;
+   OAuth and bearer tokens live only in the credential store or transient
+   process memory.
+5. Slack provider action specs include command paths, argument constraints,
    flags, remote/local effects, and scopes for generated surfaces and policy
    evaluation.
 6. CLI defaults to `https://api.toolmux.com` for toolmuxd and supports
@@ -642,10 +649,6 @@ toolmuxd deployment environment variables:
 TOOLMUX_PUBLIC_URL=https://api.toolmux.com
 TOOLMUX_REDIS_URL=redis://...
 
-NOTION_CLIENT_ID=...
-NOTION_CLIENT_SECRET=...
-NOTION_REDIRECT_URI=https://api.toolmux.com/oauth/notion/callback
-
 ATLASSIAN_CLIENT_ID=...
 ATLASSIAN_CLIENT_SECRET=...
 ATLASSIAN_REDIRECT_URI=https://api.toolmux.com/oauth/jira/callback
@@ -690,7 +693,7 @@ Integration tests:
 3. In-memory handoff TTL and single-use behavior.
 4. Token refresh rotation races.
 5. Policy denial before credential lookup for representative read, write, send, and disconnect commands.
-6. Fake Notion, Jira, Slack, Google Docs, Google Drive, and Gmail servers.
+6. Fake Jira, Slack, Google Docs, Google Drive, Gmail, and remote MCP servers.
 7. Provider fixtures for success, expired token, revoked token, missing scope, permission denied, rate limit, pagination, malformed JSON, empty response, and 5xx retry behavior.
 8. OAuth callback and toolmuxd handoff tests that run fully offline.
 9. Contract tests ensuring provider action specs, command args, flags, required
@@ -711,6 +714,9 @@ Security tests:
 4. Replay tests for handoff sessions.
 5. Policy bypass tests for aliases and nested subcommands, ensuring every executable command has a command spec.
 6. toolmuxd persistence tests that fail if token-shaped fields are written to files, databases, telemetry, or logs.
+7. Tests for any local MCP setup helpers must prove Toolmux does not read
+   browser cookie stores, browser profile databases, or provider web-app
+   session-token files.
 
 Lint and quality gates:
 
@@ -723,9 +729,11 @@ Lint and quality gates:
 
 ## Release Plan
 
-1. Publish alpha builds for contributors with Notion first.
-2. Add Jira and Google Workspace commands behind explicit beta labels.
-3. Add Slack user mode after PKCE app configuration is validated.
+1. Publish alpha builds for contributors with Slack native commands and remote
+   MCP imports first.
+2. Add Jira and Google Workspace commands only where MCP does not cover the
+   required workflows.
+3. Expand remote MCP catalog coverage and command ergonomics.
 4. Publish signed `toolmux` binaries and Homebrew tap updates.
 5. Publish generic `toolmuxd` container images.
 6. Sign every binary, checksum file, and server image.
@@ -734,7 +742,11 @@ Lint and quality gates:
 
 ## Operational Notes
 
-Hosted toolmuxd is required for a zero-manual-key experience for Notion and Jira. Self-hosters can run toolmuxd, but they must create their own provider OAuth apps and supply client secrets. The server code can be open source; provider client secrets cannot.
+Hosted toolmuxd is required for zero-manual-key native providers that need
+confidential client secrets, such as Jira and Slack user-token mode.
+Self-hosters can run toolmuxd, but they must create their own provider OAuth
+apps and supply client secrets. The server code can be open source; provider
+client secrets cannot.
 
 toolmuxd should be deployable without Postgres for the initial release. A single-node in-memory handoff store is sufficient for MVP and local development. Redis or another shared handoff store should wait until we have a separate threat model and operational reason for multi-instance handoff storage.
 
@@ -749,10 +761,10 @@ Recommended exact order:
 
 1. M0 repo/tooling.
 2. M1 CLI core and credentials.
-3. M2 toolmuxd and Notion.
+3. M2 toolmuxd, Slack, and remote MCP imports.
 4. M3 Jira.
 5. M4 Google Docs/Drive/Gmail.
-6. M5 Slack user mode.
+6. M5 native provider gaps not covered by MCP.
 7. M6 hardening and beta.
 
 This order proves the hardest foundation early: toolmuxd-backed local-custody

@@ -40,7 +40,7 @@ func TestPolicyCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "notion.page.read") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
+	if !strings.Contains(rendered, "slack.message.send") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
 		t.Fatalf("expected action effects in catalog, got %q", rendered)
 	}
 	if strings.Contains(rendered, "gmail.send") {
@@ -70,13 +70,13 @@ func TestProviderHelpComesFromActionMetadata(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"notion", "data-source", "--help"})
+	cmd.SetArgs([]string{"slack", "conversations", "--help"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "Operate Notion data sources") || !strings.Contains(rendered, "Aliases:") {
+	if !strings.Contains(rendered, "Read Slack conversations") || !strings.Contains(rendered, "Usage:") {
 		t.Fatalf("expected generated provider help from metadata, got %q", rendered)
 	}
 }
@@ -87,13 +87,13 @@ func TestProviderCommandFlagsComeFromActionMetadata(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"notion", "data-source", "query", "--help"})
+	cmd.SetArgs([]string{"slack", "conversations", "ls", "--help"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	for _, want := range []string{"--filter-json", "--filter-property", "--limit", "--result-type", "--sorts-json"} {
+	for _, want := range []string{"--include-archived", "--limit", "--team", "--types"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected generated provider help to contain %q, got %q", want, rendered)
 		}
@@ -127,13 +127,13 @@ func TestReadOnlyModeBlocksMutatingProviderCommand(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"--read-only", "notion", "page", "create", "--title", "Draft", "--parent", "workspace", "--dry-run"})
+	cmd.SetArgs([]string{"--read-only", "slack", "message", "send", "--channel", "C123456", "--text", "Draft", "--dry-run"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected read-only denial")
 	}
-	if !strings.Contains(err.Error(), "read-only mode blocks command notion.page.create") {
+	if !strings.Contains(err.Error(), "read-only mode blocks command slack.message.send") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"NOTION_CLIENT_ID is required"}`))
+		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"SLACK_CLIENT_ID is required"}`))
 	}))
 	defer server.Close()
 
@@ -153,13 +153,13 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"connect", "notion"})
+	cmd.SetArgs([]string{"connect", "slack"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected connect error")
 	}
-	if !strings.Contains(err.Error(), "NOTION_CLIENT_ID is required") {
+	if !strings.Contains(err.Error(), "SLACK_CLIENT_ID is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(out.String(), "Usage:") {
@@ -172,12 +172,12 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 	store := credentials.NewMemoryStore()
 	err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
-		Provider:  "notion",
+		Provider:  "slack",
 		AccountID: "default",
 	}, credentials.OAuthTokens{
-		AccessToken: "notion-access-token",
+		AccessToken: "slack-access-token",
 		TokenType:   "bearer",
-		Scopes:      []string{"read_content", "insert_content"},
+		Scopes:      []string{"channels:read", "chat:write"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -186,13 +186,13 @@ func TestStatusTableShowsProviderPermissions(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"status", "notion"})
+	cmd.SetArgs([]string{"status", "slack"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "insert_content") {
+	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "chat:write") {
 		t.Fatalf("expected connected status table with permissions, got %q", rendered)
 	}
 	if strings.Contains(rendered, "\x1b[") {
@@ -221,22 +221,22 @@ func TestDoctorTableRunsCoreAndProviderDiagnostics(t *testing.T) {
 	}
 }
 
-func TestNotionPageContentReplaceRequiresYes(t *testing.T) {
+func TestProviderDryRunDoesNotRequireCredentials(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
-		"notion", "page", "content", "replace",
-		"11111111-1111-4111-8111-111111111111",
-		"--markdown", "# Replacement",
+		"slack", "message", "send",
+		"--channel", "C123456",
+		"--text", "preview",
+		"--dry-run",
 	})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected replace confirmation error")
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "without --yes") {
-		t.Fatalf("unexpected error: %v", err)
+	if !strings.Contains(out.String(), "slack.message.send") {
+		t.Fatalf("expected dry-run output, got %q", out.String())
 	}
 }

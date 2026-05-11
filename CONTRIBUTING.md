@@ -58,10 +58,17 @@ build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
 Ko-built `toolmuxd` image manifest are validated before a release.
 Live-provider tests stay opt-in and are not part of default CI.
 
-Current native provider command coverage includes Notion and the initial Slack
-surface. Jira and Google provider packages may exist as registration stubs, but
-they should not expose command trees until their provider-owned specs, handlers,
-fake upstreams, and tests are ready.
+Current native provider command coverage includes the initial Slack surface.
+Use imported remote MCP servers for providers such as Notion when a supported
+MCP server exists. Jira and Google provider packages may exist as registration
+stubs, but they should not expose command trees until their provider-owned
+specs, handlers, fake upstreams, and tests are ready.
+
+Do not add browser credential harvesting, cookie extraction, session-token
+scraping, or provider-policy bypasses to make an MCP server easier to use. For
+local or self-hosted MCP servers, prefer OAuth, documented provider tokens, or
+explicit `toolmux mcp auth set` flows that store credentials in the OS
+credential store.
 
 MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
 manual protocol testing and `toolmux mcp configure` to register the server with
@@ -238,7 +245,7 @@ require explicit confirmation for destructive or broad replacement actions.
 
 ## Local OAuth Testing
 
-For Notion or other brokered OAuth flows, run a local server tunnel:
+For Slack or other brokered OAuth flows, run a local server tunnel:
 
 ```bash
 make dev-server-tunnel
@@ -279,7 +286,7 @@ Use these commands while developing:
 
 ```bash
 ./bin/toolmux policy catalog
-./bin/toolmux policy check --command "notion page read Roadmap"
+./bin/toolmux policy check --command "slack conversations ls"
 ./bin/toolmux policy check --command "iterate mock_echo"
 ./bin/toolmux policy doctor
 ```
@@ -337,10 +344,10 @@ hooks. The `commit-msg` hook checks each new commit message, and the
 Example:
 
 ```text
-feat(notion): add page links command
+feat(slack): add message search command
 
-Expose page links as stable structured output so agents can inspect
-navigation targets without using the interactive follow menu.
+Expose message search as stable structured output so agents can inspect
+recent conversations without parsing human table output.
 ```
 
 ## Pull Request Checklist

@@ -155,8 +155,8 @@ Fake upstreams should emulate:
 2. Token refresh, refresh rotation, revocation, and missing scopes.
 3. Provider API success, pagination, permission denied, rate limits, malformed
    responses, empty responses, 5xx errors, and retries.
-4. Notion, Jira, Slack, Linear, Google Docs, Google Drive, and Gmail behavior
-   needed by implemented commands.
+4. Slack, Jira, Linear, Google Docs, Google Drive, Gmail, and other behavior
+   needed by implemented native commands.
 5. Remote MCP OAuth protected-resource metadata, authorization-server metadata,
    dynamic client registration, loopback callbacks, resource parameters, PKCE,
    and refresh behavior.
@@ -172,7 +172,7 @@ parallel tests.
 
 Provider integration tests that exercise the `toolmux` command surface should
 live with the provider package, usually as external tests such as
-`internal/providers/notion/client` package `client_test`. Use
+`internal/providers/slack/client` package `client_test`. Use
 `internal/testutil/toolmuxtest` for command execution helpers instead of
 creating provider-specific `runToolmux` wrappers.
 
@@ -276,6 +276,17 @@ When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
 human table columns, or policy metadata.
 
+Prefer imported remote MCP servers over native provider integrations when a
+provider already exposes an adequate MCP server. Add native integrations only
+for providers or workflows that do not have a usable MCP path, or when a native
+surface is explicitly justified by product requirements.
+
+Do not implement browser credential harvesting, cookie extraction, session-token
+scraping, or provider-policy bypasses. If Toolmux needs to support a local or
+self-hosted MCP server that accepts tokens, require explicit user-supplied
+credentials through the OS credential store, `mcp auth set`, OAuth, or the
+server's own documented setup flow.
+
 The initial Slack native surface is brokered OAuth v2 user-token auth plus
 `slack conversations ls`, `slack message send`, and `slack search`. Keep Slack
 scopes aligned with `docs/providers/slack-app.md`, do not request bot scopes by
@@ -303,7 +314,7 @@ tunnel, either with a locally-managed tunnel name or a dashboard-managed tunnel
 token. It writes local, ignored environment hints to
 `.toolmux/server-tunnel.env`.
 
-Do not commit tunnel URLs, Cloudflare tunnel tokens, Notion client secrets,
+Do not commit tunnel URLs, Cloudflare tunnel tokens, provider client secrets,
 OAuth codes, or generated token material.
 
 ## Security
@@ -311,6 +322,12 @@ OAuth codes, or generated token material.
 Provider tokens, auth codes, refresh tokens, one-time handoff secrets, and
 `Authorization` headers must never appear in logs, fixtures, command output,
 crash reports, telemetry, or committed files.
+
+Browser cookies, local browser databases, workspace session tokens, and
+provider web-app bearer tokens are also credential material. Do not read,
+extract, transform, sync, print, or store them unless the provider documents
+that flow for application integration and the user supplies the credential
+explicitly through a supported Toolmux auth command.
 
 Policy checks must run before credential reads, token refresh, or provider API
 calls.
