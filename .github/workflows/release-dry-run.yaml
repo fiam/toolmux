@@ -1,0 +1,54 @@
+name: release dry run
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-main
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.3"
+  GOFLAGS: -mod=readonly
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  snapshot:
+    name: GoReleaser snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Install cgo toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          install-only: true
+      - name: Check GoReleaser config
+        run: goreleaser check
+      - name: Build CLI with cgo and daemon without cgo
+        run: make build
+      - name: Build snapshot without publishing
+        run: goreleaser release --snapshot --clean
