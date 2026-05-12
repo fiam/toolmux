@@ -312,22 +312,6 @@ func TestGeminiMCPConfigDetectsConfiguredServer(t *testing.T) {
 	}
 }
 
-func runMCPServe(t *testing.T, args []string, request string) string {
-	t.Helper()
-	cmd := NewRootCommandWithDeps(Dependencies{
-		Credentials: credentials.NewMemoryStore(),
-	})
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetIn(strings.NewReader(request + "\n"))
-	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	return out.String()
-}
-
 func decodeMCPCallResult(t *testing.T, output string) mcpCallToolResult {
 	t.Helper()
 	response := decodeMCPTestResponse(t, output)

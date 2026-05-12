@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -256,7 +257,7 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
 			}
-			server.AuthRequired = mcpRemoteBoolPtr(authRequired)
+			server.AuthRequired = new(authRequired)
 			if err := register(); err != nil {
 				return err
 			}
@@ -2183,13 +2184,9 @@ func writeMCPRemoteAuthRequired(entry mcpRemoteServerEntry, required bool) error
 	if !exists {
 		return fmt.Errorf("MCP server %q is not registered in %s", entry.Name, entry.Path)
 	}
-	server.AuthRequired = mcpRemoteBoolPtr(required)
+	server.AuthRequired = new(required)
 	config.MCP.Servers[entry.Name] = server
 	return writeToolmuxConfigFile(entry.Path, config)
-}
-
-func mcpRemoteBoolPtr(value bool) *bool {
-	return &value
 }
 
 func mcpRemoteCacheDir(configured string) (string, error) {
@@ -2434,7 +2431,7 @@ func listMCPRemoteTools(ctx context.Context, client *http.Client, server mcpRemo
 	var tools []mcpRemoteTool
 	var pages []json.RawMessage
 	var cursor *string
-	for page := 0; page < mcpRemoteToolsListMaxPages; page++ {
+	for range mcpRemoteToolsListMaxPages {
 		var params any
 		if cursor != nil {
 			params = map[string]any{"cursor": *cursor}
@@ -3210,9 +3207,7 @@ func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRem
 		if rawArguments == nil {
 			return nil, fmt.Errorf("--json must be a JSON object")
 		}
-		for name, value := range rawArguments {
-			arguments[name] = value
-		}
+		maps.Copy(arguments, rawArguments)
 	}
 	properties := mcpRemoteSchemaProperties(tool.InputSchema)
 	for name := range properties {
@@ -3294,9 +3289,7 @@ func mcpRemoteDefaultArgumentsForTool(defaultArguments map[string]any, schema ma
 
 func mcpRemoteMergeDefaultArguments(arguments map[string]any, defaultArguments map[string]any, schema map[string]any) map[string]any {
 	merged := mcpRemoteDefaultArgumentsForTool(defaultArguments, schema)
-	for name, value := range arguments {
-		merged[name] = value
-	}
+	maps.Copy(merged, arguments)
 	return merged
 }
 

@@ -1245,7 +1245,6 @@ type connectUI struct {
 	interactive bool
 	color       bool
 	active      bool
-	frame       int
 }
 
 type semanticTone string
@@ -1297,17 +1296,6 @@ func (ui *connectUI) done(format string, args ...any) {
 	}
 	ui.stop()
 	fmt.Fprintf(ui.w, "%s %s\n", ui.marker(toneSuccess, "+"), fmt.Sprintf(format, args...))
-}
-
-func (ui *connectUI) spin(message string) {
-	if !ui.interactive {
-		return
-	}
-	frames := []string{"|", "/", "-", "\\"}
-	frame := frames[ui.frame%len(frames)]
-	ui.frame++
-	ui.active = true
-	fmt.Fprintf(ui.w, "\r%s %s", ui.marker(toneInfo, frame), message)
 }
 
 func (ui *connectUI) stop() {
