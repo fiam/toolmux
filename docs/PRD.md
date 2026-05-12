@@ -31,11 +31,9 @@ The first release optimizes for a simple connection experience without asking us
 2. No team-shared connections.
 3. No scheduled cloud workflows or background jobs.
 4. No native workspace bot automation by default.
-5. No unrestricted Google Drive indexing/search in the initial release, because broad Drive scopes are restricted and increase verification/compliance burden.
-6. No Gmail inbox search, message body reads, mailbox modification, forwarding, or admin settings in the initial release, because those scopes are restricted and increase verification/security-assessment burden.
-7. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
-8. No AWS Lambda, DNS, certificate, production secret, or hosted deployment infrastructure in the OSS repo.
-9. No native Notion OAuth integration while Notion has a usable remote MCP
+5. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
+6. No AWS Lambda, DNS, certificate, production secret, or hosted deployment infrastructure in the OSS repo.
+7. No native Notion OAuth integration while Notion has a usable remote MCP
    path; do not ask users or hosted Toolmux operators to register a Notion
    public connection for native commands.
 10. No browser credential harvesting, cookie extraction, or session-token
@@ -209,8 +207,8 @@ Human UX requirements:
 4. Error messages should explain what failed, why it likely failed, the policy/provider detail behind it, and the exact command to retry or inspect.
 5. Common workflows may have ergonomic shortcuts that map to canonical commands.
 6. Shell completion should cover static commands and dynamic provider values
-   such as profiles, Jira projects, Linear teams, remote MCP server names/tool
-   names, and Google accounts.
+   such as profiles, Slack channels, Linear teams, and remote MCP server
+   names/tool names.
 7. Users should be able to define aliases for provider-specific ids so command lines remain readable.
 8. Commands that return web resources should support `--open` to launch the provider URL in a browser.
 
@@ -246,28 +244,18 @@ Terminal presentation contract:
 Human-oriented examples:
 
 ```bash
-toolmux linear mine
-toolmux jira open PROJ-123
+toolmux slack channels_list
+toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
 toolmux mcp catalog --enable notion
 toolmux notion
-toolmux linear issue create --title "Fix login" --dry-run
-toolmux gmail send --to user@example.com --subject "Hi" --preview
+toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
 ```
 
 Discovery commands:
 
 ```bash
-toolmux providers
-toolmux examples linear
-toolmux linear help workflows
 toolmux policy catalog
-```
-
-Alias commands:
-
-```bash
-toolmux alias set jira.default OPS
-toolmux alias ls
+toolmux schema
 ```
 
 Optional later UX:
@@ -294,9 +282,6 @@ toolmux status notion
 toolmux doctor
 toolmux remove notion
 ```
-
-`google-docs` and `google-drive` may be supported as aliases, but they should create or update the same underlying Google connection.
-`gmail` may also be supported as a connection alias, but it should create or update the same underlying Google connection.
 
 Remote MCP add and auth success output should show:
 
@@ -329,8 +314,8 @@ CLI stores tokens locally
 
 Initial providers:
 
-1. Linear.
-2. Google Docs/Drive/Gmail through Google desktop OAuth.
+1. Slack native commands for internal workflows.
+2. Remote MCP catalog entries for providers with adequate MCP servers.
 
 ### toolmuxd Local-Custody OAuth
 
@@ -348,10 +333,9 @@ CLI retrieves bundle once over HTTPS and stores it locally
 toolmuxd deletes the handoff material
 ```
 
-Initial native provider candidates when MCP is insufficient:
+Initial native provider support:
 
-1. Jira.
-2. Google Workspace.
+1. Slack for internal workflows.
 
 toolmuxd must not store provider access tokens or refresh tokens in durable storage.
 
@@ -418,36 +402,47 @@ Out of scope for MVP:
 3. Scraping browser sessions, local browser storage, or copying tokens out of
    provider-owned clients.
 
-### Jira
+### Slack
 
 Auth:
 
-1. toolmuxd-backed Atlassian OAuth 2.0 3LO.
-2. Store `cloudId`, site URL, user account id, scopes, access token, and rotating refresh token locally.
-3. Refresh uses toolmuxd because Atlassian requires the app client secret.
+1. Explicit user-supplied token plus optional cookie header.
+2. User-owned Slack OAuth app with local loopback callback.
+3. toolmuxd-backed Slack OAuth for hosted or self-hosted broker flows.
+4. Store scopes, team metadata, access token, refresh token, and refresh
+   metadata locally.
 
 Candidate scopes:
 
-1. `offline_access`.
-2. `read:jira-work`.
-3. `read:jira-user`.
-4. `write:jira-work` only when create/comment/transition commands are enabled.
+1. `channels:read`, `groups:read`, `im:read`, and `mpim:read`.
+2. `channels:history`, `groups:history`, `im:history`, and `mpim:history`.
+3. `search:read`.
+4. `chat:write` only when send commands are enabled.
 
 MVP commands:
 
 ```bash
-toolmux jira sites ls
-toolmux jira issues list --jql "assignee = currentUser() ORDER BY updated DESC"
-toolmux jira issue get PROJ-123
-toolmux jira issue create --project PROJ --type Task --summary "..."
-toolmux jira comment add PROJ-123 --body "..."
+toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
+toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
+toolmux add slack --auth broker
+toolmux slack channels_list
+toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
+toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
 ```
+
+Slack native command names mirror the Slack MCP server tool set:
+`conversations_history`, `conversations_replies`,
+`conversations_add_message`, `reactions_add`, `reactions_remove`,
+`attachment_get_data`, `conversations_search_messages`,
+`conversations_unreads`, `conversations_mark`, `channels_list`,
+`usergroups_list`, `usergroups_me`, `usergroups_create`,
+`usergroups_update`, `usergroups_users_update`, and `users_search`.
 
 Out of scope for MVP:
 
-1. Jira Data Center OAuth variants.
-2. Jira administration APIs.
-3. Bulk issue mutation.
+1. Browser cookie harvesting or Slack session extraction.
+2. Slack administration APIs.
+3. Bulk message mutation.
 
 ### Linear
 
@@ -478,100 +473,6 @@ Out of scope for MVP:
 2. Customer management.
 3. Webhooks.
 4. Agent actor authorization.
-
-### Google Docs
-
-Auth:
-
-1. Native Google desktop OAuth.
-2. Use narrow scopes first.
-3. Prefer `https://www.googleapis.com/auth/drive.file` for files created, opened, or explicitly selected for Toolmux.
-
-MVP commands:
-
-```bash
-toolmux google docs create --title "..."
-toolmux google docs get <document-id>
-toolmux google docs export <document-id> --format markdown
-toolmux google docs append <document-id> --text "..."
-```
-
-Scope strategy:
-
-1. Start with `drive.file` for Toolmux-created or user-selected docs.
-2. Add `documents.readonly` or `documents` only if the command requires direct Docs API access not covered by `drive.file`.
-3. Defer broad all-docs search until Google verification requirements are understood and accepted.
-
-Out of scope for MVP:
-
-1. Full account-wide Docs search.
-2. Comments/suggestions.
-3. Rich collaborative editing features.
-
-### Google Drive
-
-Auth:
-
-1. Native Google desktop OAuth.
-2. Prefer non-sensitive `drive.file` for least privilege.
-3. Avoid `drive` and `drive.readonly` in MVP because they are restricted scopes.
-
-MVP commands:
-
-```bash
-toolmux google drive upload <path> --parent <folder-id>
-toolmux google drive download <file-id> --output <path>
-toolmux google drive ls --created-by toolmux
-toolmux google drive folder create --name "..."
-```
-
-Scope strategy:
-
-1. Use `drive.file` for files Toolmux creates or the user explicitly selects.
-2. Use `drive.appdata` only for app configuration data if needed.
-3. Defer all-drive search/listing until restricted-scope verification and possible security assessment are handled.
-
-Out of scope for MVP:
-
-1. Whole-Drive indexing.
-2. Shared drive administration.
-3. Permission management beyond files Toolmux creates.
-
-### Gmail
-
-Auth:
-
-1. Native Google desktop OAuth through the shared Google connection.
-2. Use Gmail scopes only when a Gmail command requires them.
-3. Avoid restricted Gmail scopes in MVP.
-
-Candidate scopes:
-
-1. `https://www.googleapis.com/auth/gmail.labels` for listing and editing labels. This is non-sensitive.
-2. `https://www.googleapis.com/auth/gmail.send` for sending email. This is sensitive and requires OAuth verification.
-3. Avoid `gmail.readonly`, `gmail.metadata`, `gmail.modify`, `gmail.compose`, `gmail.settings.basic`, and `gmail.settings.sharing` in MVP because they are restricted.
-
-MVP commands:
-
-```bash
-toolmux gmail labels ls
-toolmux gmail labels create --name "..."
-toolmux gmail send --to user@example.com --subject "..." --body "..."
-```
-
-Scope strategy:
-
-1. Start with `gmail.labels` for read/write label commands.
-2. Request `gmail.send` only when the user runs a send command or explicitly enables Gmail send support.
-3. Defer message listing, search, body reads, attachment reads, drafts, mailbox modification, forwarding, and settings until restricted-scope verification and security-assessment requirements are accepted.
-
-Out of scope for MVP:
-
-1. Inbox/message search.
-2. Message body or attachment reads.
-3. Draft management.
-4. Labeling or archiving messages.
-5. Gmail settings, delegates, forwarding, filters, or admin actions.
 
 ## Cross-Provider Requirements
 
@@ -660,43 +561,32 @@ MVP success:
 
 ## Risks
 
-1. Google verification can block or delay broad Docs/Drive/Gmail features.
-2. Native provider OAuth scope reviews can block or delay useful workflows.
-3. toolmuxd availability affects brokered native refresh flows even though tokens are local.
-4. Provider OAuth policies can change and may require re-review.
-5. Local keychains behave differently in headless Linux and CI environments.
-6. Local policy files are useful guardrails but can be bypassed by users who control their machine or working directory.
-7. Private deployment code can drift from public `toolmuxd` behavior unless artifact versions and compatibility checks are enforced.
+1. Native provider OAuth scope reviews can block or delay useful workflows.
+2. toolmuxd availability affects brokered native refresh flows even though tokens are local.
+3. Provider OAuth policies can change and may require re-review.
+4. Local keychains behave differently in headless Linux and CI environments.
+5. Local policy files are useful guardrails but can be bypassed by users who control their machine or working directory.
+6. Private deployment code can drift from public `toolmuxd` behavior unless artifact versions and compatibility checks are enforced.
 
 ## Open Questions
 
-1. Should Google Docs and Drive be separate top-level commands or grouped under `toolmux google`?
-2. Should Gmail commands be top-level as `toolmux gmail`, grouped under `toolmux google gmail`, or both?
-3. Which providers with MCP support still need a native fallback, and what
+1. Which providers with MCP support still need a native fallback, and what
    product gap justifies that work?
-4. Should Jira write commands be enabled in MVP or gated behind a second auth scope escalation?
-5. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
-6. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
-7. Should aliases be stored per profile, per provider account, or both?
-8. What are the preferred hosted `toolmuxd` domains for production, staging, and local development?
-9. Should hosted Toolmux deploy `toolmuxd` to Lambda as a container image, a wrapped generic image, or a Lambda-specific private image?
+2. Should the default generated policy be `default: deny` for repos and `default: allow` for personal shells?
+3. Which human shortcuts should ship in MVP versus being added after the canonical commands are stable?
+4. Should aliases be stored per profile, per provider account, or both?
+5. What are the preferred hosted `toolmuxd` domains for production, staging, and local development?
+6. Should hosted Toolmux deploy `toolmuxd` to Lambda as a container image, a wrapped generic image, or a Lambda-specific private image?
 
 ## Source References
 
-1. Atlassian Jira OAuth 2.0 3LO: https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
-2. Atlassian Jira OAuth scopes: https://developer.atlassian.com/cloud/jira/platform/scopes-for-oauth-2-3LO-and-forge-apps/
-3. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
-4. Linear GraphQL API: https://linear.app/developers/graphql
-5. Google desktop OAuth: https://developers.google.com/identity/protocols/oauth2/native-app
-6. Google Docs API scopes: https://developers.google.com/workspace/docs/api/auth
-10. Google Drive API scopes: https://developers.google.com/workspace/drive/api/guides/api-specific-auth
-11. Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
-12. Gmail sending guide: https://developers.google.com/gmail/api/guides/sending
-13. Google Workspace API user data and developer policy: https://developers.google.com/gmail/api/policy
-14. Go 1.26 release notes: https://go.dev/doc/go1.26
-15. Go release history: https://go.dev/doc/devel/release
-16. Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
-17. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
-18. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
-19. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html
+1. Linear OAuth 2.0: https://linear.app/developers/oauth-2-0-authentication
+2. Linear GraphQL API: https://linear.app/developers/graphql
+3. Slack API methods: https://api.slack.com/methods
+4. Go 1.26 release notes: https://go.dev/doc/go1.26
+5. Go release history: https://go.dev/doc/devel/release
+6. Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
+7. AWS Lambda container images: https://docs.aws.amazon.com/lambda/latest/dg/go-image.html
+8. AWS Lambda Function URLs: https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html
+9. AWS Secrets Manager with Lambda: https://docs.aws.amazon.com/lambda/latest/dg/with-secrets-manager.html
 20. 99designs Go keyring package: https://pkg.go.dev/github.com/99designs/keyring

@@ -30,10 +30,6 @@ func TestCommandSpecsHaveRequiredFields(t *testing.T) {
 				t.Fatalf("incomplete flag metadata for %s: %#v", spec.ID, flag)
 			}
 		}
-		switch spec.Provider {
-		case "jira", "google", "google-docs", "google-drive", "gmail":
-			t.Fatalf("unimplemented provider command should not be registered: %#v", spec)
-		}
 		if seen[spec.ID] {
 			t.Fatalf("duplicate command spec %s", spec.ID)
 		}
@@ -68,15 +64,13 @@ func TestProviderActionSpecsFlattenTrees(t *testing.T) {
 	}
 }
 
-func TestLookupGoogleAliases(t *testing.T) {
+func TestLookupSlack(t *testing.T) {
 	t.Parallel()
-	for _, id := range []string{"google", "google-docs", "google-drive", "gmail"} {
-		provider, ok := providers.Lookup(id)
-		if !ok {
-			t.Fatalf("expected %s lookup to succeed", id)
-		}
-		if provider.ID != "google" {
-			t.Fatalf("expected google provider for %s, got %s", id, provider.ID)
-		}
+	provider, ok := providers.Lookup("slack")
+	if !ok {
+		t.Fatal("expected slack lookup to succeed")
+	}
+	if provider.ID != "slack" {
+		t.Fatalf("expected slack provider, got %s", provider.ID)
 	}
 }

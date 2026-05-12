@@ -58,10 +58,10 @@ build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
 Ko-built `toolmuxd` image manifest are validated before a release.
 Live-provider tests stay opt-in and are not part of default CI.
 
-Imported remote MCP servers are the primary integration path today. Jira and
-Google provider packages may exist as registration stubs, but they should not
-expose command trees until their provider-owned specs, handlers, fake upstreams,
-and tests are ready.
+Imported remote MCP servers remain the preferred path when a provider already
+ships an adequate MCP server. Do not add native provider registration stubs;
+native providers should register only when their provider-owned specs,
+handlers, fake upstreams, and tests are ready.
 
 Do not add browser credential harvesting, cookie extraction, session-token
 scraping, or provider-policy bypasses to make an MCP server easier to use. For
@@ -255,6 +255,20 @@ When adding or expanding a provider:
 
 For commands that mutate or delete data, include `--dry-run` where useful and
 require explicit confirmation for destructive or broad replacement actions.
+
+Slack is the first native provider command set. Its client facet lives under
+`internal/providers/slack/client`, shared Slack HTTP/OAuth helpers live under
+`internal/providers/slack/slackapi`, and the toolmuxd broker facet lives under
+`internal/providers/slack/broker`. Slack tests must cover direct token+cookie
+auth, user-owned OAuth, brokered OAuth, token refresh, `toolmux add slack`
+flags, add-time `auth.test` validation failures, workspace URL enrichment,
+`toolmux remove slack`, and representative Web API commands against fake
+upstream servers.
+
+For Slack broker testing, configure fake or local upstream endpoints through
+`brokers.Config` in tests instead of environment variables. For deployed
+`toolmuxd`, use `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, optional endpoint
+overrides, and `SLACK_SCOPES`.
 
 ## Local OAuth Testing
 

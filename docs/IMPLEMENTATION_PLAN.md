@@ -38,8 +38,9 @@ internal/providers/           # provider registry and common interfaces
 internal/providers/brokers/   # toolmuxd OAuth/token broker registry
 internal/providers/all/       # client provider side-effect imports
 internal/providers/brokers/all/ # server broker side-effect imports
-internal/providers/jira/
-internal/providers/google/
+internal/providers/slack/client/
+internal/providers/slack/broker/
+internal/providers/slack/slackapi/
 internal/server/              # server HTTP handlers and provider exchanges
 internal/testutil/            # fake OAuth server and provider fixtures
 docs/
@@ -335,7 +336,8 @@ Rules:
 
 ### Native PKCE Flow
 
-Used for Linear and Google Docs/Drive/Gmail when configured.
+Used for native providers such as Slack user-owned OAuth and Linear when
+configured.
 
 Implementation:
 
@@ -351,8 +353,8 @@ The callback HTML should contain no token data.
 
 ### toolmuxd-Backed Local-Custody Flow
 
-Used for native providers that require confidential client secrets, such as
-Jira.
+Used for native providers that require confidential client secrets, such as the
+Slack brokered OAuth path.
 
 toolmuxd OAuth endpoints:
 
@@ -370,12 +372,10 @@ Session creation:
 
 ```json
 {
-  "provider": "jira",
-  "mode": "default",
-  "requested_scopes": [],
-  "cli_public_key": "...",
-  "session_secret_hash": "...",
-  "return_hint": "poll"
+  "provider": "slack",
+  "profile": "default",
+  "account": "default",
+  "scopes": ["channels:read", "chat:write"]
 }
 ```
 
@@ -384,7 +384,7 @@ Session response:
 ```json
 {
   "session_id": "...",
-  "auth_url": "https://api.toolmux.com/oauth/jira/start?session_id=...",
+  "auth_url": "https://api.toolmux.com/oauth/slack/start?session_id=...",
   "expires_at": "2026-05-06T12:01:00Z"
 }
 ```
@@ -524,73 +524,55 @@ Acceptance criteria:
 5. CLI defaults to `https://api.toolmux.com` for toolmuxd and supports
    `TOOLMUX_TOOLMUXD_URL` for local development and self-hosting.
 
-### M3 - Jira
+### M3 - Slack
 
 Deliverables:
 
-1. Atlassian OAuth 3LO toolmuxd exchange.
-2. Atlassian toolmuxd refresh with rotating refresh token handling.
-3. `accessible-resources` lookup and local `cloudId` storage.
-4. Jira provider commands:
+1. Slack explicit token+cookie auth storage.
+2. Slack user-owned OAuth with local loopback callback and refresh.
+3. Slack toolmuxd broker OAuth exchange and refresh.
+4. Slack provider commands:
 
 ```bash
-toolmux jira sites ls
-toolmux jira issues list
-toolmux jira issue get
-toolmux jira issue create
-toolmux jira comment add
+toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
+toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
+toolmux add slack --auth broker
+toolmux slack channels_list
+toolmux slack conversations_search_messages
+toolmux slack conversations_add_message
 ```
 
 Acceptance criteria:
 
-1. Multiple Atlassian sites can be represented under one connection.
-2. The user can choose a default Jira site per profile.
-3. Refresh token rotation is atomic.
-4. Permission errors distinguish missing OAuth scope from missing Jira project permission.
-5. Jira create/comment commands can be denied by resource, action, project key, or account.
+1. Explicit token+cookie auth stores only user-supplied credential material.
+2. User-owned OAuth and brokered OAuth both refresh expired access tokens.
+3. Brokered OAuth uses local custody: toolmuxd only keeps short-lived handoff
+   data and the CLI stores tokens locally.
+4. Slack read and write commands carry provider-owned policy metadata.
+5. Slack command names mirror the Slack MCP server tool set, including
+   conversations, reactions, attachments, user groups, unreads, mark-read, and
+   user search tools.
+6. Fake-upstream E2E tests cover all supported auth modes without live Slack
+   credentials.
 
-### M4 - Google Docs, Google Drive, and Gmail
+### M4 - Native Provider Gaps
 
 Deliverables:
 
-1. Google desktop OAuth provider.
-2. Scope escalation support.
-3. Shared Google connection used by Docs, Drive, and Gmail command groups.
-4. Google Docs commands:
-
-```bash
-toolmux google docs create
-toolmux google docs get
-toolmux google docs export
-toolmux google docs append
-```
-
-5. Google Drive commands:
-
-```bash
-toolmux google drive upload
-toolmux google drive download
-toolmux google drive ls --created-by toolmux
-toolmux google drive folder create
-```
-
-6. Gmail commands:
-
-```bash
-toolmux gmail labels ls
-toolmux gmail labels create
-toolmux gmail send
-```
+1. Add native providers only when an adequate remote MCP path is unavailable or
+   a product requirement justifies a native command surface.
+2. Keep provider-specific auth, command specs, handlers, diagnostics, and
+   broker facets in provider-owned packages.
+3. Use `toolmux add <provider>` and `toolmux remove <provider>` for native
+   connection setup and teardown.
 
 Acceptance criteria:
 
-1. MVP uses narrow Google scopes first, with `drive.file` preferred for Docs/Drive and `gmail.labels` preferred for Gmail label commands.
-2. Commands that require broader scopes fail with a clear explanation instead of silently over-requesting.
-3. Google refresh tokens are saved long-term and refreshed locally.
-4. Broad Drive search is gated as non-MVP unless verification work is complete.
-5. Gmail message search/read/modify commands are gated as non-MVP unless restricted-scope verification and security-assessment requirements are complete.
-6. Gmail send requests `gmail.send` only when the user runs a send command or explicitly enables Gmail send support.
-7. Gmail send can be denied by recipient domain, account, command risk, or action.
+1. No placeholder provider command trees are registered.
+2. All native commands have provider-owned policy metadata and handlers before
+   they are exposed.
+3. Fake-upstream tests cover supported auth and API behavior for each native
+   provider.
 
 ### M5 - Native Provider Gaps
 
@@ -636,9 +618,10 @@ toolmuxd deployment environment variables:
 TOOLMUX_PUBLIC_URL=https://api.toolmux.com
 TOOLMUX_REDIS_URL=redis://...
 
-ATLASSIAN_CLIENT_ID=...
-ATLASSIAN_CLIENT_SECRET=...
-ATLASSIAN_REDIRECT_URI=https://api.toolmux.com/oauth/jira/callback
+SLACK_CLIENT_ID=...
+SLACK_CLIENT_SECRET=...
+SLACK_REDIRECT_URI=https://api.toolmux.com/oauth/slack/callback
+SLACK_SCOPES=channels:read,groups:read,im:read,mpim:read,channels:history,groups:history,im:history,mpim:history,chat:write,reactions:write,files:read,users:read,usergroups:read,usergroups:write,search:read
 ```
 
 CLI configuration:
@@ -650,9 +633,7 @@ profiles:
   default:
     output: table
     defaults:
-      jira_site: null
-      google_account: null
-      gmail_account: null
+      slack_account: default
 ```
 
 ## Testing Strategy
@@ -675,7 +656,7 @@ Integration tests:
 3. In-memory handoff TTL and single-use behavior.
 4. Token refresh rotation races.
 5. Policy denial before credential lookup for representative read, write, send, and remove commands.
-6. Fake Jira, Google Docs, Google Drive, Gmail, and remote MCP servers.
+6. Fake Slack, Linear, and remote MCP servers.
 7. Provider fixtures for success, expired token, revoked token, missing scope, permission denied, rate limit, pagination, malformed JSON, empty response, and 5xx retry behavior.
 8. OAuth callback and toolmuxd handoff tests that run fully offline.
 9. Contract tests ensuring provider action specs, command args, flags, required
@@ -712,8 +693,8 @@ Lint and quality gates:
 ## Release Plan
 
 1. Publish alpha builds for contributors with remote MCP imports first.
-2. Add Jira and Google Workspace commands only where MCP does not cover the
-   required workflows.
+2. Add native provider commands only where MCP does not cover the required
+   workflows.
 3. Expand remote MCP catalog coverage and command ergonomics.
 4. Publish signed `toolmux` binaries and Homebrew tap updates.
 5. Publish generic `toolmuxd` container images.
@@ -724,9 +705,9 @@ Lint and quality gates:
 ## Operational Notes
 
 Hosted toolmuxd is required for zero-manual-key native providers that need
-confidential client secrets, such as Jira. Self-hosters can run toolmuxd, but
-they must create their own provider OAuth apps and supply client secrets. The
-server code can be open source; provider client secrets cannot.
+confidential client secrets. Self-hosters can run toolmuxd, but they must
+create their own provider OAuth apps and supply client secrets. The server code
+can be open source; provider client secrets cannot.
 
 toolmuxd should be deployable without Postgres for the initial release. A single-node in-memory handoff store is sufficient for MVP and local development. Redis or another shared handoff store should wait until we have a separate threat model and operational reason for multi-instance handoff storage.
 
@@ -742,10 +723,9 @@ Recommended exact order:
 1. M0 repo/tooling.
 2. M1 CLI core and credentials.
 3. M2 toolmuxd and remote MCP imports.
-4. M3 Jira.
-5. M4 Google Docs/Drive/Gmail.
-6. M5 native provider gaps not covered by MCP.
-7. M6 hardening and beta.
+4. M3 Slack.
+5. M4 native provider gaps not covered by MCP.
+6. M5 hardening and beta.
 
 This order proves the hardest foundation early: toolmuxd-backed local-custody
 OAuth.

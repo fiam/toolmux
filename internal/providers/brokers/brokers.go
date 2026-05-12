@@ -21,6 +21,7 @@ type Config struct {
 	RevokeURL   string
 	RedirectURI string
 	APIVersion  string
+	Scopes      []string
 	HTTPClient  *http.Client
 }
 
@@ -31,7 +32,7 @@ type RevokeResult struct {
 
 type OAuthProvider interface {
 	RequireConfig() error
-	AuthURL(redirectURI, state string) (string, error)
+	AuthURL(redirectURI, state string, scopes []string) (string, error)
 	ExchangeCode(ctx context.Context, code, redirectURI string) (credentials.OAuthTokens, error)
 	Refresh(ctx context.Context, refreshToken string) (credentials.OAuthTokens, error)
 	Revoke(ctx context.Context, token string) (RevokeResult, error)
@@ -48,10 +49,12 @@ type Descriptor struct {
 	RevokeURLEnv      string
 	RedirectURIEnv    string
 	APIVersionEnv     string
+	ScopesEnv         string
 	DefaultAuthURL    string
 	DefaultTokenURL   string
 	DefaultRevokeURL  string
 	DefaultAPIVersion string
+	DefaultScopes     []string
 	NewOAuthProvider  func(Config) OAuthProvider
 }
 
@@ -124,6 +127,9 @@ func (d Descriptor) CompleteConfig(config Config, httpClient *http.Client) Confi
 	if config.APIVersion == "" {
 		config.APIVersion = firstNonEmpty(os.Getenv(d.APIVersionEnv), d.DefaultAPIVersion)
 	}
+	if len(config.Scopes) == 0 {
+		config.Scopes = splitScopes(firstNonEmpty(os.Getenv(d.ScopesEnv), strings.Join(d.DefaultScopes, ",")))
+	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = httpClient
 	}
@@ -148,6 +154,7 @@ func normalizeDescriptor(descriptor Descriptor) Descriptor {
 		&descriptor.RevokeURLEnv,
 		&descriptor.RedirectURIEnv,
 		&descriptor.APIVersionEnv,
+		&descriptor.ScopesEnv,
 	}
 	for _, env := range envs {
 		*env = strings.TrimSpace(*env)
@@ -161,6 +168,7 @@ func normalizeDescriptor(descriptor Descriptor) Descriptor {
 	for _, value := range defaults {
 		*value = strings.TrimSpace(*value)
 	}
+	descriptor.DefaultScopes = splitScopes(strings.Join(descriptor.DefaultScopes, ","))
 	return descriptor
 }
 
@@ -181,4 +189,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func splitScopes(value string) []string {
+	seen := map[string]bool{}
+	var scopes []string
+	for _, field := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	}) {
+		field = strings.TrimSpace(field)
+		if field == "" || seen[field] {
+			continue
+		}
+		seen[field] = true
+		scopes = append(scopes, field)
+	}
+	return slices.Clip(scopes)
 }
