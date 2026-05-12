@@ -537,7 +537,9 @@ Deliverables:
 toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
 toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
 toolmux add slack --auth broker
+toolmux slack auth_test
 toolmux slack channels_list
+toolmux slack conversations_history
 toolmux slack conversations_search_messages
 toolmux slack conversations_add_message
 ```
@@ -549,9 +551,9 @@ Acceptance criteria:
 3. Brokered OAuth uses local custody: toolmuxd only keeps short-lived handoff
    data and the CLI stores tokens locally.
 4. Slack read and write commands carry provider-owned policy metadata.
-5. Slack command names mirror the Slack MCP server tool set, including
-   conversations, reactions, attachments, user groups, unreads, mark-read, and
-   user search tools.
+5. Slack command names mirror the Slack MCP server tool set and Slack Web API
+   method names, including auth identity, conversations, reactions,
+   attachments, user groups, unreads, mark-read, and user search tools.
 6. Fake-upstream E2E tests cover all supported auth modes without live Slack
    credentials.
 

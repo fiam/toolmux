@@ -60,6 +60,64 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	upstream.assertDirectCookie(t)
 }
 
+func TestSlackAuthTestReturnsCurrentUser(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeSlackUpstream(t)
+	store := credentials.NewMemoryStore()
+	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
+
+	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "auth_test")
+	toolmuxtest.AssertContains(t, out, `"user_id": "U123"`)
+	toolmuxtest.AssertContains(t, out, `"user": "toolmux"`)
+}
+
+func TestSlackHistoryAndRepliesSupportTimeBounds(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeSlackUpstream(t)
+	store := credentials.NewMemoryStore()
+	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
+
+	out := toolmuxtest.Run(t, deps,
+		"--output", "json",
+		"slack", "conversations_history",
+		"--channel_id", "C123",
+		"--oldest", "1710000000.000000",
+		"--latest", "1710003600.000000",
+		"--inclusive",
+		"--limit", "15",
+	)
+	toolmuxtest.AssertContains(t, out, "bounded update")
+	upstream.assertHistoryQuery(t, url.Values{
+		"channel":   []string{"C123"},
+		"oldest":    []string{"1710000000.000000"},
+		"latest":    []string{"1710003600.000000"},
+		"inclusive": []string{"true"},
+		"limit":     []string{"15"},
+	})
+
+	out = toolmuxtest.Run(t, deps,
+		"--output", "json",
+		"slack", "conversations_replies",
+		"--channel_id", "C123",
+		"--thread_ts", "1710000100.000000",
+		"--oldest", "1710000100.000000",
+		"--latest", "1710003600.000000",
+		"--inclusive",
+		"--limit", "12",
+	)
+	toolmuxtest.AssertContains(t, out, "bounded reply")
+	upstream.assertRepliesQuery(t, url.Values{
+		"channel":   []string{"C123"},
+		"ts":        []string{"1710000100.000000"},
+		"oldest":    []string{"1710000100.000000"},
+		"latest":    []string{"1710003600.000000"},
+		"inclusive": []string{"true"},
+		"limit":     []string{"12"},
+	})
+}
+
 func TestSlackAddFailsWhenAuthTestFails(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
@@ -182,19 +240,22 @@ func TestSlackSendDryRunDoesNotReadCredentials(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, `"channel": "C123"`)
 }
 
-func TestSlackAuthSubcommandsAreNotExposed(t *testing.T) {
+func TestSlackAuthSetupSubcommandsAreNotExposed(t *testing.T) {
 	t.Parallel()
 	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
 
 	out := toolmuxtest.Run(t, deps, "slack", "--help")
-	if strings.Contains(out, "auth") {
-		t.Fatalf("slack help should not expose auth subcommands: %s", out)
+	for _, command := range []string{"auth_login", "auth_set", "broker_login"} {
+		if strings.Contains(out, command) {
+			t.Fatalf("slack help should not expose %s subcommand: %s", command, out)
+		}
 	}
 }
 
 func TestSlackExposesSlackMCPServerToolNames(t *testing.T) {
 	t.Parallel()
 	want := []string{
+		"slack.auth_test",
 		"slack.conversations_history",
 		"slack.conversations_replies",
 		"slack.conversations_add_message",
@@ -284,6 +345,8 @@ type fakeSlackUpstream struct {
 	userRefresh     bool
 	brokerRefresh   bool
 	lastSearchToken string
+	historyQuery    url.Values
+	repliesQuery    url.Values
 }
 
 func newFakeSlackUpstream(t *testing.T) *fakeSlackUpstream {
@@ -303,6 +366,10 @@ func newFakeSlackUpstream(t *testing.T) *fakeSlackUpstream {
 			writeSlackJSON(w, map[string]any{"ok": true, "revoked": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.list":
 			upstream.conversations(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.history":
+			upstream.history(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.replies":
+			upstream.replies(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/search.messages":
 			upstream.search(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/chat.postMessage":
@@ -475,6 +542,60 @@ func (s *fakeSlackUpstream) conversations(t *testing.T, w http.ResponseWriter, r
 	})
 }
 
+func (s *fakeSlackUpstream) history(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeDirectRead(t, w, r) {
+		return
+	}
+	s.mu.Lock()
+	s.historyQuery = cloneValues(r.URL.Query())
+	s.mu.Unlock()
+	writeSlackJSON(w, map[string]any{
+		"ok": true,
+		"messages": []map[string]any{{
+			"type": "message",
+			"user": "U234",
+			"text": "bounded update",
+			"ts":   "1710000300.000000",
+		}},
+	})
+}
+
+func (s *fakeSlackUpstream) replies(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeDirectRead(t, w, r) {
+		return
+	}
+	s.mu.Lock()
+	s.repliesQuery = cloneValues(r.URL.Query())
+	s.mu.Unlock()
+	writeSlackJSON(w, map[string]any{
+		"ok": true,
+		"messages": []map[string]any{{
+			"type":      "message",
+			"user":      "U234",
+			"text":      "bounded reply",
+			"ts":        "1710000301.000000",
+			"thread_ts": r.URL.Query().Get("ts"),
+		}},
+	})
+}
+
+func (s *fakeSlackUpstream) authorizeDirectRead(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
+	t.Helper()
+	if bearerToken(r) != "xoxc-direct" {
+		http.Error(w, "unexpected history token", http.StatusUnauthorized)
+		t.Errorf("unexpected read token %q", bearerToken(r))
+		return false
+	}
+	if r.Header.Get("Cookie") != "d=xoxd" {
+		http.Error(w, "missing cookie", http.StatusUnauthorized)
+		t.Errorf("expected direct cookie, got %q", r.Header.Get("Cookie"))
+		return false
+	}
+	return true
+}
+
 func (s *fakeSlackUpstream) search(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	t.Helper()
 	token := bearerToken(r)
@@ -551,6 +672,37 @@ func (s *fakeSlackUpstream) assertBrokerRefresh(t *testing.T) {
 	if !s.brokerRefresh {
 		t.Fatal("expected broker OAuth refresh")
 	}
+}
+
+func (s *fakeSlackUpstream) assertHistoryQuery(t *testing.T, want url.Values) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assertQueryValues(t, s.historyQuery, want)
+}
+
+func (s *fakeSlackUpstream) assertRepliesQuery(t *testing.T, want url.Values) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assertQueryValues(t, s.repliesQuery, want)
+}
+
+func assertQueryValues(t *testing.T, got, want url.Values) {
+	t.Helper()
+	for key, values := range want {
+		if got.Get(key) != values[0] {
+			t.Fatalf("expected query %s=%q, got %q in %v", key, values[0], got.Get(key), got)
+		}
+	}
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, item := range values {
+		cloned[key] = append([]string(nil), item...)
+	}
+	return cloned
 }
 
 func oauthResponse(accessToken, refreshToken string, expiresIn int) map[string]any {

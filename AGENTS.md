@@ -367,6 +367,9 @@ header values passed to `toolmux add slack`; do not add browser cookie
 harvesting or Slack session extraction helpers. Slack auth setup and legacy
 credential migration must use `auth.test` to validate credentials and store the
 returned workspace URL for workspace-specific API calls.
+Expose Slack identity through provider-owned read-only actions such as
+`slack.auth_test`; do not add special self-DM shortcuts when existing Slack
+message commands can address a user or configured conversation.
 
 Policy checks must run before credential reads, token refresh, or provider API
 calls.

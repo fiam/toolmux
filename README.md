@@ -125,7 +125,9 @@ SLACK_SCOPES
 Common Slack commands:
 
 ```bash
+toolmux slack auth_test
 toolmux slack channels_list --channel_types public_channel,private_channel
+toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000 --limit 50
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
@@ -133,8 +135,8 @@ toolmux status slack
 toolmux remove slack
 ```
 
-Native Slack command names mirror the Slack MCP server tool set:
-`conversations_history`, `conversations_replies`,
+Native Slack command names use Slack MCP-style and Slack Web API method names:
+`auth_test`, `conversations_history`, `conversations_replies`,
 `conversations_add_message`, `reactions_add`, `reactions_remove`,
 `attachment_get_data`, `conversations_search_messages`,
 `conversations_unreads`, `conversations_mark`, `channels_list`,

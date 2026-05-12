@@ -66,20 +66,27 @@ func Descriptor() providers.Provider {
 		BaseURLEnv:     "TOOLMUX_SLACK_API_URL",
 		DefaultBaseURL: slackapi.DefaultAPIBaseURL,
 		Tree: actions.Group("slack",
-			actions.Short("Operate Slack"),
+			actions.Short("Use Slack"),
 			actions.Children(
+				slackTool("auth_test", "Show Slack auth identity", "connection", actions.VerbRead, actions.EffectRead),
 				slackTool("conversations_history", "Get Slack conversation history", "message", actions.VerbRead, actions.EffectRead,
 					actions.StringFlag("channel_id", "", "Slack channel, DM, or MPIM ID"),
 					actions.BoolFlag("include_activity_messages", false, "include join, leave, and other activity messages"),
 					actions.StringFlag("cursor", "", "Slack pagination cursor"),
-					actions.StringFlag("limit", "1d", "time range or maximum messages to fetch"),
+					actions.StringFlag("oldest", "", "only include messages after this Slack timestamp"),
+					actions.StringFlag("latest", "", "only include messages before this Slack timestamp"),
+					actions.BoolFlag("inclusive", false, "include messages matching oldest or latest timestamps"),
+					actions.StringFlag("limit", "100", "maximum messages to fetch"),
 				),
 				slackTool("conversations_replies", "Get Slack thread replies", "message", actions.VerbRead, actions.EffectRead,
 					actions.StringFlag("channel_id", "", "Slack channel, DM, or MPIM ID"),
 					actions.StringFlag("thread_ts", "", "Slack thread timestamp"),
 					actions.BoolFlag("include_activity_messages", false, "include join, leave, and other activity messages"),
 					actions.StringFlag("cursor", "", "Slack pagination cursor"),
-					actions.StringFlag("limit", "1d", "time range or maximum replies to fetch"),
+					actions.StringFlag("oldest", "", "only include replies after this Slack timestamp"),
+					actions.StringFlag("latest", "", "only include replies before this Slack timestamp"),
+					actions.BoolFlag("inclusive", false, "include replies matching oldest or latest timestamps"),
+					actions.StringFlag("limit", "100", "maximum replies to fetch"),
 				),
 				slackTool("conversations_add_message", "Send a Slack message", "message", actions.VerbSend, actions.EffectWrite,
 					actions.StringFlag("channel_id", "", "Slack channel, DM, or MPIM ID"),
@@ -174,6 +181,7 @@ func Descriptor() providers.Provider {
 			),
 		),
 		Handlers: map[string]actions.Handler{
+			"slack.auth_test":                     handleAuthTest,
 			"slack.conversations_history":         handleConversationsHistory,
 			"slack.conversations_replies":         handleConversationsReplies,
 			"slack.conversations_add_message":     handleConversationsAddMessage,
@@ -400,6 +408,18 @@ func handleBrokerLogin(exec actions.Context, inv actions.Invocation) (any, error
 		return nil, err
 	}
 	return authResult{Message: "stored brokered Slack OAuth token for account " + account(inv)}, nil
+}
+
+func handleAuthTest(exec actions.Context, inv actions.Invocation) (any, error) {
+	client, err := slackClient(exec, inv)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.AuthTest(exec.Context)
+	if err != nil {
+		return nil, err
+	}
+	return authTestResult(response), nil
 }
 
 func handleConversationsHistory(exec actions.Context, inv actions.Invocation) (any, error) {
@@ -1300,6 +1320,21 @@ func (result actionResult) Text() string {
 	return result.Message
 }
 
+type authTestResult slackapi.AuthTestResponse
+
+func (result authTestResult) Table(opts output.Options) output.Table {
+	return output.Table{
+		Headers: []string{"Team", "Team ID", "User", "User ID", "URL"},
+		Rows: [][]string{{
+			firstNonEmpty(result.Team, "-"),
+			firstNonEmpty(result.TeamID, "-"),
+			firstNonEmpty(result.User, "-"),
+			firstNonEmpty(result.UserID, "-"),
+			firstNonEmpty(result.URL, "-"),
+		}},
+	}
+}
+
 type conversationMessagesResult struct {
 	ChannelID   string             `json:"channel_id" yaml:"channel_id"`
 	ThreadTS    string             `json:"thread_ts,omitempty" yaml:"thread_ts,omitempty"`
@@ -1543,6 +1578,11 @@ func conversationMessageValues(inv actions.Invocation) url.Values {
 	values := url.Values{}
 	if cursor := strings.TrimSpace(inv.String("cursor")); cursor != "" {
 		values.Set("cursor", cursor)
+	}
+	setIfNotEmpty(values, "oldest", inv.String("oldest"))
+	setIfNotEmpty(values, "latest", inv.String("latest"))
+	if inv.Bool("inclusive") {
+		values.Set("inclusive", "true")
 	}
 	values.Set("limit", strconv.Itoa(parseSlackLimit(inv.String("limit"), 100)))
 	return values

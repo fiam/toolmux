@@ -425,13 +425,15 @@ MVP commands:
 toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
 toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
 toolmux add slack --auth broker
+toolmux slack auth_test
 toolmux slack channels_list
+toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
 ```
 
-Slack native command names mirror the Slack MCP server tool set:
-`conversations_history`, `conversations_replies`,
+Slack native command names use Slack MCP-style and Slack Web API method names:
+`auth_test`, `conversations_history`, `conversations_replies`,
 `conversations_add_message`, `reactions_add`, `reactions_remove`,
 `attachment_get_data`, `conversations_search_messages`,
 `conversations_unreads`, `conversations_mark`, `channels_list`,
