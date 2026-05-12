@@ -175,8 +175,7 @@ Fake upstreams should emulate:
 2. Token refresh, refresh rotation, revocation, and missing scopes.
 3. Provider API success, pagination, permission denied, rate limits, malformed
    responses, empty responses, 5xx errors, and retries.
-4. Jira, Linear, Google Docs, Google Drive, Gmail, and other behavior needed by
-   implemented native commands.
+4. Slack, Linear, and other behavior needed by implemented native commands.
 5. Remote MCP OAuth protected-resource metadata, authorization-server metadata,
    dynamic client registration, loopback callbacks, resource parameters, PKCE,
    and refresh behavior.
@@ -195,6 +194,11 @@ live with the provider package, usually as external tests such as
 `internal/providers/<provider>/client` package `client_test`. Use
 `internal/testutil/toolmuxtest` for command execution helpers instead of
 creating provider-specific `runToolmux` wrappers.
+
+Slack native-provider tests must exercise all supported auth models against
+fake upstreams: explicit token+cookie storage, user-owned OAuth, brokered
+OAuth through `toolmuxd`, token refresh, and representative Web API commands.
+Do not use live Slack workspaces as the default correctness signal.
 
 Tests that need a real toolmuxd instance should use
 `internal/testutil/toolmuxdtest` instead of constructing `server.NewHandler`
@@ -358,6 +362,11 @@ provider web-app bearer tokens are also credential material. Do not read,
 extract, transform, sync, print, or store them unless the provider documents
 that flow for application integration and the user supplies the credential
 explicitly through a supported Toolmux auth command.
+Slack token+cookie auth is limited to explicit user-supplied token and cookie
+header values passed to `toolmux add slack`; do not add browser cookie
+harvesting or Slack session extraction helpers. Slack auth setup and legacy
+credential migration must use `auth.test` to validate credentials and store the
+returned workspace URL for workspace-specific API calls.
 
 Policy checks must run before credential reads, token refresh, or provider API
 calls.

@@ -17,9 +17,9 @@ Use Toolmux when you want to:
 5. Use `--read-only` and local policy files to block writes before auth is
    loaded.
 
-Toolmux is early software. Today it focuses on remote MCP imports and agent
-setup for Codex, Claude Code, and Gemini CLI. Native provider command sets are
-not currently shipped as the primary integration path.
+Toolmux is early software. Today it focuses on remote MCP imports, agent setup
+for Codex, Claude Code, and Gemini CLI, and a native Slack command set for
+internal workflows.
 
 ## Install
 
@@ -66,6 +66,80 @@ export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
 ```
 
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+
+## Native Slack
+
+Slack is available as a native provider under `toolmux slack`. It supports
+three auth models:
+
+1. User-supplied token plus an optional explicit cookie header.
+2. A user-owned Slack OAuth app with a local loopback callback.
+3. Brokered OAuth through `toolmuxd`.
+
+Store a user-supplied token and cookie:
+
+```bash
+toolmux add slack \
+  --token-env SLACK_TOKEN \
+  --cookie-env SLACK_COOKIE
+```
+
+Toolmux never reads browser cookie stores or extracts Slack session material.
+The cookie path only stores the exact cookie header you provide through a
+supported `toolmux add slack` command. `toolmux add slack` validates Slack
+credentials with `auth.test` before storing them, records the returned
+workspace URL, and uses that workspace-specific API base for later Slack calls.
+
+Authorize with your own Slack OAuth app:
+
+```bash
+toolmux add slack \
+  --auth oauth \
+  --client-id "$SLACK_CLIENT_ID" \
+  --client-secret-env SLACK_CLIENT_SECRET \
+  --scope channels:read,chat:write,search:read
+```
+
+Authorize through the Toolmux broker:
+
+```bash
+toolmux add slack --auth broker --scope channels:read,chat:write,search:read
+```
+
+Omit `--scope` to use Toolmux's Slack defaults, which cover channel and DM
+history, posting, reactions, attachment reads, user search, user groups, and
+Slack search.
+
+The Slack broker facet in `toolmuxd` uses these environment variables:
+
+```text
+SLACK_CLIENT_ID
+SLACK_CLIENT_SECRET
+SLACK_AUTH_URL
+SLACK_TOKEN_URL
+SLACK_REVOKE_URL
+SLACK_REDIRECT_URI
+SLACK_SCOPES
+```
+
+Common Slack commands:
+
+```bash
+toolmux slack channels_list --channel_types public_channel,private_channel
+toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
+toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
+toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
+toolmux status slack
+toolmux remove slack
+```
+
+Native Slack command names mirror the Slack MCP server tool set:
+`conversations_history`, `conversations_replies`,
+`conversations_add_message`, `reactions_add`, `reactions_remove`,
+`attachment_get_data`, `conversations_search_messages`,
+`conversations_unreads`, `conversations_mark`, `channels_list`,
+`usergroups_list`, `usergroups_me`, `usergroups_create`,
+`usergroups_update`, `usergroups_users_update`, and `users_search`.
 
 ## Output For Humans And Scripts
 

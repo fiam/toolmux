@@ -26,6 +26,7 @@ import (
 	"github.com/fiam/toolmux/internal/credentials"
 	"github.com/fiam/toolmux/internal/output"
 	"github.com/fiam/toolmux/internal/policy"
+	"github.com/fiam/toolmux/internal/providers"
 	"github.com/fiam/toolmux/internal/version"
 )
 
@@ -196,12 +197,16 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 	var transport string
 	var noSync bool
 	var verboseHTTP bool
+	var native nativeToolboxAddOptions
 	cmd := &cobra.Command{
 		Use:   "add <toolbox-or-url>",
 		Short: "Add a toolbox",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := strings.TrimSpace(args[0])
+			if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
+				return err
+			}
 			name, server, err := resolveToolboxAddTarget(target, nameFlag, transport)
 			if err != nil {
 				return err
@@ -269,8 +274,108 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "", "remote MCP transport: streamable-http")
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "register without immediately syncing tools")
 	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
+	addNativeToolboxAddFlags(cmd, &native)
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
+}
+
+type nativeToolboxAddOptions struct {
+	Account         string
+	Auth            string
+	Token           string
+	TokenEnv        string
+	TokenFile       string
+	Cookie          string
+	CookieEnv       string
+	CookieFile      string
+	TeamID          string
+	Workspace       string
+	ClientID        string
+	ClientSecret    string
+	ClientSecretEnv string
+	AuthURL         string
+	TokenURL        string
+	Scopes          []string
+	UserScopes      []string
+	TokenSource     string
+	RedirectPort    int
+	TimeoutSeconds  int
+}
+
+func addNativeToolboxAddFlags(cmd *cobra.Command, opts *nativeToolboxAddOptions) {
+	cmd.Flags().StringVar(&opts.Account, "account", "default", "native provider account name")
+	cmd.Flags().StringVar(&opts.Auth, "auth", "", "native provider auth mode: broker, oauth, token, or token-cookie")
+	cmd.Flags().StringVar(&opts.Token, "token", "", "provider access token to store")
+	cmd.Flags().StringVar(&opts.TokenEnv, "token-env", "", "environment variable containing the provider access token")
+	cmd.Flags().StringVar(&opts.TokenFile, "token-file", "", "file containing the provider access token")
+	cmd.Flags().StringVar(&opts.Cookie, "cookie", "", "provider cookie header to store with the token")
+	cmd.Flags().StringVar(&opts.CookieEnv, "cookie-env", "", "environment variable containing the provider cookie header")
+	cmd.Flags().StringVar(&opts.CookieFile, "cookie-file", "", "file containing the provider cookie header")
+	cmd.Flags().StringVar(&opts.TeamID, "team-id", "", "provider team or workspace ID to store as metadata")
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "provider workspace name to store as metadata")
+	cmd.Flags().StringVar(&opts.ClientID, "client-id", "", "OAuth client ID")
+	cmd.Flags().StringVar(&opts.ClientSecret, "client-secret", "", "OAuth client secret")
+	cmd.Flags().StringVar(&opts.ClientSecretEnv, "client-secret-env", "", "environment variable containing the OAuth client secret")
+	cmd.Flags().StringVar(&opts.AuthURL, "auth-url", "", "OAuth authorization endpoint override")
+	cmd.Flags().StringVar(&opts.TokenURL, "token-url", "", "OAuth token endpoint override")
+	cmd.Flags().StringSliceVar(&opts.Scopes, "scope", nil, "OAuth scopes to request; comma-separated or repeatable")
+	cmd.Flags().StringSliceVar(&opts.UserScopes, "user-scope", nil, "OAuth user scopes to request; comma-separated or repeatable")
+	cmd.Flags().StringVar(&opts.TokenSource, "token-source", "auto", "OAuth token source to store: auto, bot, or user")
+	cmd.Flags().IntVar(&opts.RedirectPort, "redirect-port", 0, "loopback OAuth callback port, or 0 for a random port")
+	cmd.Flags().IntVar(&opts.TimeoutSeconds, "timeout-seconds", 120, "seconds to wait for OAuth completion")
+}
+
+func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native nativeToolboxAddOptions, args []string) (bool, error) {
+	provider, ok := providers.Lookup(target)
+	if !ok || provider.AddHandler == nil {
+		return false, nil
+	}
+	if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
+		return true, err
+	}
+	store, err := opts.credentials()
+	if err != nil {
+		return true, err
+	}
+	execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
+	execCtx.Interactive = interactiveCommand(cmd, opts)
+	if execCtx.OpenBrowser == nil && execCtx.Interactive {
+		execCtx.OpenBrowser = openURL
+	}
+	result, err := provider.AddHandler(execCtx, actions.Invocation{
+		Spec:  toolboxAddSpec(),
+		Args:  append([]string(nil), args...),
+		Flags: nativeToolboxAddFlagValues(native),
+	})
+	if err != nil {
+		return true, err
+	}
+	return true, writeActionResult(cmd, opts, execCtx, result)
+}
+
+func nativeToolboxAddFlagValues(opts nativeToolboxAddOptions) map[string]any {
+	return map[string]any{
+		"account":           opts.Account,
+		"auth":              opts.Auth,
+		"token":             opts.Token,
+		"token-env":         opts.TokenEnv,
+		"token-file":        opts.TokenFile,
+		"cookie":            opts.Cookie,
+		"cookie-env":        opts.CookieEnv,
+		"cookie-file":       opts.CookieFile,
+		"team-id":           opts.TeamID,
+		"workspace":         opts.Workspace,
+		"client-id":         opts.ClientID,
+		"client-secret":     opts.ClientSecret,
+		"client-secret-env": opts.ClientSecretEnv,
+		"auth-url":          opts.AuthURL,
+		"token-url":         opts.TokenURL,
+		"scope":             append([]string(nil), opts.Scopes...),
+		"user-scope":        append([]string(nil), opts.UserScopes...),
+		"token-source":      opts.TokenSource,
+		"redirect-port":     opts.RedirectPort,
+		"timeout-seconds":   opts.TimeoutSeconds,
+	}
 }
 
 func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mcpRemoteServer, error) {
@@ -438,12 +543,16 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 
 func toolboxRemoveCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
+	var nativeAccount string
 	cmd := &cobra.Command{
 		Use:     "remove <toolbox> [toolbox...]",
 		Aliases: []string{"rm"},
 		Short:   "Remove a toolbox",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if handled, err := removeNativeToolboxes(cmd, opts, args, nativeAccount); handled || err != nil {
+				return err
+			}
 			names, err := cleanMCPRemoteNames(args)
 			if err != nil {
 				return err
@@ -480,8 +589,50 @@ func toolboxRemoveCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&nativeAccount, "account", "default", "native provider account name")
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
+}
+
+func removeNativeToolboxes(cmd *cobra.Command, opts *options, args []string, account string) (bool, error) {
+	var native []providers.Provider
+	for _, arg := range args {
+		provider, ok := providers.Lookup(arg)
+		if !ok || provider.RemoveHandler == nil {
+			continue
+		}
+		native = append(native, provider)
+	}
+	if len(native) == 0 {
+		return false, nil
+	}
+	if len(native) != len(args) {
+		return true, fmt.Errorf("cannot remove native and remote toolboxes in one command")
+	}
+	if err := authorize(cmd, opts, toolboxRemoveSpec(), args); err != nil {
+		return true, err
+	}
+	store, err := opts.credentials()
+	if err != nil {
+		return true, err
+	}
+	for i, provider := range native {
+		execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
+		result, err := provider.RemoveHandler(execCtx, actions.Invocation{
+			Spec: toolboxRemoveSpec(),
+			Args: []string{args[i]},
+			Flags: map[string]any{
+				"account": account,
+			},
+		})
+		if err != nil {
+			return true, err
+		}
+		if err := writeActionResult(cmd, opts, execCtx, result); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
 }
 
 type mcpRemoteRemovalPlan struct {

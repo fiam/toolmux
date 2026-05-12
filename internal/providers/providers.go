@@ -17,6 +17,8 @@ type Provider struct {
 	Aliases            []string
 	Tree               actions.Spec
 	Handlers           map[string]actions.Handler
+	AddHandler         actions.Handler
+	RemoveHandler      actions.Handler
 	Diagnostics        actions.DiagnosticsFunc
 	DefaultPermissions func() []string
 	BaseURLEnv         string

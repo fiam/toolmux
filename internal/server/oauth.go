@@ -57,6 +57,7 @@ type oauthSession struct {
 	Provider    string
 	State       string
 	RedirectURI string
+	Scopes      []string
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
 	Status      string
@@ -66,9 +67,10 @@ type oauthSession struct {
 }
 
 type createSessionRequest struct {
-	Provider string `json:"provider"`
-	Profile  string `json:"profile,omitempty"`
-	Account  string `json:"account,omitempty"`
+	Provider string   `json:"provider"`
+	Profile  string   `json:"profile,omitempty"`
+	Account  string   `json:"account,omitempty"`
+	Scopes   []string `json:"scopes,omitempty"`
 }
 
 type refreshRequest struct {
@@ -172,6 +174,7 @@ func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
 		Provider:    string(provider.descriptor.ID),
 		State:       state,
 		RedirectURI: b.redirectURI(r, provider),
+		Scopes:      cleanOAuthSessionScopes(request.Scopes),
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(b.config.SessionTTL),
 		Status:      "pending",
@@ -242,7 +245,7 @@ func (b *oauthBroker) startOAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "expired", "OAuth session expired")
 		return
 	}
-	authURL, err := provider.broker.AuthURL(session.RedirectURI, session.State)
+	authURL, err := provider.broker.AuthURL(session.RedirectURI, session.State, session.Scopes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "invalid_config", "invalid authorization URL")
 		return
@@ -414,6 +417,24 @@ func (b *oauthBroker) redirectURI(r *http.Request, provider oauthProvider) strin
 		return provider.config.RedirectURI
 	}
 	return b.publicURL(r) + "/oauth/" + url.PathEscape(string(provider.descriptor.ID)) + "/callback"
+}
+
+func cleanOAuthSessionScopes(values []string) []string {
+	seen := map[string]bool{}
+	var scopes []string
+	for _, value := range values {
+		for _, part := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n'
+		}) {
+			part = strings.TrimSpace(part)
+			if part == "" || seen[part] {
+				continue
+			}
+			seen[part] = true
+			scopes = append(scopes, part)
+		}
+	}
+	return scopes
 }
 
 func randomHex(bytesLen int) (string, error) {

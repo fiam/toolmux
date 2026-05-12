@@ -39,6 +39,7 @@ type options struct {
 	readOnly           bool
 	credentials        func() (credentials.Store, error)
 	httpClient         *http.Client
+	openBrowser        func(string) error
 	providerURL        map[string]string
 	providerAPI        map[string]string
 	toolmuxdURL        string
@@ -49,6 +50,7 @@ type options struct {
 type Dependencies struct {
 	Credentials credentials.Store
 	HTTPClient  *http.Client
+	OpenBrowser func(string) error
 	Env         func(string) string
 	ProviderURL map[string]string
 	ProviderAPI map[string]string
@@ -71,6 +73,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	if opts.httpClient == nil {
 		opts.httpClient = http.DefaultClient
 	}
+	opts.openBrowser = deps.OpenBrowser
 	env := deps.Env
 	if env == nil {
 		env = os.Getenv
@@ -165,18 +168,30 @@ func statusCommand(opts *options) *cobra.Command {
 			if err := authorize(cmd, opts, toolboxStatusSpec(), args); err != nil {
 				return err
 			}
-			selected, err := selectedMCPRemoteEntries(args)
-			if err != nil {
-				return err
+			remoteArgs, nativeProviders := partitionNativeStatusArgs(args)
+			var selected []mcpRemoteServerEntry
+			if len(args) == 0 || len(remoteArgs) > 0 {
+				var err error
+				selected, err = selectedMCPRemoteEntries(remoteArgs)
+				if err != nil {
+					return err
+				}
 			}
-			statuses := make([]toolboxStatusItem, 0, len(selected))
-			if len(selected) > 0 {
+			statuses := make([]toolboxStatusItem, 0, len(selected)+len(nativeProviders))
+			if len(selected) > 0 || len(nativeProviders) > 0 {
 				store, err := opts.credentials()
 				if err != nil {
 					return err
 				}
 				for _, entry := range selected {
 					status, err := readMCPRemoteToolboxStatus(commandContext(cmd), opts, store, entry)
+					if err != nil {
+						return err
+					}
+					statuses = append(statuses, status)
+				}
+				for _, provider := range nativeProviders {
+					status, err := readNativeToolboxStatus(commandContext(cmd), opts, store, provider)
 					if err != nil {
 						return err
 					}
@@ -211,6 +226,27 @@ func statusCommand(opts *options) *cobra.Command {
 	}
 }
 
+func partitionNativeStatusArgs(args []string) ([]string, []providers.Provider) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	remoteArgs := make([]string, 0, len(args))
+	nativeProviders := make([]providers.Provider, 0, len(args))
+	seenNative := map[string]bool{}
+	for _, arg := range args {
+		provider, ok := providers.Lookup(arg)
+		if ok && (provider.AddHandler != nil || provider.RemoveHandler != nil) {
+			if !seenNative[provider.ID] {
+				nativeProviders = append(nativeProviders, provider)
+				seenNative[provider.ID] = true
+			}
+			continue
+		}
+		remoteArgs = append(remoteArgs, arg)
+	}
+	return remoteArgs, nativeProviders
+}
+
 func selectedMCPRemoteEntries(args []string) ([]mcpRemoteServerEntry, error) {
 	entries, err := effectiveMCPRemoteServerEntries("")
 	if err != nil {
@@ -237,6 +273,56 @@ func selectedMCPRemoteEntries(args []string) ([]mcpRemoteServerEntry, error) {
 		selected = append(selected, entry)
 	}
 	return selected, nil
+}
+
+func readNativeToolboxStatus(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) (toolboxStatusItem, error) {
+	item := toolboxStatusItem{
+		Name:      provider.ID,
+		Kind:      "native",
+		Status:    "disconnected",
+		Auth:      "none",
+		Scope:     "profile",
+		Scopes:    []string{opts.profile},
+		URL:       providerBaseURL(opts, provider),
+		Transport: "native",
+	}
+	tokens, err := store.LoadOAuthTokens(ctx, credentials.ConnectionRef{
+		Profile:   opts.profile,
+		Provider:  provider.ID,
+		AccountID: "default",
+	})
+	if err != nil {
+		if errors.Is(err, credentials.ErrNotFound) {
+			return item, nil
+		}
+		return toolboxStatusItem{}, err
+	}
+	item.Status = "connected"
+	item.Auth = nativeAuthLabel(tokens)
+	return item, nil
+}
+
+func nativeAuthLabel(tokens credentials.OAuthTokens) string {
+	switch tokens.Extra["auth_type"] {
+	case "token_cookie":
+		return "token-cookie"
+	case "oauth_user":
+		return "oauth"
+	case "oauth_broker":
+		return "brokered-oauth"
+	default:
+		if tokens.TokenType != "" {
+			return strings.ToLower(tokens.TokenType)
+		}
+		return "oauth"
+	}
+}
+
+func providerBaseURL(opts *options, provider providers.Provider) string {
+	if value := strings.TrimSpace(opts.providerURL[provider.ID]); value != "" {
+		return value
+	}
+	return provider.DefaultBaseURL
 }
 
 func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store credentials.Store, entry mcpRemoteServerEntry) (toolboxStatusItem, error) {
@@ -629,6 +715,9 @@ func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
 				}
 				execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
 				execCtx.Interactive = interactiveCommand(cmd, opts)
+				if execCtx.OpenBrowser == nil && execCtx.Interactive {
+					execCtx.OpenBrowser = openURL
+				}
 				execCtx.SelectString = selectString(cmd)
 				execCtx.SelectInteger = selectInteger(cmd)
 				result, err := handler(execCtx, actions.Invocation{
@@ -965,7 +1054,7 @@ func actionExecutionContext(ctx context.Context, opts *options, store credential
 		ProviderAPI: opts.providerAPI[provider.ID],
 		ToolmuxdURL: opts.toolmuxdURL,
 		ReadFile:    os.ReadFile,
-		OpenBrowser: openURL,
+		OpenBrowser: opts.openBrowser,
 	}
 }
 
