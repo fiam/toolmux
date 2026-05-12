@@ -179,7 +179,7 @@ Releases are managed by release-please and GoReleaser.
 5. GoReleaser publishes a Ko-built `toolmuxd` Linux image for amd64 and arm64
    to `ghcr.io/fiam/toolmuxd:<tag>`.
 6. GoReleaser uploads CLI release artifacts and checksums to GitHub Releases.
-7. GoReleaser publishes the `toolmux` Homebrew formula to
+7. GoReleaser publishes the `toolmux` Homebrew cask to
    `fiam/homebrew-tap`.
 
 For a no-publish release rehearsal, run the `release dry run` workflow. It

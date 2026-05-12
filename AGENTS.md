@@ -154,11 +154,11 @@ Release automation uses release-please and GoReleaser.
    and arm64 unless release support is intentionally changed and documented.
 5. `toolmuxd` must not be released as a binary archive. Release it only as a
    Linux amd64/arm64 image at `ghcr.io/fiam/toolmuxd:<tag>`.
-6. The release workflow publishes a Homebrew formula to `fiam/homebrew-tap`.
+6. The release workflow publishes a Homebrew cask to `fiam/homebrew-tap`.
 7. The release dry-run workflow must stay read-only, check out latest `main`,
    and must not log in to GHCR, publish GitHub release artifacts, or update
    Homebrew.
-8. Keep the Homebrew formula install block aligned with released binary names.
+8. Keep the Homebrew cask binary stanza aligned with released binary names.
 9. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
    `fiam/homebrew-tap`.
 10. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under

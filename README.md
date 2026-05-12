@@ -26,7 +26,7 @@ not currently shipped as the primary integration path.
 With Homebrew:
 
 ```bash
-brew install fiam/tap/toolmux
+brew install --cask fiam/tap/toolmux
 toolmux version
 ```
 

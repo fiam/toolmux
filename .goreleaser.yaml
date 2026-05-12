@@ -76,21 +76,24 @@ release:
   mode: keep-existing
   replace_existing_artifacts: true
 
-brews:
+homebrew_casks:
   - name: toolmux
     ids:
+      - toolmux
+    binaries:
       - toolmux
     repository:
       owner: fiam
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/fiam/toolmux"
     description: "Local-first CLI for working with SaaS tools from one policy-aware command surface."
-    license: MIT
-    commit_msg_template: "brew: update toolmux to {{ .Tag }}"
-    install: |
-      bin.install "toolmux"
-    test: |
-      system "#{bin}/toolmux", "version"
+    commit_msg_template: "brew: update toolmux cask to {{ .Tag }}"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/toolmux"]
+          end
