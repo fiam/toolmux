@@ -953,7 +953,7 @@ func TestMCPRemoteServerUsesStoredBearerToken(t *testing.T) {
 	}
 }
 
-func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
+func TestToolboxRemoveMultipleServersUsesProjectFlag(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	projectPath := filepath.Join(env.Home, ".toolmux", "config.yaml")
 	if err := writeToolmuxConfigFile(projectPath, toolmuxConfigFile{
@@ -976,7 +976,7 @@ func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
 		}
 	}
 
-	help := runRootForRemoteTest(t, env, "mcp", "rm", "--help")
+	help := runRootForRemoteTest(t, env, "rm", "--help")
 	if !strings.Contains(help, "--project") {
 		t.Fatalf("expected remove help to include --project, got:\n%s", help)
 	}
@@ -984,10 +984,10 @@ func TestMCPRemoteRemoveMultipleServersUsesProjectFlag(t *testing.T) {
 		t.Fatalf("expected remove help not to include --local, got:\n%s", help)
 	}
 
-	output := runRootForRemoteTest(t, env, "mcp", "rm", "miro", "linear", "--project")
+	output := runRootForRemoteTest(t, env, "rm", "miro", "linear", "--project")
 	for _, want := range []string{
-		"removed MCP server miro",
-		"removed MCP server linear",
+		"removed toolbox miro",
+		"removed toolbox linear",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected remove output to contain %q, got:\n%s", want, output)
@@ -1295,18 +1295,6 @@ func TestMCPRemoteServerRegistrationRejectsNativeCommandCollision(t *testing.T) 
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), `MCP server name "status" conflicts`) {
 		t.Fatalf("expected collision error, got %v", err)
-	}
-}
-
-func TestMCPRemoteServerCommandSurfaceIsFlat(t *testing.T) {
-	env := newMCPRemoteTestEnv(t)
-	cmd := rootForRemoteTest(env)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"mcp", "server", "add", "iterate"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected legacy mcp server command path to fail")
 	}
 }
 

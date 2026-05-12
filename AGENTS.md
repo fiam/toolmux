@@ -247,12 +247,12 @@ start MCP OAuth, store auth, retry sync, and only then write the server config.
 Failed or cancelled OAuth must not leave a registered server behind. Keep
 `--no-sync` available for registration without auth or sync. Custom URL adds
 must use `toolmux add <url>` with `--name` when the derived name is not desired
-or would collide. `toolmux add`, `toolmux mcp sync`, and remote tool commands
-must support `-v`/`--verbose` redacted HTTP tracing for debugging.
-`toolmux mcp remove` and `rm` must accept one or more server names and must
-delete stored auth for removed server names in the active Toolmux
-profile/account. `toolmux mcp auth remove` must still delete matching stored
-auth after the server entry has already been removed.
+or would collide. Top-level `toolmux remove` and `rm` remove registered
+toolboxes and must delete stored auth for removed remote MCP server names in
+the active Toolmux profile. `toolmux add`, `toolmux mcp sync`, and
+remote tool commands must support `-v`/`--verbose` redacted HTTP tracing for
+debugging. `toolmux mcp auth remove` must still delete matching stored auth
+after the server entry has already been removed.
 Stale remote caches should refresh
 opportunistically after about 24 hours without making existing cached
 commands unusable when a refresh attempt fails. `toolmux mcp catalog` must list
@@ -277,15 +277,15 @@ only for interactive human table output; keep non-TTY, JSON, and YAML output
 plain and stable for agents.
 
 Toolbox status is owned by the root `status [toolbox...]` command, which should
-report registered toolbox state, backend kind, stored auth type, account, tool
-count, scope, and source URL when available. Do not add provider-specific
+report registered toolbox state, backend kind, stored auth type, tool count,
+scope, and source URL when available. Do not add provider-specific
 `status` subcommands. The root status command must construct its own policy
 spec before reading credentials.
 
-Diagnostics are owned by the root `doctor [provider...]` command. Do not add
-provider-specific `doctor` subcommands.
-`doctor` should run active core and provider-defined diagnostics with
-actionable remediation, while still checking policy before provider token reads.
+Diagnostics are owned by the root `doctor` command. Do not add
+provider-specific `doctor` subcommands. `doctor` should run active core and
+remote MCP diagnostics with actionable remediation, while still checking policy
+before reading credentials.
 
 When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
@@ -361,8 +361,8 @@ Provider command paths, argument constraints, flags, group help, aliases, and
 leaf help must come from a provider-owned `actions.Spec` tree. Use the same
 type for group nodes and leaf actions, and let upper layers walk the tree
 instead of maintaining a parallel group model. Do not hardcode provider command
-trees or provider command flags in the Cobra root layer. Root `add`, `connect`,
-`disconnect`, `status`, and `doctor` are the only code-driven CLI-only command
+trees or provider command flags in the Cobra root layer. Root `add`, `remove`,
+`rm`, `status`, and `doctor` are the only code-driven CLI-only command
 surfaces.
 
 Provider command behavior must also live with the provider's client package, not

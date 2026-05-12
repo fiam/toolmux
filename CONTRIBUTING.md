@@ -86,8 +86,9 @@ Imported remote MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool
 metadata in the user cache directory. Use top-level `toolmux add` to register
 remote MCP toolboxes from a catalog name or URL; use `toolmux mcp sync`,
-`rename`, `remove`, `ls`, `show`, `catalog`, and `defaults` for MCP-specific
-server maintenance. Default arguments are non-secret config values applied only
+`toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
+`toolmux mcp catalog`, and `toolmux mcp defaults` for MCP-specific server
+maintenance. Default arguments are non-secret config values applied only
 to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
 the global config; require `--project` for project-local writes. Server config
@@ -95,9 +96,9 @@ should record `auth_required` after sync or auth setup when the requirement is
 known. Use
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
 registration, and `toolmux mcp auth set` for externally issued bearer tokens.
-`toolmux mcp remove` and its `rm` alias should accept one or more server names.
-Removing a remote MCP server should also delete stored auth for that server
-name in the active Toolmux profile/account.
+`toolmux remove` and its `rm` alias should accept one or more toolbox names.
+Removing a remote MCP toolbox should also delete stored auth for that server
+name in the active Toolmux profile.
 `toolmux mcp auth remove` should still delete matching stored auth when the
 server entry has already been removed.
 `toolmux mcp ls` should use the shared table renderer for human output,
@@ -304,9 +305,9 @@ Use these commands while developing:
 ```
 
 Provider command metadata is data-driven. Root `status [toolbox...]` reports
-registered toolbox state and auth, while root `doctor [provider...]` remains
-the provider-aware diagnostics command. Do not add provider-specific status or
-doctor subcommands.
+registered toolbox state and auth, while root `doctor` runs core Toolmux and
+remote MCP diagnostics. Do not add provider-specific status or doctor
+subcommands.
 
 Provider command paths, args, flags, group help, aliases, and leaf help belong
 in a provider-owned `actions.Spec` tree. Use one spec type for both groups and

@@ -111,9 +111,6 @@ var oauthSuccessTemplate = template.Must(template.New("oauth-success").Parse(`<!
       line-height: 1.8;
       overflow-wrap: anywhere;
     }
-    .prompt {
-      color: #7dd3fc;
-    }
     .ok {
       color: #86efac;
       font-weight: 700;
@@ -155,12 +152,12 @@ var oauthSuccessTemplate = template.Must(template.New("oauth-success").Parse(`<!
       </div>
     </header>
     <section class="terminal" aria-live="polite">
-      <div><span class="prompt">$</span> toolmux connect {{.Provider.Slug}}</div>
+      <div><span class="muted">...</span> waiting for browser callback</div>
       <div><span class="ok">OK</span> oauth callback received</div>
-      <div><span class="ok">OK</span> agent link established</div>
+      <div><span class="ok">OK</span> authorization handed to Toolmux</div>
       <div><span class="muted">...</span> return to your terminal</div>
     </section>
-    <p class="hint">You can close this window. Toolmux will finish the connection in your terminal and store provider tokens locally in your OS credential store.</p>
+    <p class="hint">You can close this window. Toolmux will finish the auth flow in your terminal and store provider tokens locally in your OS credential store.</p>
   </main>
 </body>
 </html>`))

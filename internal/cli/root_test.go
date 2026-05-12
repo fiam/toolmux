@@ -2,8 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -101,49 +99,20 @@ func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
 	}
 }
 
-func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"object":"error","status":503,"code":"not_configured","message":"JIRA_CLIENT_ID is required"}`))
-	}))
-	defer server.Close()
-
-	cmd := NewRootCommandWithDeps(Dependencies{
-		HTTPClient:  server.Client(),
-		ToolmuxdURL: server.URL,
-	})
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{"connect", "jira"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected connect error")
-	}
-	if !strings.Contains(err.Error(), "JIRA_CLIENT_ID is required") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(out.String(), "Usage:") {
-		t.Fatalf("runtime error printed usage:\n%s", out.String())
-	}
-}
-
-func TestDoctorTableRunsCoreAndProviderDiagnostics(t *testing.T) {
+func TestDoctorTableRunsCoreDiagnostics(t *testing.T) {
 	t.Parallel()
 	store := credentials.NewMemoryStore()
 	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"doctor", "jira"})
+	cmd.SetArgs([]string{"doctor"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "credential-store") || !strings.Contains(rendered, "not connected") {
+	if !strings.Contains(rendered, "credential-store") || !strings.Contains(rendered, "toolboxes") {
 		t.Fatalf("expected doctor diagnostics table, got %q", rendered)
 	}
 	if strings.Contains(rendered, "\x1b[") {

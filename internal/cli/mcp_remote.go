@@ -435,12 +435,12 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
+func toolboxRemoveCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	cmd := &cobra.Command{
-		Use:     "remove <name> [name...]",
+		Use:     "remove <toolbox> [toolbox...]",
 		Aliases: []string{"rm"},
-		Short:   "Remove a registered remote MCP server",
+		Short:   "Remove a toolbox",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names, err := cleanMCPRemoteNames(args)
@@ -451,7 +451,7 @@ func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpRemoteRemoveSpec(), args); err != nil {
+			if err := authorize(cmd, opts, toolboxRemoveSpec(), args); err != nil {
 				return err
 			}
 			store, err := opts.credentials()
@@ -471,9 +471,9 @@ func mcpRemoteRemoveCommand(opts *options) *cobra.Command {
 				for _, name := range removal.Names {
 					_ = removeMCPRemoteCache(opts.mcpCacheDir, name)
 					if err := store.DeleteOAuthTokens(ctx, mcpRemoteCredentialRef(opts, name)); err != nil {
-						return fmt.Errorf("remove stored auth for MCP server %s: %w", name, err)
+						return fmt.Errorf("remove stored auth for toolbox %s: %w", name, err)
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "removed MCP server %s from %s\n", name, removal.Path)
+					fmt.Fprintf(cmd.OutOrStdout(), "removed toolbox %s from %s\n", name, removal.Path)
 				}
 			}
 			return nil
@@ -3419,7 +3419,7 @@ func mcpRemoteFlagNameReserved(cmd *cobra.Command, name string) bool {
 		return true
 	}
 	switch name {
-	case "account", "color", "help", "output", "pager", "policy", "profile", "read-only":
+	case "color", "help", "output", "pager", "policy", "profile", "read-only":
 		return true
 	default:
 		return false
@@ -3710,14 +3710,14 @@ func mcpRemoteCommandAllowsConflicts(cmd *cobra.Command) bool {
 		return false
 	}
 	path := commandPathNames(cmd)
-	if len(path) >= 2 && path[0] == "toolmux" && path[1] == "add" {
+	if len(path) >= 2 && path[0] == "toolmux" && (path[1] == "add" || path[1] == "remove" || path[1] == "rm") {
 		return true
 	}
 	if len(path) < 3 || path[0] != "toolmux" || path[1] != "mcp" {
 		return false
 	}
 	switch path[2] {
-	case "sync", "rename", "remove", "rm", "ls", "list", "show", "catalog", "available", "auth":
+	case "sync", "rename", "ls", "list", "show", "catalog", "available", "auth":
 		return true
 	default:
 		return false
@@ -3769,15 +3769,11 @@ func mcpRemoteBearerTokenFromFlags(cmd *cobra.Command, literal, envName string, 
 }
 
 func mcpRemoteCredentialRef(opts *options, name string) credentials.ConnectionRef {
-	account := strings.TrimSpace(opts.account)
-	if account == "" {
-		account = "default"
-	}
 	return credentials.ConnectionRef{
 		Profile:   opts.profile,
 		Provider:  mcpRemoteCredentialProvider,
 		Service:   name,
-		AccountID: account,
+		AccountID: "default",
 	}
 }
 
@@ -3805,8 +3801,16 @@ func toolboxAddSpec() actions.Spec {
 func toolboxStatusSpec() actions.Spec {
 	return actions.Command("toolbox.status", "status",
 		actions.Use("status [toolbox...]"),
-		actions.Short("Show toolbox connection status"),
+		actions.Short("Show toolbox status"),
 		actions.RBAC("toolbox", actions.VerbStatus, actions.EffectNone, actions.EffectRead),
+	)
+}
+
+func doctorSpec() actions.Spec {
+	return actions.Command("doctor", "doctor",
+		actions.Use("doctor"),
+		actions.Short("Check Toolmux setup"),
+		actions.RBAC("toolbox", actions.VerbDiagnose, actions.EffectNone, actions.EffectRead),
 	)
 }
 
@@ -3828,10 +3832,10 @@ func mcpRemoteRenameSpec() actions.Spec {
 	)
 }
 
-func mcpRemoteRemoveSpec() actions.Spec {
-	return actions.Command("mcp.remove", "remove",
-		actions.Use("mcp remove <name> [name...]"),
-		actions.Short("Remove a registered remote MCP server"),
+func toolboxRemoveSpec() actions.Spec {
+	return actions.Command("toolbox.remove", "remove",
+		actions.Use("remove <toolbox> [toolbox...]"),
+		actions.Short("Remove a toolbox"),
 		actions.RBAC("mcp_server", actions.VerbDelete, actions.EffectNone, actions.EffectWrite),
 		actions.Risks("mcp-config", "mcp-auth"),
 	)

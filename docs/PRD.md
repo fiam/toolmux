@@ -166,9 +166,9 @@ Policy evaluation requirements:
    flags, help, aliases, CLI commands, MCP tools, and REST routes should derive
    from one provider-owned action tree. Group nodes and leaf actions use the
    same metadata type, and upper layers walk that tree instead of maintaining
-   separate group and command models. Root `add`, `connect`, `disconnect`,
-   `status`, and `doctor` remain explicit CLI commands instead of generated
-   provider subcommands.
+   separate group and command models. Root `add`, `remove`, `rm`, `status`,
+   and `doctor` remain explicit CLI commands instead of generated provider
+   subcommands.
 8. Keep provider command execution provider-owned. Providers expose action
    handlers and return structured results; CLI, future MCP, and future REST
    adapters invoke those handlers and render or serialize the same result types
@@ -275,44 +275,38 @@ Optional later UX:
 ```bash
 toolmux browse
 toolmux linear issues
-toolmux connections
+toolmux status
 ```
 
 These optional flows are not required for MVP. If added later, they should remain
 part of the same command surface and output contract rather than becoming a
 separate application.
 
-## Connection UX
+## Toolbox UX
 
 Baseline commands:
 
 ```bash
-toolmux connect jira
-toolmux connect linear
-toolmux connect google
 toolmux add notion
 
 toolmux status
 toolmux status notion
 toolmux doctor
-toolmux doctor jira
-toolmux connections ls
-toolmux disconnect jira
-toolmux mcp remove notion
+toolmux remove notion
 ```
 
 `google-docs` and `google-drive` may be supported as aliases, but they should create or update the same underlying Google connection.
 `gmail` may also be supported as a connection alias, but it should create or update the same underlying Google connection.
 
-Connection success output should show:
+Remote MCP add and auth success output should show:
 
-1. Provider name.
-2. Connected account/workspace/site.
-3. Granted scopes in readable language.
+1. Toolbox name.
+2. Backend kind and source URL.
+3. Auth mode and granted scopes when known.
 4. Local storage mode.
 5. Suggested first command.
 
-Connection metadata may be stored in config files, but token material must be
+Toolbox metadata may be stored in config files, but token material must be
 stored directly in the user's OS credential store.
 
 ## Auth Model
@@ -583,35 +577,34 @@ Out of scope for MVP:
 
 All provider-like toolboxes must support:
 
-1. Registration through `toolmux add` where applicable, global
-   `status [toolbox...]`, and global `doctor [provider...]` for provider-owned
-   diagnostics.
+1. Registration through `toolmux add` where applicable, removal through
+   `toolmux remove`, global `status [toolbox...]`, and global `doctor` for
+   core diagnostics.
 2. Local credential storage.
 3. Token refresh before expiry.
 4. Remote revocation where supported.
 5. Structured errors with provider error code, HTTP status, and retry hint.
 6. `--output table|json|yaml`.
 7. `--profile <name>` for multiple identities.
-8. `--account <id-or-alias>` when multiple workspaces/sites are connected.
-9. Command metadata for policy evaluation.
-10. Local policy enforcement before token access and provider API calls.
-11. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
-12. `status` output must show registered toolbox state, backend kind, stored
-    auth type, account, tool count, and source URL when available.
-13. `doctor` output must run core diagnostics plus provider-defined checks and
-    include remediation when a check fails or warns.
-14. Human-friendly table output and stable JSON/YAML output for the same command.
-15. Shared terminal presentation through `internal/output`; providers return
+8. Command metadata for policy evaluation.
+9. Local policy enforcement before token access and provider API calls.
+10. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
+11. `status` output must show registered toolbox state, backend kind, stored
+    auth type, tool count, and source URL when available.
+12. `doctor` output must run core diagnostics plus remote MCP checks and include
+    remediation when a check fails or warns.
+13. Human-friendly table output and stable JSON/YAML output for the same command.
+14. Shared terminal presentation through `internal/output`; providers return
     structured view models and never hand-roll colors, paging, prompts, or ad
     hoc table layouts.
-16. Markdown-producing commands should render Markdown through
+15. Markdown-producing commands should render Markdown through
     `charm.land/glamour/v2` for interactive human table output, while
     JSON/YAML and non-interactive output remain undecorated and stable.
-17. Stable JSON/YAML schemas for automation, even when human table columns are
+16. Stable JSON/YAML schemas for automation, even when human table columns are
     provider-specific or optimized for terminal width.
-18. Preview or dry-run support for risky writes where the provider API allows safe preview.
-19. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-17. Open-in-browser support for commands that return provider URLs.
+17. Preview or dry-run support for risky writes where the provider API allows safe preview.
+18. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+19. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 
@@ -622,7 +615,8 @@ All provider-like toolboxes must support:
 5. PKCE must use S256 where supported.
 6. Loopback listeners must bind to `127.0.0.1` and close immediately after callback.
 7. Token refresh must atomically replace rotating refresh tokens.
-8. `disconnect` must revoke remote tokens where the provider exposes a revocation endpoint, then delete local credentials.
+8. Removing a toolbox must delete local credentials, and remote revocation
+   should happen where an integration exposes a supported revocation endpoint.
 9. The OSS server repo must include secret scanning and clear documentation that deployment operators must provide provider client secrets out of band.
 10. Local policy denies must be checked before provider tokens are read from the OS credential store.
 11. Browser cookies, local browser databases, workspace session tokens, and
@@ -648,9 +642,8 @@ Required quality gates:
 
 MVP success:
 
-1. A user can connect supported native providers and imported MCP servers
-   without manually creating provider API keys when those providers support
-   OAuth or external token issuance.
+1. A user can add supported toolboxes without manually creating provider API
+   keys when those providers support OAuth or external token issuance.
 2. A user can run at least one read command and one write/create command for
    each implemented native provider or imported MCP server, subject to
    provider-scope limits.

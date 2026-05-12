@@ -33,7 +33,7 @@ toolmux version
 Release archives for macOS, Linux, and Windows are available from
 [GitHub Releases](https://github.com/fiam/toolmux/releases).
 
-## Connect Services
+## Add Toolboxes
 
 Import a supported remote MCP server from the catalog:
 
@@ -90,7 +90,6 @@ Common global flags:
 --color auto|always|never
 --pager auto|always|never
 --profile <name>
---account <id-or-alias>
 --policy <path>
 --read-only
 ```
@@ -128,16 +127,14 @@ directory.
 
 ## Use Toolmux With Agents
 
-Toolmux can expose provider actions and imported remote MCP tools over Model
-Context Protocol stdio:
+Toolmux can expose imported remote MCP tools over Model Context Protocol stdio:
 
 ```bash
 toolmux mcp serve
 ```
 
 The MCP server uses the same action metadata as the CLI, so tool calls still
-pass through local policy checks, `--read-only`, profiles, account selection,
-and provider auth.
+pass through local policy checks, `--read-only`, profiles, and stored auth.
 
 Configure supported local agent CLIs:
 
@@ -297,11 +294,11 @@ Rename or remove registered remotes:
 
 ```bash
 toolmux mcp rename linear-work linear-prod
-toolmux mcp remove linear-prod
+toolmux remove linear-prod
 ```
 
 Removing a remote also deletes stored auth for that server name in the active
-Toolmux profile/account. If you already removed a server and want to clear a
+Toolmux profile. If you already removed a server and want to clear a
 stale token, use:
 
 ```bash

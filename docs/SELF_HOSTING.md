@@ -4,7 +4,7 @@ Last updated: 2026-05-09
 
 `toolmuxd` is the open-source Toolmux server daemon. It exists so OAuth
 providers that require confidential client secrets can still support a
-browser-based "connect" flow while keeping provider tokens local to the user's
+browser-based OAuth flow while keeping provider tokens local to the user's
 machine.
 
 Self-hosting means you run your own `toolmuxd` and create your own provider

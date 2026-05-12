@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,7 +35,6 @@ type options struct {
 	color              string
 	pager              string
 	profile            string
-	account            string
 	policy             string
 	readOnly           bool
 	credentials        func() (credentials.Store, error)
@@ -105,17 +103,14 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.color, "color", "auto", "color output: auto, always, never")
 	root.PersistentFlags().StringVar(&opts.pager, "pager", "auto", "pager behavior: auto, always, never")
 	root.PersistentFlags().StringVar(&opts.profile, "profile", "default", "Toolmux profile")
-	root.PersistentFlags().StringVar(&opts.account, "account", "", "provider account or workspace")
 	root.PersistentFlags().StringVar(&opts.policy, "policy", "", "policy file path")
 	root.PersistentFlags().BoolVar(&opts.readOnly, "read-only", false, "deny actions with remote or local write effects")
 
 	root.AddCommand(versionCommand())
 	root.AddCommand(toolboxAddCommand(opts))
-	root.AddCommand(connectCommand(opts))
-	root.AddCommand(disconnectCommand(opts))
+	root.AddCommand(toolboxRemoveCommand(opts))
 	root.AddCommand(statusCommand(opts))
 	root.AddCommand(doctorCommand(opts))
-	root.AddCommand(connectionsCommand())
 	root.AddCommand(policyCommand(opts))
 	root.AddCommand(schemaCommand(opts))
 	root.AddCommand(mcpCommand(opts))
@@ -146,266 +141,11 @@ func versionCommand() *cobra.Command {
 	}
 }
 
-type connectProviderOptions struct {
-	AuthURLOnly bool
-	NoBrowser   bool
-	Timeout     time.Duration
-}
-
-type disconnectProviderOptions struct {
-	Yes bool
-}
-
-func connectCommand(opts *options) *cobra.Command {
-	var authURLOnly bool
-	var noBrowser bool
-	var timeout time.Duration
-	cmd := &cobra.Command{
-		Use:   "connect <provider>",
-		Short: "Connect a provider",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			provider, ok := providers.Lookup(args[0])
-			if !ok {
-				return fmt.Errorf("unknown provider %q", args[0])
-			}
-			if err := authorize(cmd, opts, providerConnectSpec(provider, args[0]), nil); err != nil {
-				return err
-			}
-			if provider.AuthMode == "brokered_local_custody" {
-				return connectBrokeredProvider(cmd, opts, provider, connectProviderOptions{
-					AuthURLOnly: authURLOnly,
-					NoBrowser:   noBrowser,
-					Timeout:     timeout,
-				})
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "connect %s: not implemented yet\n", provider.DisplayName)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&authURLOnly, "auth-url-only", false, "create session and print auth URL without polling")
-	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "print auth URL without opening a browser")
-	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "OAuth completion timeout")
-	return cmd
-}
-
-func disconnectCommand(opts *options) *cobra.Command {
-	var yes bool
-	cmd := &cobra.Command{
-		Use:   "disconnect <provider>",
-		Short: "Disconnect a provider",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			provider, ok := providers.Lookup(args[0])
-			if !ok {
-				return fmt.Errorf("unknown provider %q", args[0])
-			}
-			if err := authorize(cmd, opts, providerDisconnectSpec(provider, args[0]), nil); err != nil {
-				return err
-			}
-			if provider.AuthMode == "brokered_local_custody" {
-				return disconnectBrokeredProvider(cmd, opts, provider, disconnectProviderOptions{Yes: yes})
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "disconnect %s: not implemented yet\n", provider.DisplayName)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&yes, "yes", false, "confirm remote token revocation and local credential deletion")
-	return cmd
-}
-
-type oauthSessionResponse struct {
-	SessionID   string                   `json:"session_id"`
-	Provider    string                   `json:"provider"`
-	Status      string                   `json:"status"`
-	AuthURL     string                   `json:"auth_url"`
-	RedirectURI string                   `json:"redirect_uri"`
-	Error       string                   `json:"error"`
-	Tokens      *credentials.OAuthTokens `json:"tokens"`
-	ExpiresAt   time.Time                `json:"expires_at"`
-}
-
-func connectBrokeredProvider(cmd *cobra.Command, opts *options, provider providers.Provider, options connectProviderOptions) error {
-	ui := newConnectUI(cmd, opts)
-	serverURL := strings.TrimRight(opts.toolmuxdURL, "/")
-	if serverURL == "" {
-		return fmt.Errorf("toolmuxd URL is required")
-	}
-	ui.status("Creating %s OAuth session", provider.DisplayName)
-	payload, err := json.Marshal(map[string]string{"provider": provider.ID, "profile": opts.profile, "account": opts.account})
-	if err != nil {
-		return err
-	}
-	// #nosec G107 -- toolmuxd URL is explicit local/deployment configuration.
-	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, serverURL+"/v1/oauth/sessions", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := opts.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("create %s OAuth session: status %d: %s", provider.DisplayName, resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	var session oauthSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return err
-	}
-	if session.AuthURL == "" {
-		return fmt.Errorf("toolmuxd did not return a %s authorization URL", provider.DisplayName)
-	}
-	ui.done("Created %s OAuth session", provider.DisplayName)
-	fmt.Fprintf(cmd.OutOrStdout(), "open this URL to connect %s:\n%s\n", provider.DisplayName, session.AuthURL)
-	if session.RedirectURI != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s redirect URI:\n%s\n", provider.DisplayName, session.RedirectURI)
-	}
-	if options.AuthURLOnly {
-		return nil
-	}
-	if ui.interactive && !options.NoBrowser {
-		if err := openURL(session.AuthURL); err != nil {
-			ui.warn("Could not open browser automatically: %v", err)
-		} else {
-			ui.status("Opened browser for %s authorization", provider.DisplayName)
-		}
-	}
-	deadline := time.Now().Add(options.Timeout)
-	for time.Now().Before(deadline) {
-		ui.spin("Waiting for " + provider.DisplayName + " authorization")
-		polled, err := pollOAuthSession(cmd.Context(), opts, serverURL, session.SessionID)
-		if err != nil {
-			ui.stop()
-			return err
-		}
-		switch polled.Status {
-		case "complete":
-			ui.done("%s authorization complete", provider.DisplayName)
-			if polled.Tokens == nil {
-				return fmt.Errorf("%s OAuth session completed without token handoff", strings.ToLower(provider.DisplayName))
-			}
-			store, err := opts.credentials()
-			if err != nil {
-				return err
-			}
-			if err := store.SaveOAuthTokens(cmd.Context(), providerCredentialRef(opts, provider.ID), *polled.Tokens); err != nil {
-				return err
-			}
-			workspace := polled.Tokens.Extra["workspace_name"]
-			if workspace == "" {
-				workspace = polled.Tokens.Extra["workspace_id"]
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "connected %s: %s\n", provider.DisplayName, firstNonEmpty(workspace, "default"))
-			return nil
-		case "failed", "expired":
-			ui.stop()
-			return fmt.Errorf("%s OAuth session %s: %s", strings.ToLower(provider.DisplayName), polled.Status, polled.Error)
-		}
-		select {
-		case <-cmd.Context().Done():
-			ui.stop()
-			return cmd.Context().Err()
-		case <-time.After(time.Second):
-		}
-	}
-	ui.stop()
-	return fmt.Errorf("timed out waiting for %s OAuth completion", provider.DisplayName)
-}
-
-func disconnectBrokeredProvider(cmd *cobra.Command, opts *options, provider providers.Provider, options disconnectProviderOptions) error {
-	if !options.Yes {
-		return fmt.Errorf("refusing to disconnect %s without --yes", provider.DisplayName)
-	}
-	store, err := opts.credentials()
-	if err != nil {
-		return err
-	}
-	ref := providerCredentialRef(opts, provider.ID)
-	tokens, err := store.LoadOAuthTokens(cmd.Context(), ref)
-	if err != nil {
-		return err
-	}
-	serverURL := strings.TrimRight(opts.toolmuxdURL, "/")
-	if serverURL != "" && tokens.AccessToken != "" {
-		payload, err := json.Marshal(map[string]string{"token": tokens.AccessToken})
-		if err != nil {
-			return err
-		}
-		// #nosec G107 -- toolmuxd URL is explicit local/deployment configuration.
-		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, serverURL+"/v1/oauth/"+provider.ID+"/revoke", bytes.NewReader(payload))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := opts.httpClient.Do(req)
-		if err != nil {
-			return err
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		if err := resp.Body.Close(); err != nil {
-			return err
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("revoke %s token: status %d", provider.DisplayName, resp.StatusCode)
-		}
-	}
-	if err := store.DeleteOAuthTokens(cmd.Context(), ref); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "disconnected %s\n", provider.DisplayName)
-	return nil
-}
-
-func pollOAuthSession(ctx context.Context, opts *options, serverURL, sessionID string) (oauthSessionResponse, error) {
-	// #nosec G107 -- toolmuxd URL is explicit local/deployment configuration.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/v1/oauth/sessions/"+sessionID, nil)
-	if err != nil {
-		return oauthSessionResponse{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := opts.httpClient.Do(req)
-	if err != nil {
-		return oauthSessionResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return oauthSessionResponse{}, fmt.Errorf("poll OAuth session: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	var session oauthSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return oauthSessionResponse{}, err
-	}
-	return session, nil
-}
-
-func connectionsCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "connections",
-		Short: "Manage local provider connections",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "ls",
-		Short: "List local connections",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), "no connections configured")
-		},
-	})
-	return cmd
-}
-
-type providerStatus = actions.ConnectionStatus
-
 type toolboxStatusItem struct {
 	Name         string     `json:"name" yaml:"name"`
 	Kind         string     `json:"kind" yaml:"kind"`
 	Status       string     `json:"status" yaml:"status"`
 	Auth         string     `json:"auth" yaml:"auth"`
-	Account      string     `json:"account" yaml:"account"`
 	Scope        string     `json:"scope" yaml:"scope"`
 	Scopes       []string   `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	URL          string     `json:"url" yaml:"url"`
@@ -419,7 +159,7 @@ type toolboxStatusItem struct {
 func statusCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status [toolbox...]",
-		Short: "Show toolbox connection status",
+		Short: "Show toolbox status",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authorize(cmd, opts, toolboxStatusSpec(), args); err != nil {
@@ -456,14 +196,13 @@ func statusCommand(opts *options) *cobra.Command {
 						status.Kind,
 						output.StatusBadge(human, status.Status),
 						output.Value(status.Auth),
-						output.Value(status.Account),
 						mcpRemoteScopesLabel(status.Scopes),
 						tools,
 						status.URL,
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Account", "Scope", "Tools", "URL"},
+					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope", "Tools", "URL"},
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
 				})
@@ -507,7 +246,6 @@ func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store creden
 		Kind:         "remote-mcp",
 		Status:       "not_synced",
 		Auth:         mcpRemoteAuthLabel(false, credentials.OAuthTokens{}, entry.Server.AuthRequired),
-		Account:      ref.AccountID,
 		Scope:        mcpRemoteScopeLabel(entry.Scope),
 		Scopes:       mcpRemoteNormalizedScopes(entry.Scopes),
 		URL:          entry.Server.URL,
@@ -552,132 +290,20 @@ func mcpRemoteAuthLabel(stored bool, tokens credentials.OAuthTokens, authRequire
 	return "not required"
 }
 
-func selectedProviders(args []string) ([]providers.Provider, error) {
-	if len(args) == 0 {
-		return providers.All(), nil
-	}
-	selected := make([]providers.Provider, 0, len(args))
-	seen := make(map[string]bool, len(args))
-	for _, arg := range args {
-		provider, ok := providers.Lookup(arg)
-		if !ok {
-			return nil, fmt.Errorf("unknown provider %q", arg)
-		}
-		if seen[provider.ID] {
-			continue
-		}
-		seen[provider.ID] = true
-		selected = append(selected, provider)
-	}
-	return selected, nil
-}
-
 type providerDiagnostic = actions.Diagnostic
-
-func providerStatusSpec(provider providers.Provider) policy.CommandSpec {
-	return policy.CommandSpec{
-		ID:           provider.ID + ".status",
-		Path:         []string{"status", provider.ID},
-		Provider:     provider.ID,
-		Resource:     string(actions.ResourceConnection),
-		Action:       string(actions.VerbStatus),
-		Effect:       string(actions.EffectRead),
-		RemoteEffect: string(actions.EffectRead),
-		LocalEffect:  string(actions.EffectNone),
-	}
-}
-
-func providerDoctorSpec(provider providers.Provider) policy.CommandSpec {
-	return policy.CommandSpec{
-		ID:           provider.ID + ".doctor",
-		Path:         []string{"doctor", provider.ID},
-		Provider:     provider.ID,
-		Resource:     string(actions.ResourceConnection),
-		Action:       string(actions.VerbDiagnose),
-		Effect:       string(actions.EffectRead),
-		RemoteEffect: string(actions.EffectRead),
-		LocalEffect:  string(actions.EffectNone),
-	}
-}
-
-func providerConnectSpec(provider providers.Provider, pathProvider string) policy.CommandSpec {
-	return policy.CommandSpec{
-		ID:           provider.ID + ".connect",
-		Path:         []string{"connect", pathProvider},
-		Provider:     provider.ID,
-		Resource:     string(actions.ResourceConnection),
-		Action:       string(actions.VerbConnect),
-		Effect:       string(actions.EffectWrite),
-		RemoteEffect: string(actions.EffectNone),
-		LocalEffect:  string(actions.EffectWrite),
-		Risk:         []string{"credential-access"},
-	}
-}
-
-func providerDisconnectSpec(provider providers.Provider, pathProvider string) policy.CommandSpec {
-	return policy.CommandSpec{
-		ID:           provider.ID + ".disconnect",
-		Path:         []string{"disconnect", pathProvider},
-		Provider:     provider.ID,
-		Resource:     string(actions.ResourceConnection),
-		Action:       string(actions.VerbDisconnect),
-		Effect:       string(actions.EffectWrite),
-		RemoteEffect: string(actions.EffectWrite),
-		LocalEffect:  string(actions.EffectWrite),
-		Risk:         []string{"credential-revoke"},
-	}
-}
-
-func readProviderStatus(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) providerStatus {
-	ref := providerCredentialRef(opts, provider.ID)
-	status := providerStatus{
-		Provider:    provider.ID,
-		DisplayName: provider.DisplayName,
-		Profile:     ref.Profile,
-		Account:     ref.AccountID,
-		Message:     "not connected",
-	}
-	tokens, err := store.LoadOAuthTokens(ctx, ref)
-	if err != nil {
-		if errors.Is(err, credentials.ErrNotFound) {
-			return status
-		}
-		status.Message = err.Error()
-		return status
-	}
-	status.Connected = true
-	status.Message = ""
-	status.TokenType = tokens.TokenType
-	status.ExpiresAt = tokens.ExpiresAt
-	status.Scopes = tokens.Scopes
-	status.Permissions = providerPermissions(provider, tokens)
-	status.Extra = tokens.Extra
-	status.WorkspaceID = tokens.Extra["workspace_id"]
-	status.WorkspaceName = tokens.Extra["workspace_name"]
-	if site := tokens.Extra["site_name"]; status.WorkspaceName == "" && site != "" {
-		status.WorkspaceName = site
-	}
-	return status
-}
 
 func doctorCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
-		Use:   "doctor [provider...]",
-		Short: "Check Toolmux setup and provider connections",
-		Args:  cobra.ArbitraryArgs,
+		Use:   "doctor",
+		Short: "Check Toolmux setup",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := selectedProviders(args)
-			if err != nil {
+			if err := authorize(cmd, opts, doctorSpec(), args); err != nil {
 				return err
 			}
 			diagnostics := coreDiagnostics(opts)
 			if diagnosticsHaveFailure(diagnostics) {
 				return writeDiagnostics(cmd, opts, diagnostics)
-			}
-			for _, provider := range selected {
-				if err := authorize(cmd, opts, providerDoctorSpec(provider), []string{provider.ID}); err != nil {
-					return err
-				}
 			}
 			store, err := opts.credentials()
 			if err != nil {
@@ -690,9 +316,7 @@ func doctorCommand(opts *options) *cobra.Command {
 				return writeDiagnostics(cmd, opts, diagnostics)
 			}
 			diagnostics = append(diagnostics, credentialStoreDiagnostic(cmd.Context(), store))
-			for _, provider := range selected {
-				diagnostics = append(diagnostics, doctorProvider(cmd.Context(), opts, store, provider)...)
-			}
+			diagnostics = append(diagnostics, mcpRemoteDoctorDiagnostics(cmd.Context(), opts, store)...)
 			return writeDiagnostics(cmd, opts, diagnostics)
 		},
 	}
@@ -748,103 +372,98 @@ func credentialStoreDiagnostic(ctx context.Context, store credentials.Store) pro
 	}
 }
 
-func doctorProvider(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) []providerDiagnostic {
-	diagnostics, status := genericProviderDiagnostics(ctx, opts, store, provider)
-	if provider.Diagnostics != nil {
-		actionCtx := actionExecutionContext(ctx, opts, store, provider)
-		diagnostics = append(diagnostics, provider.Diagnostics(ctx, actionCtx, status)...)
+func mcpRemoteDoctorDiagnostics(ctx context.Context, opts *options, store credentials.Store) []providerDiagnostic {
+	entries, err := effectiveMCPRemoteServerEntries("")
+	if err != nil {
+		return []providerDiagnostic{{
+			Check:       "mcp-config",
+			Status:      "fail",
+			Message:     err.Error(),
+			Remediation: "Fix Toolmux MCP config or remove invalid MCP server entries.",
+		}}
+	}
+	if len(entries) == 0 {
+		return []providerDiagnostic{{
+			Check:       "toolboxes",
+			Status:      "warn",
+			Message:     "no toolboxes registered",
+			Remediation: "Run `toolmux add <catalog-name-or-url>`.",
+		}}
+	}
+	diagnostics := []providerDiagnostic{{
+		Check:   "toolboxes",
+		Status:  "ok",
+		Message: fmt.Sprintf("%d registered", len(entries)),
+	}}
+	for _, entry := range entries {
+		diagnostics = append(diagnostics, mcpRemoteCacheDiagnostic(opts, entry))
+		diagnostics = append(diagnostics, mcpRemoteAuthDiagnostic(ctx, opts, store, entry))
 	}
 	return diagnostics
 }
 
-func genericProviderDiagnostics(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) ([]providerDiagnostic, providerStatus) {
-	status := readProviderStatus(ctx, opts, store, provider)
-	if !status.Connected {
-		return []providerDiagnostic{{
-			Provider:    provider.ID,
-			Check:       "connection",
-			Status:      "warn",
-			Message:     firstNonEmpty(status.Message, "not connected"),
-			Remediation: "Run `toolmux connect " + provider.ID + "`.",
-		}}, status
+func mcpRemoteCacheDiagnostic(opts *options, entry mcpRemoteServerEntry) providerDiagnostic {
+	diagnostic := providerDiagnostic{
+		Provider: entry.Name,
+		Check:    "toolbox-cache",
+		Status:   "warn",
 	}
-	diagnostics := []providerDiagnostic{{
-		Provider: provider.ID,
-		Check:    "connection",
+	cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
+	if err != nil {
+		diagnostic.Status = "fail"
+		diagnostic.Message = err.Error()
+		diagnostic.Remediation = "Remove the corrupt cache or run `toolmux mcp sync " + entry.Name + "`."
+		return diagnostic
+	}
+	if !ok {
+		diagnostic.Message = "no cached tools"
+		diagnostic.Remediation = "Run `toolmux mcp sync " + entry.Name + "`."
+		return diagnostic
+	}
+	diagnostic.Status = "ok"
+	diagnostic.Message = fmt.Sprintf("%d cached tools", len(cache.Tools))
+	if time.Since(cache.SyncedAt) > mcpRemoteCacheMaxAge {
+		diagnostic.Status = "warn"
+		diagnostic.Message = "cached tools are stale"
+		diagnostic.Remediation = "Run `toolmux mcp sync " + entry.Name + "`."
+	}
+	return diagnostic
+}
+
+func mcpRemoteAuthDiagnostic(ctx context.Context, opts *options, store credentials.Store, entry mcpRemoteServerEntry) providerDiagnostic {
+	diagnostic := providerDiagnostic{
+		Provider: entry.Name,
+		Check:    "toolbox-auth",
 		Status:   "ok",
-		Message:  "local token bundle found for " + status.Account,
-	}}
-	if len(status.Permissions) == 0 {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider:    provider.ID,
-			Check:       "permissions",
-			Status:      "warn",
-			Message:     "no recorded permissions",
-			Remediation: "Reconnect the provider so Toolmux can record granted scopes or capabilities.",
-		})
-		return diagnostics, status
+		Message:  "auth not required",
 	}
-	missing := missingProviderPermissions(provider, status.Permissions)
-	if len(missing) > 0 {
-		diagnostics = append(diagnostics, providerDiagnostic{
-			Provider:    provider.ID,
-			Check:       "permissions",
-			Status:      "warn",
-			Message:     "missing " + strings.Join(missing, ","),
-			Remediation: "Reconnect the provider to grant the missing permissions.",
-		})
-		return diagnostics, status
-	}
-	diagnostics = append(diagnostics, providerDiagnostic{
-		Provider: provider.ID,
-		Check:    "permissions",
-		Status:   "ok",
-		Message:  strings.Join(status.Permissions, ","),
-	})
-	return diagnostics, status
-}
-
-func providerPermissions(provider providers.Provider, tokens credentials.OAuthTokens) []string {
-	if len(tokens.Scopes) > 0 {
-		return append([]string(nil), tokens.Scopes...)
-	}
-	if provider.DefaultPermissions != nil {
-		return provider.DefaultPermissions()
-	}
-	return nil
-}
-
-func missingProviderPermissions(provider providers.Provider, permissions []string) []string {
-	required := requiredProviderPermissions(provider)
-	if len(required) == 0 {
-		return nil
-	}
-	have := make(map[string]bool, len(permissions))
-	for _, permission := range permissions {
-		have[permission] = true
-	}
-	var missing []string
-	for _, permission := range required {
-		if !have[permission] {
-			missing = append(missing, permission)
+	tokens, err := store.LoadOAuthTokens(ctx, mcpRemoteCredentialRef(opts, entry.Name))
+	if err != nil {
+		if !errors.Is(err, credentials.ErrNotFound) {
+			diagnostic.Status = "fail"
+			diagnostic.Message = err.Error()
+			diagnostic.Remediation = "Check OS credential store availability."
+			return diagnostic
 		}
-	}
-	return missing
-}
-
-func requiredProviderPermissions(provider providers.Provider) []string {
-	seen := map[string]bool{}
-	var required []string
-	for _, spec := range providers.ActionSpecs(provider) {
-		for _, scope := range spec.Scopes {
-			if seen[scope] {
-				continue
-			}
-			seen[scope] = true
-			required = append(required, scope)
+		if entry.Server.AuthRequired != nil && *entry.Server.AuthRequired {
+			diagnostic.Status = "warn"
+			diagnostic.Message = "auth required but not stored"
+			diagnostic.Remediation = "Run `toolmux mcp auth login " + entry.Name + "` or `toolmux mcp auth set " + entry.Name + "`."
+			return diagnostic
 		}
+		if entry.Server.AuthRequired == nil {
+			diagnostic.Status = "warn"
+			diagnostic.Message = "auth requirement unknown"
+			diagnostic.Remediation = "Run `toolmux mcp sync " + entry.Name + "`."
+		}
+		return diagnostic
 	}
-	return required
+	if mcpRemoteStoredTokenIsOAuth(tokens) {
+		diagnostic.Message = "OAuth auth stored"
+		return diagnostic
+	}
+	diagnostic.Message = "bearer auth stored"
+	return diagnostic
 }
 
 func writeDiagnostics(cmd *cobra.Command, opts *options, diagnostics []providerDiagnostic) error {
@@ -862,7 +481,7 @@ func writeDiagnostics(cmd *cobra.Command, opts *options, diagnostics []providerD
 			})
 		}
 		output.RenderTable(w, human, output.Table{
-			Headers: []string{"Provider", "Check", "Status", "Message", "Remediation"},
+			Headers: []string{"Target", "Check", "Status", "Message", "Remediation"},
 			Rows:    rows,
 			Empty:   "no diagnostics",
 		})
@@ -1188,10 +807,11 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpProfileSetSpec(),
 		mcpProfileDefaultSpec(),
 		toolboxAddSpec(),
+		toolboxRemoveSpec(),
 		toolboxStatusSpec(),
+		doctorSpec(),
 		mcpRemoteSyncSpec(),
 		mcpRemoteRenameSpec(),
-		mcpRemoteRemoveSpec(),
 		mcpRemoteListSpec(),
 		mcpRemoteShowSpec(),
 		mcpRemoteCatalogListSpec(),
@@ -1233,7 +853,7 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 	inv := policy.Invocation{
 		Spec:       spec,
 		Profile:    opts.profile,
-		Account:    opts.account,
+		Account:    "default",
 		OutputMode: opts.output,
 		Args:       map[string]any{"argv": args},
 	}
@@ -1260,8 +880,14 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	if len(parts) >= 1 && parts[0] == "add" {
 		return toolboxAddSpec(), true
 	}
+	if len(parts) >= 1 && (parts[0] == "remove" || parts[0] == "rm") {
+		return toolboxRemoveSpec(), true
+	}
 	if len(parts) >= 1 && parts[0] == "status" {
 		return toolboxStatusSpec(), true
+	}
+	if len(parts) >= 1 && parts[0] == "doctor" {
+		return doctorSpec(), true
 	}
 	if len(parts) >= 1 && parts[0] == "schema" {
 		return schemaSpec(), true
@@ -1287,8 +913,6 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 			return mcpRemoteSyncSpec(), true
 		case "rename":
 			return mcpRemoteRenameSpec(), true
-		case "remove", "rm":
-			return mcpRemoteRemoveSpec(), true
 		case "ls", "list":
 			return mcpRemoteListSpec(), true
 		case "show":
@@ -1326,50 +950,16 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 			}
 		}
 	}
-	if len(parts) < 2 {
-		return policy.CommandSpec{}, false
-	}
-	provider, ok := providers.Lookup(parts[1])
-	if !ok {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[0] {
-	case "status":
-		return providerStatusSpec(provider), true
-	case "doctor":
-		return providerDoctorSpec(provider), true
-	case "connect":
-		return providerConnectSpec(provider, parts[1]), true
-	case "disconnect":
-		return providerDisconnectSpec(provider, parts[1]), true
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func providerCredentialRef(opts *options, provider string) credentials.ConnectionRef {
-	account := strings.TrimSpace(opts.account)
-	if account == "" {
-		account = "default"
-	}
-	return credentials.ConnectionRef{
-		Profile:   opts.profile,
-		Provider:  provider,
-		AccountID: account,
-	}
+	return policy.CommandSpec{}, false
 }
 
 func actionExecutionContext(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) actions.Context {
-	account := strings.TrimSpace(opts.account)
-	if account == "" {
-		account = "default"
-	}
 	return actions.Context{
 		Context:     ctx,
 		Credentials: store,
 		HTTPClient:  opts.httpClient,
 		Profile:     opts.profile,
-		Account:     account,
+		Account:     "default",
 		Provider:    provider.ID,
 		ProviderURL: opts.providerURL[provider.ID],
 		ProviderAPI: opts.providerAPI[provider.ID],

@@ -74,7 +74,6 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(mcpDisableCommand(opts))
 	cmd.AddCommand(mcpRemoteSyncCommand(opts))
 	cmd.AddCommand(mcpRemoteRenameCommand(opts))
-	cmd.AddCommand(mcpRemoteRemoveCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthCommand(opts))
 	cmd.AddCommand(mcpRemoteListCommand(opts))
 	cmd.AddCommand(mcpRemoteShowCommand(opts))
@@ -88,7 +87,7 @@ func mcpServeCommand(opts *options) *cobra.Command {
 	var selection mcpToolSelection
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Serve Toolmux provider actions over MCP stdio",
+		Short: "Serve Toolmux tools over MCP stdio",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolved, err := resolveMCPToolSelection(selection)
@@ -1933,9 +1932,6 @@ func mcpConfiguredServeArgs(opts *options, configure mcpConfigureOptions) []stri
 	args := []string{"mcp", "serve"}
 	if opts.profile != "" && opts.profile != "default" {
 		args = append(args, "--profile", opts.profile)
-	}
-	if opts.account != "" {
-		args = append(args, "--account", opts.account)
 	}
 	if opts.policy != "" {
 		args = append(args, "--policy", opts.policy)

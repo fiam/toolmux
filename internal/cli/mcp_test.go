@@ -380,7 +380,7 @@ func TestMCPAgentConfigureCommandsRejectInvalidScopes(t *testing.T) {
 }
 
 func Example_mcpConfiguredServeArgs() {
-	opts := &options{profile: "work", account: "default", readOnly: true}
+	opts := &options{profile: "work", readOnly: true}
 	configure := mcpConfigureOptions{
 		mcpToolSelection: mcpToolSelection{
 			Profile:      "readonly",
@@ -389,5 +389,5 @@ func Example_mcpConfiguredServeArgs() {
 		},
 	}
 	fmt.Println(strings.Join(mcpConfiguredServeArgs(opts, configure), " "))
-	// Output: mcp serve --profile work --account default --read-only --mcp-profile readonly --tool linear.* --exclude-tool *.send
+	// Output: mcp serve --profile work --read-only --mcp-profile readonly --tool linear.* --exclude-tool *.send
 }
