@@ -8,9 +8,10 @@ CLI, `toolmuxd`, provider integrations, docs, tests, and release tooling.
 Install:
 
 1. Go 1.26.3 or newer on the Go 1.26 line.
-2. Docker, for the full Dockerfile-based linter pass.
-3. `make`.
-4. `cloudflared`, only if you are testing browser OAuth callbacks locally.
+2. A C compiler such as `clang` or `gcc`, for cgo-enabled `toolmux` builds.
+3. Docker, for the full Dockerfile-based linter pass.
+4. `make`.
+5. `cloudflared`, only if you are testing browser OAuth callbacks locally.
 
 On macOS, local Keychain testing is easier if you build a stable signed binary:
 
@@ -56,6 +57,12 @@ race tests, fake-upstream integration tests, coverage generation, binary
 builds, commit-message validation, and the generic `toolmuxd` container image
 build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
 Ko-built `toolmuxd` image manifest are validated before a release.
+PR and Make-based local builds use the Make defaults: `toolmux` is compiled
+with `CGO_ENABLED=1`, and `toolmuxd` is compiled with `CGO_ENABLED=0`.
+The `release dry run` workflow also runs weekly and can be triggered manually;
+it checks out latest `main`, builds native `toolmux` with cgo and `toolmuxd`
+without cgo, and runs the same GoReleaser snapshot path without publishing
+artifacts, container images, or Homebrew updates.
 Live-provider tests stay opt-in and are not part of default CI.
 
 Imported remote MCP servers are the primary integration path today. Jira and
@@ -174,6 +181,21 @@ Releases are managed by release-please and GoReleaser.
 6. GoReleaser uploads CLI release artifacts and checksums to GitHub Releases.
 7. GoReleaser publishes the `toolmux` Homebrew formula to
    `fiam/homebrew-tap`.
+
+For a no-publish release rehearsal, run the `release dry run` workflow. It
+checks out latest `main`, runs `goreleaser check`, builds native `toolmux` with
+cgo and `toolmuxd` without cgo, and runs
+`goreleaser release --snapshot --clean` with read-only repository permissions.
+It does not log in to GHCR, require the Homebrew tap token, or publish release
+artifacts.
+
+PR and local Make builds use split cgo settings: `toolmux` is cgo-enabled and
+`toolmuxd` is pure-Go. The current GoReleaser CLI artifact matrix still pins
+`CGO_ENABLED=0`, so a required cgo dependency in release-packaged `toolmux`
+artifacts needs a release toolchain update before it can ship. Update the
+GoReleaser matrix, CI runner/toolchain setup, and release dry run together when
+enabling cgo release artifacts. Keep `toolmuxd` release images built with
+`CGO_ENABLED=0`.
 
 Required repository secrets:
 

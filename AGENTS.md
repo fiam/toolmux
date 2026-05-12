@@ -102,6 +102,14 @@ versions pinned in the root `Dockerfile`.
 `make test-live` must be skipped by default and require explicit environment
 variables such as `TOOLMUX_LIVE_TESTS=1`.
 
+Make-based builds compile `toolmux` with `CGO_ENABLED=1` and `toolmuxd` with
+`CGO_ENABLED=0` by default through `TOOLMUX_CGO_ENABLED` and
+`TOOLMUXD_CGO_ENABLED`. PR CI should use those Make defaults instead of
+duplicating cgo settings in workflow environment variables. Keep C compiler and
+header dependencies available for CLI build jobs whenever `toolmux` cgo
+dependencies change. Keep `toolmuxd` and its container image pure-Go unless
+the daemon's product requirements intentionally change.
+
 `make dev-cli` builds `./bin/toolmux` for local interactive testing. On macOS,
 set `CODESIGN_IDENTITY` to a stable local signing identity so the target signs
 the binary after every rebuild and Keychain "Always Allow" decisions can persist
@@ -124,6 +132,8 @@ CI should run at least:
 10. Coverage generation with `make coverage`.
 11. GoReleaser snapshot release validation for the CLI archive matrix and
     Ko-built `toolmuxd` image manifest.
+12. A non-publishing release dry run against latest `main` through
+    `goreleaser release --snapshot --clean`.
 
 ## Releases
 
@@ -133,15 +143,25 @@ Release automation uses release-please and GoReleaser.
    release PRs, changelog generation, GitHub releases, and tags.
 2. `.goreleaser.yaml` controls CLI archives for `toolmux` and the Ko-built
    `toolmuxd` container image.
-3. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
+3. PR and local Make builds compile `toolmux` with cgo and `toolmuxd` without
+   cgo. The current GoReleaser CLI artifact matrix still pins
+   `CGO_ENABLED=0`, so do not add required cgo dependencies to
+   release-packaged `toolmux` artifacts until the release matrix, CI
+   toolchains, and dry-run workflow have been updated to build cgo artifacts
+   intentionally. Keep GoReleaser's `toolmuxd` image build at
+   `CGO_ENABLED=0`.
+4. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
    and arm64 unless release support is intentionally changed and documented.
-4. `toolmuxd` must not be released as a binary archive. Release it only as a
+5. `toolmuxd` must not be released as a binary archive. Release it only as a
    Linux amd64/arm64 image at `ghcr.io/fiam/toolmuxd:<tag>`.
-5. The release workflow publishes a Homebrew formula to `fiam/homebrew-tap`.
-6. Keep the Homebrew formula install block aligned with released binary names.
-7. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
+6. The release workflow publishes a Homebrew formula to `fiam/homebrew-tap`.
+7. The release dry-run workflow must stay read-only, check out latest `main`,
+   and must not log in to GHCR, publish GitHub release artifacts, or update
+   Homebrew.
+8. Keep the Homebrew formula install block aligned with released binary names.
+9. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
    `fiam/homebrew-tap`.
-8. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
+10. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
    branch protection; otherwise the workflow falls back to `GITHUB_TOKEN`.
 
 ## Integration Tests

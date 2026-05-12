@@ -1,5 +1,7 @@
 GO ?= go
 GOFLAGS ?=
+TOOLMUX_CGO_ENABLED ?= 1
+TOOLMUXD_CGO_ENABLED ?= 0
 DOCKER ?= docker
 LINT_IMAGE ?= toolmux-lint:dev
 BIN_DIR ?= bin
@@ -31,13 +33,13 @@ help:
 .PHONY: build
 build:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
-	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmuxd ./cmd/toolmuxd
+	CGO_ENABLED=$(TOOLMUX_CGO_ENABLED) $(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
+	CGO_ENABLED=$(TOOLMUXD_CGO_ENABLED) $(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmuxd ./cmd/toolmuxd
 
 .PHONY: dev-cli
 dev-cli:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
+	CGO_ENABLED=$(TOOLMUX_CGO_ENABLED) $(GO) build $(GOFLAGS) -o $(BIN_DIR)/toolmux ./cmd/toolmux
 ifneq ($(strip $(CODESIGN_IDENTITY)),)
 	codesign --force --sign "$(CODESIGN_IDENTITY)" --timestamp=none "$(BIN_DIR)/toolmux"
 else
