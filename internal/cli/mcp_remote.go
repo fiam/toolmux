@@ -189,42 +189,20 @@ type mcpRemoteDefaultArgumentsResult struct {
 	Arguments []mcpRemoteDefaultArgumentItem `json:"arguments" yaml:"arguments"`
 }
 
-func mcpRemoteAddCommand(opts *options) *cobra.Command {
+func toolboxAddCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
+	var nameFlag string
 	var transport string
 	var noSync bool
 	var verboseHTTP bool
 	cmd := &cobra.Command{
-		Use:     "add <name> [url]",
-		Aliases: []string{"register"},
-		Short:   "Register and sync a remote MCP server",
-		Args:    cobra.RangeArgs(1, 2),
+		Use:   "add <toolbox-or-url>",
+		Short: "Add a toolbox",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && isMCPRemoteURLArgument(args[0]) {
-				return fmt.Errorf("MCP server name is required when adding a URL; use `toolmux mcp add <name> %s`", strings.TrimSpace(args[0]))
-			}
-			name, err := cleanMCPRemoteName(args[0])
+			target := strings.TrimSpace(args[0])
+			name, server, err := resolveToolboxAddTarget(target, nameFlag, transport)
 			if err != nil {
-				return err
-			}
-			serverURL := ""
-			if len(args) == 2 {
-				serverURL = strings.TrimSpace(args[1])
-			} else if builtin, ok := mcpBuiltinRemoteServers()[name]; ok {
-				serverURL = builtin.URL
-				if transport == "" {
-					transport = builtin.Transport
-				}
-			} else {
-				return fmt.Errorf("URL is required for unknown MCP server %q", name)
-			}
-			if err := validateMCPRemoteURL(serverURL); err != nil {
-				return err
-			}
-			if transport == "" {
-				transport = mcpRemoteTransportStreamableHTTP
-			}
-			if err := validateMCPRemoteTransport(transport); err != nil {
 				return err
 			}
 			configPath, scopeName, err := mcpProfileWritePath(scope)
@@ -249,20 +227,17 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 			if err := ensureMCPRemoteNameAvailable(cmd.Root(), name); err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpRemoteAddSpec(), args); err != nil {
+			if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
 				return err
 			}
-			server := normalizeMCPRemoteServer(mcpRemoteServer{
-				URL:       serverURL,
-				Transport: transport,
-			})
+			server = normalizeMCPRemoteServer(server)
 			register := func() error {
 				config.Version = 1
 				config.MCP.Servers[name] = server
 				if err := writeToolmuxConfigFile(configPath, config); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "registered %s MCP server %s in %s\n", scopeName, name, configPath)
+				fmt.Fprintf(cmd.OutOrStdout(), "registered %s toolbox %s in %s\n", scopeName, name, configPath)
 				writeMCPRemoteDefaultArgumentSuggestions(cmd.OutOrStdout(), name, server)
 				return nil
 			}
@@ -285,15 +260,80 @@ func mcpRemoteAddCommand(opts *options) *cobra.Command {
 			if err := register(); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "synced MCP server %s: %d tools\n", name, len(cache.Tools))
+			fmt.Fprintf(cmd.OutOrStdout(), "synced toolbox %s: %d tools\n", name, len(cache.Tools))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", mcpRemoteTransportStreamableHTTP, "remote MCP transport: streamable-http")
+	cmd.Flags().StringVar(&nameFlag, "name", "", "registered toolbox name")
+	cmd.Flags().StringVar(&transport, "transport", "", "remote MCP transport: streamable-http")
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "register without immediately syncing tools")
 	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
+}
+
+func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mcpRemoteServer, error) {
+	if strings.TrimSpace(target) == "" {
+		return "", mcpRemoteServer{}, fmt.Errorf("toolbox name or URL is required")
+	}
+	if isMCPRemoteURLArgument(target) {
+		name, err := cleanToolboxAddName(nameFlag, target)
+		if err != nil {
+			return "", mcpRemoteServer{}, err
+		}
+		transport := strings.TrimSpace(transportFlag)
+		if transport == "" {
+			transport = mcpRemoteTransportStreamableHTTP
+		}
+		if err := validateMCPRemoteURL(target); err != nil {
+			return "", mcpRemoteServer{}, err
+		}
+		if err := validateMCPRemoteTransport(transport); err != nil {
+			return "", mcpRemoteServer{}, err
+		}
+		return name, mcpRemoteServer{URL: strings.TrimSpace(target), Transport: transport}, nil
+	}
+	catalogName, err := cleanMCPRemoteName(target)
+	if err != nil {
+		return "", mcpRemoteServer{}, err
+	}
+	builtin, ok := mcpBuiltinRemoteServers()[catalogName]
+	if !ok {
+		return "", mcpRemoteServer{}, fmt.Errorf("unknown toolbox %q; pass an MCP URL or a known catalog name", catalogName)
+	}
+	name := catalogName
+	if strings.TrimSpace(nameFlag) != "" {
+		name, err = cleanMCPRemoteName(nameFlag)
+		if err != nil {
+			return "", mcpRemoteServer{}, err
+		}
+	}
+	transport := strings.TrimSpace(transportFlag)
+	if transport == "" {
+		transport = builtin.Transport
+	}
+	if transport == "" {
+		transport = mcpRemoteTransportStreamableHTTP
+	}
+	if err := validateMCPRemoteTransport(transport); err != nil {
+		return "", mcpRemoteServer{}, err
+	}
+	builtin.Transport = transport
+	if err := validateMCPRemoteURL(builtin.URL); err != nil {
+		return "", mcpRemoteServer{}, err
+	}
+	return name, builtin, nil
+}
+
+func cleanToolboxAddName(nameFlag, rawURL string) (string, error) {
+	if strings.TrimSpace(nameFlag) != "" {
+		return cleanMCPRemoteName(nameFlag)
+	}
+	name, err := defaultMCPRemoteNameFromURL(rawURL)
+	if err != nil {
+		return "", err
+	}
+	return cleanMCPRemoteName(name)
 }
 
 func mcpRemoteSyncCommand(opts *options) *cobra.Command {
@@ -1949,6 +1989,54 @@ func cleanMCPRemoteName(name string) (string, error) {
 	}
 	if !mcpRemoteNamePattern.MatchString(name) {
 		return "", fmt.Errorf("invalid MCP server name %q: use lowercase letters, digits, hyphens, or underscores, starting with a letter", name)
+	}
+	return name, nil
+}
+
+func defaultMCPRemoteNameFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("invalid MCP server URL %q: %w", raw, err)
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return "", fmt.Errorf("MCP server URL must include a host")
+	}
+	labels := strings.Split(host, ".")
+	labels = slices.DeleteFunc(labels, func(label string) bool {
+		return label == "" || label == "mcp"
+	})
+	if len(labels) == 0 {
+		return "", fmt.Errorf("could not derive a toolbox name from %q; pass --name", raw)
+	}
+	name := labels[0]
+	if len(labels) >= 2 {
+		name = labels[len(labels)-2]
+	}
+	if len(labels) >= 3 && len(labels[len(labels)-1]) == 2 {
+		switch labels[len(labels)-2] {
+		case "ac", "co", "com", "edu", "gov", "net", "org":
+			name = labels[len(labels)-3]
+		}
+	}
+	name = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, name)
+	name = strings.Trim(name, "-_")
+	if name == "" {
+		return "", fmt.Errorf("could not derive a toolbox name from %q; pass --name", raw)
+	}
+	if _, err := cleanMCPRemoteName(name); err != nil {
+		return "", fmt.Errorf("could not derive a valid toolbox name from %q; pass --name", raw)
 	}
 	return name, nil
 }
@@ -3622,11 +3710,14 @@ func mcpRemoteCommandAllowsConflicts(cmd *cobra.Command) bool {
 		return false
 	}
 	path := commandPathNames(cmd)
+	if len(path) >= 2 && path[0] == "toolmux" && path[1] == "add" {
+		return true
+	}
 	if len(path) < 3 || path[0] != "toolmux" || path[1] != "mcp" {
 		return false
 	}
 	switch path[2] {
-	case "add", "register", "sync", "rename", "remove", "rm", "ls", "list", "show", "catalog", "available", "auth":
+	case "sync", "rename", "remove", "rm", "ls", "list", "show", "catalog", "available", "auth":
 		return true
 	default:
 		return false
@@ -3702,12 +3793,20 @@ func mcpRemoteBearerTokens(token string, entry mcpRemoteServerEntry) credentials
 	}
 }
 
-func mcpRemoteAddSpec() actions.Spec {
-	return actions.Command("mcp.add", "add",
-		actions.Use("mcp add <name> [url]"),
-		actions.Short("Register a remote MCP server"),
+func toolboxAddSpec() actions.Spec {
+	return actions.Command("toolbox.add", "add",
+		actions.Use("add <toolbox-or-url>"),
+		actions.Short("Add a toolbox"),
 		actions.RBAC("mcp_server", actions.VerbCreate, actions.EffectNone, actions.EffectWrite),
 		actions.Risks("mcp-config"),
+	)
+}
+
+func toolboxStatusSpec() actions.Spec {
+	return actions.Command("toolbox.status", "status",
+		actions.Use("status [toolbox...]"),
+		actions.Short("Show toolbox connection status"),
+		actions.RBAC("toolbox", actions.VerbStatus, actions.EffectNone, actions.EffectRead),
 	)
 }
 

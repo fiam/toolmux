@@ -35,7 +35,7 @@ func TestMCPRemoteServerSyncAndTopLevelCommand(t *testing.T) {
 	upstream := newFakeMCPRemoteServer(t, &called)
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
 	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "linear create_issue")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected remote command policy check, got %q", policyOutput)
@@ -66,7 +66,7 @@ func TestMCPRemoteDefaultArgumentsApplyToToolCalls(t *testing.T) {
 	upstream := newFakeMCPRemoteCloudServer(t, &called)
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "jira", upstream.URL)
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "jira")
 	setOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "set", "jira", "cloudId", "cloud-123")
 	if !strings.Contains(setOutput, "set default argument cloudId") {
 		t.Fatalf("expected defaults set output, got %q", setOutput)
@@ -160,32 +160,73 @@ func TestMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
 	}
 }
 
-func TestMCPRemoteAddURLRequiresNameAndSupportsNameURLForm(t *testing.T) {
+func TestToolboxAddURLDerivesNameAndSupportsCustomName(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any
 	upstream := newFakeMCPRemoteServer(t, &called)
 	defer upstream.Close()
 
-	output, err := runRootForRemoteTestError(t, env, "mcp", "add", upstream.URL, "--global")
-	if err == nil {
-		t.Fatalf("expected missing name error, got output:\n%s", output)
+	derivedOutput := runRootForRemoteTest(t, env, "add", "https://mcp.linear.app/mcp", "--no-sync", "--global")
+	if !strings.Contains(derivedOutput, "registered global toolbox linear") {
+		t.Fatalf("expected URL-derived registration output, got:\n%s", derivedOutput)
 	}
-	if !strings.Contains(err.Error(), "MCP server name is required when adding a URL") {
-		t.Fatalf("unexpected missing name error: %v", err)
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.MCP.Servers["linear"].URL; got != "https://mcp.linear.app/mcp" {
+		t.Fatalf("expected exact URL to be stored, got %q", got)
 	}
 
-	addOutput := runRootForRemoteTest(t, env, "mcp", "add", "custom", upstream.URL, "--global")
+	addOutput := runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "custom", "--global")
 	for _, want := range []string{
-		"registered global MCP server custom",
-		"synced MCP server custom: 2 tools",
+		"registered global toolbox custom",
+		"synced toolbox custom: 2 tools",
 	} {
 		if !strings.Contains(addOutput, want) {
 			t.Fatalf("expected URL add output to contain %q, got:\n%s", want, addOutput)
 		}
 	}
-	output = runRootForRemoteTest(t, env, "custom", "create_issue", "--title", "URL")
+	output := runRootForRemoteTest(t, env, "custom", "create_issue", "--title", "URL")
 	if !strings.Contains(output, "called create_issue: URL") {
 		t.Fatalf("expected custom remote tool output, got %q", output)
+	}
+}
+
+func TestToolboxAddCatalogNameStoresResolvedURL(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+
+	addOutput := runRootForRemoteTest(t, env, "add", "linear", "--name", "linear-work", "--no-sync", "--global")
+	if !strings.Contains(addOutput, "registered global toolbox linear-work") {
+		t.Fatalf("expected catalog add output, got:\n%s", addOutput)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.MCP.Servers["linear-work"].URL; got != mcpBuiltinRemoteServers()["linear"].URL {
+		t.Fatalf("expected catalog add to store resolved URL, got %q", got)
+	}
+}
+
+func TestDefaultMCPRemoteNameFromURL(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"https://mcp.linear.app/mcp":         "linear",
+		"https://linear.app/mcp":             "linear",
+		"https://api.slack.com/mcp":          "slack",
+		"https://mcp.example.co.uk/mcp":      "example",
+		"https://team-tools.example.com/mcp": "example",
+	}
+	for raw, want := range tests {
+		got, err := defaultMCPRemoteNameFromURL(raw)
+		if err != nil {
+			t.Fatalf("defaultMCPRemoteNameFromURL(%q): %v", raw, err)
+		}
+		if got != want {
+			t.Fatalf("defaultMCPRemoteNameFromURL(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }
 
@@ -268,8 +309,8 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	upstream := newFakeMCPRemoteServer(t, &called)
 	defer upstream.Close()
 
-	addOutput := runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL)
-	if !strings.Contains(addOutput, "registered global MCP server linear") {
+	addOutput := runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear")
+	if !strings.Contains(addOutput, "registered global toolbox linear") {
 		t.Fatalf("expected global registration output, got %q", addOutput)
 	}
 	config, err := readToolmuxConfigFile(env.Config)
@@ -324,13 +365,43 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	}
 }
 
+func TestStatusTableShowsRemoteMCPToolboxesAndAuth(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteServerWithBearer(t, &called, "secret-token")
+	defer upstream.Close()
+
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
+	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
+	runRootForRemoteTest(t, env, "mcp", "sync", "linear")
+
+	rendered := runRootForRemoteTest(t, env, "status", "linear")
+	for _, want := range []string{"Toolbox", "remote-mcp", "connected", "bearer", "linear", "2"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected status table to contain %q, got:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "\x1b[") {
+		t.Fatalf("non-tty status output should not contain ANSI escape sequences: %q", rendered)
+	}
+
+	jsonOutput := runRootForRemoteTest(t, env, "-o", "json", "status")
+	var statuses []toolboxStatusItem
+	if err := json.Unmarshal([]byte(jsonOutput), &statuses); err != nil {
+		t.Fatalf("decode status json output: %v\n%s", err, jsonOutput)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "linear" || statuses[0].Auth != "bearer" || statuses[0].Status != "connected" {
+		t.Fatalf("unexpected status json output: %+v", statuses)
+	}
+}
+
 func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any
 	upstream := newFakeMCPRemoteServer(t, &called)
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
 
 	serverHelp := runRootForRemoteTest(t, env, "linear")
 	for _, want := range []string{"Imported remote MCP server linear", "create_issue", "calculate"} {
@@ -621,7 +692,7 @@ func TestMCPRemoteToolVerbosePrintsHTTPTrace(t *testing.T) {
 	upstream := newFakeMCPRemoteServerWithBearer(t, &called, "secret-token")
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global", "--no-sync")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
 	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
 	config, err := readToolmuxConfigFile(env.Config)
 	if err != nil {
@@ -708,14 +779,14 @@ func TestMCPRemoteAddVerbosePrintsHTTPTraceAndUsesLatestClientMetadata(t *testin
 	}))
 	defer upstream.Close()
 
-	output := runRootForRemoteTest(t, env, "mcp", "add", "debug", upstream.URL, "--global", "-v")
+	output := runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "debug", "--global", "-v")
 	for _, want := range []string{
 		"----- MCP HTTP request -----",
 		"Mcp-Protocol-Version: " + mcpRemoteClientProtocolVersion,
 		`"protocolVersion":"` + mcpRemoteClientProtocolVersion + `"`,
 		`"title":"Toolmux"`,
 		`"method":"tools/list"`,
-		"synced MCP server debug: 1 tools",
+		"synced toolbox debug: 1 tools",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected add verbose output to contain %q, got:\n%s", want, output)
@@ -821,7 +892,7 @@ func TestMCPRemoteServerExposesCachedToolsOverMCPServe(t *testing.T) {
 	upstream := newFakeMCPRemoteServer(t, &called)
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
 
 	listOutput := runRootForRemoteTestWithInput(t, env,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
@@ -865,7 +936,7 @@ func TestMCPRemoteServerUsesStoredBearerToken(t *testing.T) {
 	upstream := newFakeMCPRemoteServerWithBearer(t, &called, "secret-token")
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "linear", upstream.URL, "--global", "--no-sync")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
 	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
 	authStatus := runRootForRemoteTest(t, env, "mcp", "auth", "status", "linear")
 	if !strings.Contains(authStatus, "stored bearer token") {
@@ -962,12 +1033,12 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected OAuth auth policy check, got %q", policyOutput)
 	}
-	addOutput := runRootForRemoteOAuthTest(t, env, upstream.Client(), "mcp", "add", "linear", upstream.URL+"/mcp", "--global")
+	addOutput := runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
 	for _, want := range []string{
-		"registered global MCP server linear",
+		"registered global toolbox linear",
 		"MCP server linear requires auth; starting OAuth login",
 		"stored OAuth token for MCP server linear",
-		"synced MCP server linear: 1 tools",
+		"synced toolbox linear: 1 tools",
 	} {
 		if !strings.Contains(addOutput, want) {
 			t.Fatalf("expected OAuth add output to contain %q, got:\n%s", want, addOutput)
@@ -1012,11 +1083,11 @@ func TestMCPRemoteAddDoesNotRegisterWhenOAuthLoginFails(t *testing.T) {
 	upstream := newFakeMCPRemoteOAuthRequiredWithoutMetadataServer(t)
 	defer upstream.Close()
 
-	output, err := runRootForRemoteTestError(t, env, "mcp", "add", "linear", upstream.URL, "--global")
+	output, err := runRootForRemoteTestError(t, env, "add", upstream.URL, "--name", "linear", "--global")
 	if err == nil {
 		t.Fatalf("expected OAuth add failure, got output:\n%s", output)
 	}
-	if strings.Contains(output, "registered global MCP server linear") {
+	if strings.Contains(output, "registered global toolbox linear") {
 		t.Fatalf("expected failed OAuth add not to print registration, got:\n%s", output)
 	}
 	if !strings.Contains(output, "MCP server linear requires auth; starting OAuth login") {
@@ -1043,7 +1114,7 @@ func TestMCPRemoteServerSupportsSSEAndSessionID(t *testing.T) {
 	upstream := newFakeMCPRemoteSSESessionServer(t, &called)
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "mcp", "add", "iterate", upstream.URL, "--global")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "iterate", "--global")
 
 	output := runRootForRemoteTest(t, env, "iterate", "create_issue", "--title", "SSE")
 	if !strings.Contains(output, "called create_issue: SSE") {
@@ -1220,7 +1291,7 @@ func TestMCPRemoteServerRegistrationRejectsNativeCommandCollision(t *testing.T) 
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"mcp", "add", "status", upstream.URL, "--global"})
+	cmd.SetArgs([]string{"add", upstream.URL, "--name", "status", "--global"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), `MCP server name "status" conflicts`) {
 		t.Fatalf("expected collision error, got %v", err)

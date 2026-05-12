@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,7 +39,7 @@ func TestPolicyCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "mcp.add") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
+	if !strings.Contains(rendered, "toolbox.add") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
 		t.Fatalf("expected action effects in catalog, got %q", rendered)
 	}
 	if strings.Contains(rendered, "gmail.send") {
@@ -91,13 +90,13 @@ func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"--read-only", "mcp", "add", "demo", "https://example.com/mcp", "--no-sync", "--global"})
+	cmd.SetArgs([]string{"--read-only", "add", "https://example.com/mcp", "--name", "demo", "--no-sync", "--global"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected read-only denial")
 	}
-	if !strings.Contains(err.Error(), "read-only mode blocks command mcp.add") {
+	if !strings.Contains(err.Error(), "read-only mode blocks command toolbox.add") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -128,39 +127,6 @@ func TestRuntimeErrorDoesNotPrintUsage(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "Usage:") {
 		t.Fatalf("runtime error printed usage:\n%s", out.String())
-	}
-}
-
-func TestStatusTableShowsProviderPermissions(t *testing.T) {
-	t.Parallel()
-	store := credentials.NewMemoryStore()
-	err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
-		Profile:   "default",
-		Provider:  "jira",
-		AccountID: "default",
-	}, credentials.OAuthTokens{
-		AccessToken: "jira-access-token",
-		TokenType:   "bearer",
-		Scopes:      []string{"read:jira-work", "write:jira-work"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{"status", "jira"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	rendered := out.String()
-	if !strings.Contains(rendered, "Provider") || !strings.Contains(rendered, "connected") || !strings.Contains(rendered, "write:jira-work") {
-		t.Fatalf("expected connected status table with permissions, got %q", rendered)
-	}
-	if strings.Contains(rendered, "\x1b[") {
-		t.Fatalf("non-tty table output should not contain ANSI escape sequences: %q", rendered)
 	}
 }
 

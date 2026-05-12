@@ -110,6 +110,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.PersistentFlags().BoolVar(&opts.readOnly, "read-only", false, "deny actions with remote or local write effects")
 
 	root.AddCommand(versionCommand())
+	root.AddCommand(toolboxAddCommand(opts))
 	root.AddCommand(connectCommand(opts))
 	root.AddCommand(disconnectCommand(opts))
 	root.AddCommand(statusCommand(opts))
@@ -399,56 +400,156 @@ func connectionsCommand() *cobra.Command {
 
 type providerStatus = actions.ConnectionStatus
 
+type toolboxStatusItem struct {
+	Name         string     `json:"name" yaml:"name"`
+	Kind         string     `json:"kind" yaml:"kind"`
+	Status       string     `json:"status" yaml:"status"`
+	Auth         string     `json:"auth" yaml:"auth"`
+	Account      string     `json:"account" yaml:"account"`
+	Scope        string     `json:"scope" yaml:"scope"`
+	Scopes       []string   `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	URL          string     `json:"url" yaml:"url"`
+	Transport    string     `json:"transport" yaml:"transport"`
+	Tools        *int       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	SyncedAt     *time.Time `json:"synced_at,omitempty" yaml:"synced_at,omitempty"`
+	AuthRequired *bool      `json:"auth_required,omitempty" yaml:"auth_required,omitempty"`
+	Path         string     `json:"path" yaml:"path"`
+}
+
 func statusCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status [provider...]",
-		Short: "Show provider connection status",
+		Use:   "status [toolbox...]",
+		Short: "Show toolbox connection status",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := selectedProviders(args)
+			if err := authorize(cmd, opts, toolboxStatusSpec(), args); err != nil {
+				return err
+			}
+			selected, err := selectedMCPRemoteEntries(args)
 			if err != nil {
 				return err
 			}
-			for _, provider := range selected {
-				if err := authorize(cmd, opts, providerStatusSpec(provider), []string{provider.ID}); err != nil {
+			statuses := make([]toolboxStatusItem, 0, len(selected))
+			if len(selected) > 0 {
+				store, err := opts.credentials()
+				if err != nil {
 					return err
 				}
-			}
-			store, err := opts.credentials()
-			if err != nil {
-				return err
-			}
-			statuses := make([]providerStatus, 0, len(selected))
-			for _, provider := range selected {
-				statuses = append(statuses, readProviderStatus(cmd.Context(), opts, store, provider))
+				for _, entry := range selected {
+					status, err := readMCPRemoteToolboxStatus(commandContext(cmd), opts, store, entry)
+					if err != nil {
+						return err
+					}
+					statuses = append(statuses, status)
+				}
 			}
 			return writeValue(cmd, opts, statuses, func(w io.Writer) {
 				human := humanOutputOptions(cmd, opts)
 				rows := make([][]string, 0, len(statuses))
 				for _, status := range statuses {
-					state := "disconnected"
-					detail := firstNonEmpty(status.Message, "not connected")
-					permissions := output.JoinList(status.Permissions)
-					if status.Connected {
-						state = "connected"
-						detail = firstNonEmpty(status.WorkspaceName, status.WorkspaceID, status.TokenType, "connected")
+					tools := "-"
+					if status.Tools != nil {
+						tools = fmt.Sprintf("%d", *status.Tools)
 					}
 					rows = append(rows, []string{
-						status.Provider,
-						output.StatusBadge(human, state),
+						output.ToneText(human, output.ToneInfo, status.Name),
+						status.Kind,
+						output.StatusBadge(human, status.Status),
+						output.Value(status.Auth),
 						output.Value(status.Account),
-						output.Value(detail),
-						permissions,
+						mcpRemoteScopesLabel(status.Scopes),
+						tools,
+						status.URL,
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Provider", "Status", "Account", "Details", "Permissions"},
+					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Account", "Scope", "Tools", "URL"},
 					Rows:    rows,
-					Empty:   "no providers selected",
+					Empty:   "no toolboxes registered",
 				})
 			})
 		},
 	}
+}
+
+func selectedMCPRemoteEntries(args []string) ([]mcpRemoteServerEntry, error) {
+	entries, err := effectiveMCPRemoteServerEntries("")
+	if err != nil {
+		return nil, err
+	}
+	if len(args) == 0 {
+		return entries, nil
+	}
+	selected := make([]mcpRemoteServerEntry, 0, len(args))
+	seen := make(map[string]bool, len(args))
+	for _, arg := range args {
+		name, err := cleanMCPRemoteName(arg)
+		if err != nil {
+			return nil, err
+		}
+		if seen[name] {
+			continue
+		}
+		entry, ok := findMCPRemoteServerEntry(entries, name)
+		if !ok {
+			return nil, fmt.Errorf("toolbox %q is not registered", name)
+		}
+		seen[name] = true
+		selected = append(selected, entry)
+	}
+	return selected, nil
+}
+
+func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store credentials.Store, entry mcpRemoteServerEntry) (toolboxStatusItem, error) {
+	ref := mcpRemoteCredentialRef(opts, entry.Name)
+	item := toolboxStatusItem{
+		Name:         entry.Name,
+		Kind:         "remote-mcp",
+		Status:       "not_synced",
+		Auth:         mcpRemoteAuthLabel(false, credentials.OAuthTokens{}, entry.Server.AuthRequired),
+		Account:      ref.AccountID,
+		Scope:        mcpRemoteScopeLabel(entry.Scope),
+		Scopes:       mcpRemoteNormalizedScopes(entry.Scopes),
+		URL:          entry.Server.URL,
+		Transport:    entry.Server.Transport,
+		AuthRequired: entry.Server.AuthRequired,
+		Path:         entry.Path,
+	}
+	if cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name); err != nil {
+		return toolboxStatusItem{}, err
+	} else if ok {
+		count := len(cache.Tools)
+		syncedAt := cache.SyncedAt
+		item.Tools = &count
+		item.SyncedAt = &syncedAt
+		item.Status = "connected"
+	}
+	tokens, err := store.LoadOAuthTokens(ctx, ref)
+	if err != nil && !errors.Is(err, credentials.ErrNotFound) {
+		return toolboxStatusItem{}, err
+	}
+	authStored := err == nil
+	if entry.Server.AuthRequired != nil && *entry.Server.AuthRequired && !authStored {
+		item.Status = "needs_auth"
+	}
+	item.Auth = mcpRemoteAuthLabel(authStored, tokens, entry.Server.AuthRequired)
+	return item, nil
+}
+
+func mcpRemoteAuthLabel(stored bool, tokens credentials.OAuthTokens, authRequired *bool) string {
+	if stored {
+		if mcpRemoteStoredTokenIsOAuth(tokens) {
+			return "oauth"
+		}
+		return "bearer"
+	}
+	if authRequired == nil {
+		return "unknown"
+	}
+	if *authRequired {
+		return "missing"
+	}
+	return "not required"
 }
 
 func selectedProviders(args []string) ([]providers.Provider, error) {
@@ -1086,7 +1187,8 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpDisableSpec(),
 		mcpProfileSetSpec(),
 		mcpProfileDefaultSpec(),
-		mcpRemoteAddSpec(),
+		toolboxAddSpec(),
+		toolboxStatusSpec(),
 		mcpRemoteSyncSpec(),
 		mcpRemoteRenameSpec(),
 		mcpRemoteRemoveSpec(),
@@ -1155,6 +1257,12 @@ func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool
 }
 
 func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
+	if len(parts) >= 1 && parts[0] == "add" {
+		return toolboxAddSpec(), true
+	}
+	if len(parts) >= 1 && parts[0] == "status" {
+		return toolboxStatusSpec(), true
+	}
 	if len(parts) >= 1 && parts[0] == "schema" {
 		return schemaSpec(), true
 	}
@@ -1175,8 +1283,6 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	}
 	if len(parts) >= 2 && parts[0] == "mcp" {
 		switch parts[1] {
-		case "add", "register":
-			return mcpRemoteAddSpec(), true
 		case "sync":
 			return mcpRemoteSyncSpec(), true
 		case "rename":

@@ -72,7 +72,6 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(mcpConfigureCommand(opts))
 	cmd.AddCommand(mcpEnableCommand(opts))
 	cmd.AddCommand(mcpDisableCommand(opts))
-	cmd.AddCommand(mcpRemoteAddCommand(opts))
 	cmd.AddCommand(mcpRemoteSyncCommand(opts))
 	cmd.AddCommand(mcpRemoteRenameCommand(opts))
 	cmd.AddCommand(mcpRemoteRemoveCommand(opts))

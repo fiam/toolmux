@@ -84,7 +84,7 @@ func StatusBadge(opts Options, status string) string {
 	switch normalized {
 	case "ok", "active", "allowed", "complete", "connected":
 		tone = ToneSuccess
-	case "warn", "warning", "pending", "disconnected", "trashed":
+	case "warn", "warning", "pending", "disconnected", "needs_auth", "not_synced", "trashed":
 		tone = ToneWarning
 	case "fail", "failed", "error", "denied":
 		tone = ToneDanger

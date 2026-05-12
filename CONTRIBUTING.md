@@ -84,10 +84,11 @@ profile selection.
 
 Imported remote MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool
-metadata in the user cache directory. Use `toolmux mcp add`, `sync`,
-`rename`, `remove`, `ls`, `show`, `catalog`, and `defaults` for server
-definitions. Default arguments are non-secret config values applied only to
-remote tool schemas with matching top-level properties; explicit tool
+metadata in the user cache directory. Use top-level `toolmux add` to register
+remote MCP toolboxes from a catalog name or URL; use `toolmux mcp sync`,
+`rename`, `remove`, `ls`, `show`, `catalog`, and `defaults` for MCP-specific
+server maintenance. Default arguments are non-secret config values applied only
+to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
 the global config; require `--project` for project-local writes. Server config
 should record `auth_required` after sync or auth setup when the requirement is
@@ -113,21 +114,21 @@ Do not store bearer tokens, OAuth tokens, refresh tokens, dynamic client
 secrets, client secrets, auth codes, or authorization headers in YAML config or
 test fixtures. Remote Streamable HTTP support must handle both JSON and
 `text/event-stream` responses and preserve `Mcp-Session-Id` headers for
-sessionful servers. `mcp add` syncs tools by default; when the first sync gets
-an auth-required response and no auth is stored, it should start MCP OAuth,
-store auth, retry sync, and only then write the server config. Failed or
+sessionful servers. `toolmux add` syncs MCP tools by default; when the first
+sync gets an auth-required response and no auth is stored, it should start MCP
+OAuth, store auth, retry sync, and only then write the server config. Failed or
 cancelled OAuth must not leave a registered server behind. Keep `--no-sync`
 working for users who want registration without auth or sync. Custom URL adds
-must use the single `mcp add <name> <url>` form. OAuth tests should use fake
-upstreams for protected-resource metadata,
-authorization-server metadata, dynamic registration, loopback callbacks, PKCE,
-token exchange, and refresh. Stale caches should refresh opportunistically
-after about 24 hours without breaking
-use of an existing cache when refresh fails. Remote tool commands
+must use `toolmux add <url>` with `--name` when the derived name is not desired
+or would collide. OAuth tests should use fake upstreams for protected-resource
+metadata, authorization-server metadata, dynamic registration, loopback
+callbacks, PKCE, token exchange, and refresh. Stale caches should refresh
+opportunistically after about 24 hours without breaking use of an existing cache
+when refresh fails. Remote tool commands
 should translate representable top-level input-schema properties into flags,
 keep help focused on command usage, expose full schemas through the top-level
 `toolmux schema` command, and support `-v`/`--verbose` HTTP tracing with
-credential headers redacted. `toolmux mcp add` and `toolmux mcp sync` should
+credential headers redacted. `toolmux add` and `toolmux mcp sync` should
 support the same redacted tracing for sync-time debugging.
 `mcp catalog` must list built-in remotes regardless of registration state and
 support scriptable `--enable`/`--disable` plus interactive `--manage` toggling.
@@ -302,9 +303,10 @@ Use these commands while developing:
 ./bin/toolmux policy doctor
 ```
 
-Provider command metadata is data-driven. Root `status [provider...]` and
-`doctor [provider...]` are explicit commands with provider-aware policy checks,
-so do not add provider-specific status or doctor subcommands.
+Provider command metadata is data-driven. Root `status [toolbox...]` reports
+registered toolbox state and auth, while root `doctor [provider...]` remains
+the provider-aware diagnostics command. Do not add provider-specific status or
+doctor subcommands.
 
 Provider command paths, args, flags, group help, aliases, and leaf help belong
 in a provider-owned `actions.Spec` tree. Use one spec type for both groups and

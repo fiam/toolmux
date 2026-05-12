@@ -166,9 +166,9 @@ Policy evaluation requirements:
    flags, help, aliases, CLI commands, MCP tools, and REST routes should derive
    from one provider-owned action tree. Group nodes and leaf actions use the
    same metadata type, and upper layers walk that tree instead of maintaining
-   separate group and command models. Root `connect`, `disconnect`, `status`,
-   and `doctor` remain explicit provider-aware CLI commands instead of
-   generated provider subcommands.
+   separate group and command models. Root `add`, `connect`, `disconnect`,
+   `status`, and `doctor` remain explicit CLI commands instead of generated
+   provider subcommands.
 8. Keep provider command execution provider-owned. Providers expose action
    handlers and return structured results; CLI, future MCP, and future REST
    adapters invoke those handlers and render or serialize the same result types
@@ -290,10 +290,10 @@ Baseline commands:
 toolmux connect jira
 toolmux connect linear
 toolmux connect google
-toolmux mcp add notion
+toolmux add notion
 
 toolmux status
-toolmux status jira
+toolmux status notion
 toolmux doctor
 toolmux doctor jira
 toolmux connections ls
@@ -581,10 +581,11 @@ Out of scope for MVP:
 
 ## Cross-Provider Requirements
 
-All providers must support:
+All provider-like toolboxes must support:
 
-1. `connect`, `disconnect`, global `status [provider...]`, and global
-   `doctor [provider...]`.
+1. Registration through `toolmux add` where applicable, global
+   `status [toolbox...]`, and global `doctor [provider...]` for provider-owned
+   diagnostics.
 2. Local credential storage.
 3. Token refresh before expiry.
 4. Remote revocation where supported.
@@ -595,8 +596,8 @@ All providers must support:
 9. Command metadata for policy evaluation.
 10. Local policy enforcement before token access and provider API calls.
 11. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
-12. `status` output must show connection state plus known scopes/capabilities
-    or provider permissions.
+12. `status` output must show registered toolbox state, backend kind, stored
+    auth type, account, tool count, and source URL when available.
 13. `doctor` output must run core diagnostics plus provider-defined checks and
     include remediation when a check fails or warns.
 14. Human-friendly table output and stable JSON/YAML output for the same command.

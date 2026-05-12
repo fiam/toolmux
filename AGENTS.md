@@ -240,15 +240,17 @@ sessionful remote servers.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
 client registration when advertised; keep `--client-id` available for servers
-without registration. `toolmux mcp add` syncs tools by default; when the first
-sync returns an auth-required response and no auth is stored, it must start MCP
-OAuth, store auth, retry sync, and only then write the server config. Failed or
-cancelled OAuth must not leave a registered server behind. Keep `--no-sync`
-available for registration without auth or sync. Custom URL adds must use the
-single `mcp add <name> <url>` form. `toolmux mcp add`, `toolmux mcp sync`, and
-remote tool commands must support `-v`/`--verbose` redacted HTTP tracing for
-debugging. `toolmux mcp remove` and `rm` must accept one or more server names
-and must delete stored auth for removed server names in the active Toolmux
+without registration. Top-level `toolmux add` registers remote MCP toolboxes
+from a built-in catalog name or MCP URL and syncs tools by default. When the
+first sync returns an auth-required response and no auth is stored, it must
+start MCP OAuth, store auth, retry sync, and only then write the server config.
+Failed or cancelled OAuth must not leave a registered server behind. Keep
+`--no-sync` available for registration without auth or sync. Custom URL adds
+must use `toolmux add <url>` with `--name` when the derived name is not desired
+or would collide. `toolmux add`, `toolmux mcp sync`, and remote tool commands
+must support `-v`/`--verbose` redacted HTTP tracing for debugging.
+`toolmux mcp remove` and `rm` must accept one or more server names and must
+delete stored auth for removed server names in the active Toolmux
 profile/account. `toolmux mcp auth remove` must still delete matching stored
 auth after the server entry has already been removed.
 Stale remote caches should refresh
@@ -274,13 +276,14 @@ Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output
 plain and stable for agents.
 
-Connection status is owned by the root `status [provider...]` command, and
-diagnostics are owned by the root `doctor [provider...]` command. Do not add
-provider-specific `status` or `doctor` subcommands. Keep these root commands
-explicit and provider-aware; they construct their own policy specs before
-reading credentials.
+Toolbox status is owned by the root `status [toolbox...]` command, which should
+report registered toolbox state, backend kind, stored auth type, account, tool
+count, scope, and source URL when available. Do not add provider-specific
+`status` subcommands. The root status command must construct its own policy
+spec before reading credentials.
 
-`status` should report connection state and known scopes/capabilities.
+Diagnostics are owned by the root `doctor [provider...]` command. Do not add
+provider-specific `doctor` subcommands.
 `doctor` should run active core and provider-defined diagnostics with
 actionable remediation, while still checking policy before provider token reads.
 
@@ -358,7 +361,7 @@ Provider command paths, argument constraints, flags, group help, aliases, and
 leaf help must come from a provider-owned `actions.Spec` tree. Use the same
 type for group nodes and leaf actions, and let upper layers walk the tree
 instead of maintaining a parallel group model. Do not hardcode provider command
-trees or provider command flags in the Cobra root layer. Root `connect`,
+trees or provider command flags in the Cobra root layer. Root `add`, `connect`,
 `disconnect`, `status`, and `doctor` are the only code-driven CLI-only command
 surfaces.
 

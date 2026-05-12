@@ -39,7 +39,7 @@ Import a supported remote MCP server from the catalog:
 
 ```bash
 toolmux mcp catalog
-toolmux mcp catalog --enable grafana
+toolmux add grafana
 toolmux mcp auth login grafana
 toolmux mcp sync grafana
 toolmux grafana
@@ -48,7 +48,7 @@ toolmux grafana
 Try the public no-auth Iterate mock server:
 
 ```bash
-toolmux mcp add iterate
+toolmux add iterate
 toolmux iterate mock_echo --message hello
 ```
 
@@ -102,7 +102,7 @@ provider credentials are read:
 
 ```bash
 toolmux --read-only mcp ls -R
-toolmux --read-only mcp add demo https://example.com/mcp --no-sync
+toolmux --read-only add https://example.com/mcp --name demo --no-sync
 ```
 
 The first command can run. The second is blocked because it writes config.
@@ -192,7 +192,7 @@ definitions, and expose those tools in two places:
 Try the public no-auth Iterate mock server:
 
 ```bash
-toolmux mcp add iterate
+toolmux add iterate
 toolmux iterate mock_echo --message hello
 toolmux iterate mock_calculate --operation add --a 2 --b 3
 toolmux schema iterate mock_calculate
@@ -214,7 +214,7 @@ Use the Notion catalog entry for Notion work instead of a native Toolmux
 integration:
 
 ```bash
-toolmux mcp catalog --enable notion
+toolmux add notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion
@@ -224,7 +224,7 @@ Manage built-ins from the catalog:
 
 ```bash
 toolmux mcp catalog
-toolmux mcp catalog --enable cloudflare
+toolmux add cloudflare
 toolmux mcp auth login cloudflare
 toolmux mcp sync cloudflare
 toolmux cloudflare
@@ -234,7 +234,7 @@ Grafana Cloud uses hosted OAuth. The browser flow may ask for your Grafana
 Cloud stack URL before consent:
 
 ```bash
-toolmux mcp catalog --enable grafana
+toolmux add grafana
 toolmux mcp auth login grafana
 toolmux mcp sync grafana
 toolmux grafana
@@ -243,15 +243,24 @@ toolmux grafana
 Register a custom endpoint:
 
 ```bash
-toolmux mcp add linear-work https://mcp.linear.app/mcp --no-sync
+toolmux add https://mcp.linear.app/mcp --name linear-work --no-sync
 toolmux mcp auth login linear-work
 toolmux mcp sync linear-work
 toolmux linear-work
 ```
 
-The registered name becomes the command namespace. Registering `linear-work`
-exposes CLI commands as `toolmux linear-work <tool-name>` and MCP tools as
-`linear-work.<tool-name>`.
+The registered name becomes the command namespace. When `--name` is omitted for
+an MCP URL, Toolmux derives a default name from the URL host, such as `linear`
+for `https://mcp.linear.app/mcp`. MCP config stores the resolved URL, not the
+catalog shorthand. Registering `linear-work` exposes CLI commands as
+`toolmux linear-work <tool-name>` and MCP tools as `linear-work.<tool-name>`.
+
+Show registered toolboxes and their auth state:
+
+```bash
+toolmux status
+toolmux status linear-work
+```
 
 For repeated non-secret tool arguments, configure defaults on the registered
 remote. Defaults apply only to tools whose input schema has that argument, and
@@ -278,9 +287,8 @@ toolmux mcp ls linear-work --full-descriptions
 toolmux mcp ls -R --full-descriptions
 ```
 
-Use `-v`/`--verbose` on `toolmux mcp add`, `toolmux mcp sync`, or a remote
-tool command to print redacted Streamable HTTP requests and responses for
-debugging.
+Use `-v`/`--verbose` on `toolmux add`, `toolmux mcp sync`, or a remote tool
+command to print redacted Streamable HTTP requests and responses for debugging.
 
 Non-interactive output and JSON/YAML output keep the full cached metadata for
 agents and scripts.
