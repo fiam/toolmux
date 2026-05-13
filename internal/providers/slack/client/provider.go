@@ -334,10 +334,13 @@ func handleAuthSet(exec actions.Context, inv actions.Invocation) (any, error) {
 		TokenType:   "Bearer",
 		Extra:       extra,
 	}
+	validateProgress := exec.StartProgress("Validating Slack auth")
 	tokens, err = validateSlackAuth(exec, tokens)
 	if err != nil {
+		validateProgress.Warn("Slack auth validation failed")
 		return nil, err
 	}
+	validateProgress.Done("Slack auth verified")
 	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
 		return nil, err
 	}
@@ -356,18 +359,24 @@ func handleBrowserAuth(exec actions.Context, inv actions.Invocation) (any, error
 	if workspace == "" {
 		return nil, fmt.Errorf("slack browser auth requires --workspace <slack-subdomain>; pass --auth broker, --auth oauth, or token flags for other auth modes")
 	}
+	progress := newSlackBrowserAuthProgress(exec)
+	defer progress.Close()
 	session, err := slackAuthExtract(exec.Context, slackauth.Options{
 		Engine:          engine,
 		WorkspaceDomain: workspace,
 		Chooser:         slackAuthChooser(exec),
+		OnEvent:         progress.Event,
 		Timeout:         timeout(inv),
 	})
 	if err != nil {
+		progress.Warn("Slack browser auth failed")
 		return nil, fmt.Errorf("slack browser auth failed: %w", err)
 	}
 	if session == nil || strings.TrimSpace(session.Token) == "" || strings.TrimSpace(session.Cookie) == "" {
+		progress.Warn("Slack browser auth did not return credentials")
 		return nil, fmt.Errorf("slack browser auth did not return both token and cookie")
 	}
+	progress.Done("Received Slack browser credentials")
 	extra := map[string]string{
 		"auth_type": authTypeDirect,
 		"cookie":    normalizeSlackCookieHeader(session.Cookie),
@@ -389,10 +398,13 @@ func handleBrowserAuth(exec actions.Context, inv actions.Invocation) (any, error
 		TokenType:   "Bearer",
 		Extra:       extra,
 	}
+	validateProgress := exec.StartProgress("Validating Slack auth")
 	tokens, err = validateSlackAuth(exec, tokens)
 	if err != nil {
+		validateProgress.Warn("Slack auth validation failed")
 		return nil, err
 	}
+	validateProgress.Done("Slack auth verified")
 	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
 		return nil, err
 	}
@@ -477,6 +489,94 @@ func slackAuthChooser(exec actions.Context) func([]slackauth.Team) (slackauth.Te
 	}
 }
 
+type slackBrowserAuthProgress struct {
+	exec    actions.Context
+	current actions.ProgressHandle
+}
+
+func newSlackBrowserAuthProgress(exec actions.Context) *slackBrowserAuthProgress {
+	return &slackBrowserAuthProgress{exec: exec}
+}
+
+func (progress *slackBrowserAuthProgress) Event(event slackauth.Event) {
+	message := slackBrowserAuthProgressMessage(event)
+	if message == "" {
+		return
+	}
+	switch event.Kind {
+	case slackauth.EventWaiting:
+		if progress.current == nil {
+			progress.current = progress.exec.StartProgress(message)
+			return
+		}
+		progress.current.Update(message)
+	case slackauth.EventExpectingAuth:
+		progress.Stop()
+		progress.exec.ProgressWarn(message)
+	case slackauth.EventLaunching, slackauth.EventInfo:
+		progress.Stop()
+		progress.exec.ProgressStatus(message)
+	default:
+		progress.Stop()
+		progress.exec.ProgressStatus(message)
+	}
+}
+
+func (progress *slackBrowserAuthProgress) Stop() {
+	if progress.current == nil {
+		return
+	}
+	progress.current.Stop()
+	progress.current = nil
+}
+
+func (progress *slackBrowserAuthProgress) Warn(message string) {
+	if progress.current == nil {
+		progress.exec.ProgressWarn(message)
+		return
+	}
+	progress.current.Warn(message)
+	progress.current = nil
+}
+
+func (progress *slackBrowserAuthProgress) Done(message string) {
+	if progress.current == nil {
+		progress.exec.ProgressDone(message)
+		return
+	}
+	progress.current.Done(message)
+	progress.current = nil
+}
+
+func (progress *slackBrowserAuthProgress) Close() {
+	progress.Stop()
+}
+
+func slackBrowserAuthProgressMessage(event slackauth.Event) string {
+	detail := strings.TrimSpace(event.Detail)
+	switch event.Kind {
+	case slackauth.EventLaunching:
+		if detail == "" {
+			return "Launching Slack browser auth"
+		}
+		return "Launching Slack browser auth in " + detail
+	case slackauth.EventExpectingAuth:
+		if detail == "" {
+			return "Slack browser auth needs approval"
+		}
+		return detail
+	case slackauth.EventWaiting:
+		if detail == "" {
+			return "Waiting for Slack browser auth"
+		}
+		return detail
+	case slackauth.EventInfo:
+		return detail
+	default:
+		return detail
+	}
+}
+
 func handleAuthLogin(exec actions.Context, inv actions.Invocation) (any, error) {
 	clientID := strings.TrimSpace(inv.String("client-id"))
 	if clientID == "" {
@@ -510,17 +610,25 @@ func handleAuthLogin(exec actions.Context, inv actions.Invocation) (any, error) 
 	if err := exec.OpenBrowser(authURL); err != nil {
 		return nil, err
 	}
+	exec.ProgressStatus("Opened browser for Slack OAuth")
+	callbackProgress := exec.StartProgress("Waiting for Slack OAuth callback")
 	result, err := callback.wait(exec.Context, timeout(inv))
 	if err != nil {
+		callbackProgress.Warn("Slack OAuth callback wait failed")
 		return nil, err
 	}
 	if result.Err != nil {
+		callbackProgress.Warn("Slack OAuth callback failed")
 		return nil, result.Err
 	}
+	callbackProgress.Done("Received Slack OAuth callback")
+	exchangeProgress := exec.StartProgress("Exchanging Slack OAuth code")
 	tokens, err := slackapi.ExchangeOAuthCode(exec.Context, exec.HTTPClient, options, result.Code, time.Now())
 	if err != nil {
+		exchangeProgress.Warn("Slack OAuth token exchange failed")
 		return nil, err
 	}
+	exchangeProgress.Done("Received Slack OAuth token")
 	tokens.Extra = mergeExtra(tokens.Extra, map[string]string{
 		"auth_type":     authTypeUser,
 		"client_id":     clientID,
@@ -528,10 +636,13 @@ func handleAuthLogin(exec actions.Context, inv actions.Invocation) (any, error) 
 		"token_url":     options.TokenURL,
 		"token_source":  options.TokenSource,
 	})
+	validateProgress := exec.StartProgress("Validating Slack auth")
 	tokens, err = validateSlackAuth(exec, tokens)
 	if err != nil {
+		validateProgress.Warn("Slack auth validation failed")
 		return nil, err
 	}
+	validateProgress.Done("Slack auth verified")
 	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
 		return nil, err
 	}
@@ -539,28 +650,38 @@ func handleAuthLogin(exec actions.Context, inv actions.Invocation) (any, error) 
 }
 
 func handleBrokerLogin(exec actions.Context, inv actions.Invocation) (any, error) {
+	sessionProgress := exec.StartProgress("Creating Slack broker OAuth session")
 	session, err := createBrokerSession(exec, inv)
 	if err != nil {
+		sessionProgress.Warn("Slack broker OAuth session failed")
 		return nil, err
 	}
+	sessionProgress.Done("Created Slack broker OAuth session")
 	if exec.OpenBrowser == nil {
 		return nil, fmt.Errorf("browser opener is not configured")
 	}
 	if err := exec.OpenBrowser(session.AuthURL); err != nil {
 		return nil, err
 	}
+	exec.ProgressStatus("Opened browser for Slack broker OAuth")
+	pollProgress := exec.StartProgress("Waiting for Slack broker OAuth")
 	tokens, err := pollBrokerSession(exec, session.SessionID, timeout(inv))
 	if err != nil {
+		pollProgress.Warn("Slack broker OAuth failed")
 		return nil, err
 	}
+	pollProgress.Done("Received Slack broker OAuth token")
 	tokens.Extra = mergeExtra(tokens.Extra, map[string]string{
 		"auth_type":  authTypeBroker,
 		"broker_url": strings.TrimRight(exec.ToolmuxdURL, "/"),
 	})
+	validateProgress := exec.StartProgress("Validating Slack auth")
 	tokens, err = validateSlackAuth(exec, tokens)
 	if err != nil {
+		validateProgress.Warn("Slack auth validation failed")
 		return nil, err
 	}
+	validateProgress.Done("Slack auth verified")
 	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
 		return nil, err
 	}

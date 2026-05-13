@@ -51,6 +51,7 @@ type Context struct {
 	OpenBrowser   func(string) error
 	SelectString  func(context.Context, SelectStringRequest) (string, bool, error)
 	SelectInteger func(context.Context, SelectIntegerRequest) (int, bool, error)
+	Progress      ProgressReporter
 }
 
 type SelectStringRequest struct {
@@ -78,6 +79,52 @@ type SelectIntegerOption struct {
 	Label string
 	Value int
 }
+
+type ProgressReporter interface {
+	Start(message string) ProgressHandle
+	Status(message string)
+	Warn(message string)
+	Done(message string)
+}
+
+type ProgressHandle interface {
+	Update(message string)
+	Stop()
+	Warn(message string)
+	Done(message string)
+}
+
+func (ctx Context) StartProgress(message string) ProgressHandle {
+	if ctx.Progress == nil {
+		return noopProgressHandle{}
+	}
+	return ctx.Progress.Start(message)
+}
+
+func (ctx Context) ProgressStatus(message string) {
+	if ctx.Progress != nil {
+		ctx.Progress.Status(message)
+	}
+}
+
+func (ctx Context) ProgressWarn(message string) {
+	if ctx.Progress != nil {
+		ctx.Progress.Warn(message)
+	}
+}
+
+func (ctx Context) ProgressDone(message string) {
+	if ctx.Progress != nil {
+		ctx.Progress.Done(message)
+	}
+}
+
+type noopProgressHandle struct{}
+
+func (noopProgressHandle) Update(string) {}
+func (noopProgressHandle) Stop()         {}
+func (noopProgressHandle) Warn(string)   {}
+func (noopProgressHandle) Done(string)   {}
 
 type Handler func(Context, Invocation) (any, error)
 

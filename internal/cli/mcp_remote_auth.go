@@ -142,27 +142,32 @@ func loginMCPRemoteOAuth(cmd *cobra.Command, opts *options, entry mcpRemoteServe
 	}
 	ctx := commandContext(cmd)
 	ui := newConnectUI(cmd, opts)
-	ui.status("Discovering MCP OAuth metadata")
+	discoveryProgress := ui.Start("Discovering MCP OAuth metadata")
 	discovery, err := discoverMCPRemoteOAuth(ctx, client, entry.Server, login.AuthServer)
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth metadata discovery failed")
 		return credentials.OAuthTokens{}, err
 	}
 	state, err := mcpRemoteRandomURLToken(32)
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth setup failed")
 		return credentials.OAuthTokens{}, err
 	}
 	callback, err := startMCPRemoteOAuthCallback(login.RedirectPort, state, mcpRemoteOAuthCallbackPageFor(entry, discovery))
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth callback listener failed")
 		return credentials.OAuthTokens{}, err
 	}
 	defer callback.shutdown()
 
 	verifier, challenge, err := newMCPRemotePKCE()
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth PKCE setup failed")
 		return credentials.OAuthTokens{}, err
 	}
 	oauthClient, err := resolveMCPRemoteOAuthClient(ctx, client, discovery.Authorization, callback.redirectURI, login)
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth client setup failed")
 		return credentials.OAuthTokens{}, err
 	}
 	scopes := cleanMCPRemoteOAuthScopes(login.Scopes)
@@ -171,9 +176,10 @@ func loginMCPRemoteOAuth(cmd *cobra.Command, opts *options, entry mcpRemoteServe
 	}
 	authURL, err := mcpRemoteOAuthAuthorizationURL(discovery.Authorization.AuthorizationEndpoint, oauthClient.ClientID, callback.redirectURI, state, challenge, discovery.ResourceURI, scopes)
 	if err != nil {
+		discoveryProgress.Warn("MCP OAuth authorization URL setup failed")
 		return credentials.OAuthTokens{}, err
 	}
-	ui.done("Discovered MCP OAuth metadata")
+	discoveryProgress.Done("Discovered MCP OAuth metadata")
 	fmt.Fprintf(cmd.OutOrStdout(), "open this URL to authorize MCP server %s:\n%s\n", entry.Name, authURL)
 	fmt.Fprintf(cmd.OutOrStdout(), "redirect URI:\n%s\n", callback.redirectURI)
 	if ui.interactive && !login.NoBrowser {
@@ -183,20 +189,25 @@ func loginMCPRemoteOAuth(cmd *cobra.Command, opts *options, entry mcpRemoteServe
 			ui.status("Opened browser for MCP authorization")
 		}
 	}
+	callbackProgress := ui.Start("Waiting for MCP OAuth callback")
 	result, err := callback.wait(ctx, login.Timeout)
 	if err != nil {
+		callbackProgress.Warn("MCP OAuth callback wait failed")
 		return credentials.OAuthTokens{}, err
 	}
 	if result.Err != nil {
+		callbackProgress.Warn("MCP OAuth callback failed")
 		return credentials.OAuthTokens{}, result.Err
 	}
-	ui.status("Exchanging MCP OAuth code")
+	callbackProgress.Done("Received MCP OAuth callback")
+	exchangeProgress := ui.Start("Exchanging MCP OAuth code")
 	tokens, err := exchangeMCPRemoteOAuthCode(ctx, client, discovery, oauthClient, callback.redirectURI, result.Code, verifier, scopes)
 	if err != nil {
+		exchangeProgress.Warn("MCP OAuth token exchange failed")
 		return credentials.OAuthTokens{}, err
 	}
 	tokens.Extra = mcpRemoteOAuthTokenExtra(entry, discovery, oauthClient, scopes, tokens.Extra)
-	ui.done("MCP OAuth authorization complete")
+	exchangeProgress.Done("MCP OAuth authorization complete")
 	return tokens, nil
 }
 

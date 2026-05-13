@@ -298,6 +298,9 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 	if execCtx.OpenBrowser == nil && execCtx.Interactive {
 		execCtx.OpenBrowser = openURL
 	}
+	execCtx.Progress = newConnectUI(cmd, opts)
+	execCtx.SelectString = selectString(cmd)
+	execCtx.SelectInteger = selectInteger(cmd)
 	result, err := provider.AddHandler(execCtx, actions.Invocation{
 		Spec:  toolboxAddSpec(),
 		Args:  append([]string(nil), args...),
@@ -2465,21 +2468,29 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 }
 
 func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
+	ui := newConnectUI(cmd, opts)
+	syncProgress := ui.Start("Syncing MCP server metadata")
 	cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 	if err == nil {
+		syncProgress.Done("Synced MCP server metadata")
 		return cache, authRequired, nil
 	}
 	if !mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
+		syncProgress.Warn("MCP server metadata sync failed")
 		return mcpRemoteCache{}, false, err
 	}
 	if _, ok, loadErr := loadMCPRemoteStoredTokens(commandContext(cmd), opts, entry.Name); loadErr != nil {
+		syncProgress.Warn("MCP stored auth lookup failed")
 		return mcpRemoteCache{}, false, loadErr
 	} else if ok {
+		syncProgress.Warn("MCP server metadata sync needs refreshed auth")
 		return mcpRemoteCache{}, true, err
 	}
 	if authErr := authorize(cmd, opts, mcpRemoteAuthLoginSpec(), []string{entry.Name}); authErr != nil {
+		syncProgress.Warn("MCP OAuth login denied")
 		return mcpRemoteCache{}, true, fmt.Errorf("%s; OAuth login was denied: %w", err.Error(), authErr)
 	}
+	syncProgress.Done("MCP server requires OAuth")
 	fmt.Fprintf(cmd.OutOrStdout(), "MCP server %s requires auth; starting OAuth login\n", entry.Name)
 	tokens, loginErr := loginMCPRemoteOAuth(cmd, opts, entry, mcpRemoteAuthLoginOptions{Timeout: 2 * time.Minute})
 	if loginErr != nil {
@@ -2493,7 +2504,13 @@ func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemo
 		return mcpRemoteCache{}, true, saveErr
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "stored OAuth token for MCP server %s\n", entry.Name)
+	retryProgress := ui.Start("Syncing MCP server metadata with stored auth")
 	cache, _, err = syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+	if err != nil {
+		retryProgress.Warn("Authenticated MCP server metadata sync failed")
+	} else {
+		retryProgress.Done("Synced MCP server metadata")
+	}
 	return cache, true, err
 }
 

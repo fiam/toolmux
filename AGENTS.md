@@ -213,7 +213,9 @@ pagers, prompts, or table layouts.
 
 Provider commands must return structured results and route all presentation
 through `internal/output`. Human table output may use shared styles, color,
-hyperlinks, markdown rendering, compact tables, and pagers when stdout is a TTY.
+hyperlinks, markdown rendering, compact tables, progress spinners, and pagers
+when stdout is a TTY. Provider-owned long-running work should report status
+through `actions.ProgressReporter` instead of printing terminal UI directly.
 JSON/YAML output must stay stable and undecorated: no ANSI escape sequences, no
 pagers, no prompts, no progress animation, and no browser opens.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,6 +24,8 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 	var gotOptions slackauth.Options
 	slackAuthExtract = func(_ context.Context, opts slackauth.Options) (*slackauth.Session, error) {
 		gotOptions = opts
+		opts.OnEvent(slackauth.Event{Kind: slackauth.EventLaunching, Detail: "Test Browser"})
+		opts.OnEvent(slackauth.Event{Kind: slackauth.EventWaiting, Detail: "Waiting for test Slack login"})
 		return &slackauth.Session{
 			TeamID:     "T123",
 			TeamName:   "Acme",
@@ -56,6 +59,7 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 	t.Cleanup(upstream.Close)
 
 	store := credentials.NewMemoryStore()
+	progress := &recordingProgress{}
 	_, err := handleAdd(actions.Context{
 		Context:     context.Background(),
 		Credentials: store,
@@ -63,6 +67,7 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 		Profile:     "default",
 		Provider:    providerID,
 		ProviderURL: upstream.URL + "/api",
+		Progress:    progress,
 	}, actions.Invocation{Flags: map[string]any{
 		"account":         defaultAccount,
 		"auth":            "",
@@ -78,6 +83,17 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 	}
 	if gotOptions.WorkspaceDomain != "acme" {
 		t.Fatalf("expected workspace domain acme, got %q", gotOptions.WorkspaceDomain)
+	}
+	for _, want := range []string{
+		"status:Launching Slack browser auth in Test Browser",
+		"start:Waiting for test Slack login",
+		"done:Received Slack browser credentials",
+		"start:Validating Slack auth",
+		"done:Slack auth verified",
+	} {
+		if !progress.Contains(want) {
+			t.Fatalf("expected progress event %q, got %#v", want, progress.events)
+		}
 	}
 
 	tokens, err := store.LoadOAuthTokens(context.Background(), credentials.ConnectionRef{
@@ -129,4 +145,53 @@ func upstreamURL(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+type recordingProgress struct {
+	events []string
+}
+
+func (progress *recordingProgress) Start(message string) actions.ProgressHandle {
+	progress.record("start:" + message)
+	return &recordingProgressHandle{progress: progress}
+}
+
+func (progress *recordingProgress) Status(message string) {
+	progress.record("status:" + message)
+}
+
+func (progress *recordingProgress) Warn(message string) {
+	progress.record("warn:" + message)
+}
+
+func (progress *recordingProgress) Done(message string) {
+	progress.record("done:" + message)
+}
+
+func (progress *recordingProgress) Contains(event string) bool {
+	return slices.Contains(progress.events, event)
+}
+
+func (progress *recordingProgress) record(event string) {
+	progress.events = append(progress.events, event)
+}
+
+type recordingProgressHandle struct {
+	progress *recordingProgress
+}
+
+func (handle *recordingProgressHandle) Update(message string) {
+	handle.progress.record("update:" + message)
+}
+
+func (handle *recordingProgressHandle) Stop() {
+	handle.progress.record("stop")
+}
+
+func (handle *recordingProgressHandle) Warn(message string) {
+	handle.progress.record("warn:" + message)
+}
+
+func (handle *recordingProgressHandle) Done(message string) {
+	handle.progress.record("done:" + message)
 }

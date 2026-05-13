@@ -232,8 +232,9 @@ ID.
 ## Output For Humans And Scripts
 
 Human output is the default. When stdout is a terminal, Toolmux can use tables,
-colors, Markdown rendering, links, pagers, browser opens, and interactive
-selectors.
+colors, Markdown rendering, links, pagers, browser opens, progress spinners,
+and interactive selectors. Long auth flows show status while Toolmux waits for
+browser approval, callback receipt, token exchange, and credential validation.
 
 Use structured output when another program is reading the result:
 

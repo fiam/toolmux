@@ -246,6 +246,9 @@ provider-specific fake upstream behavior kept in provider fixtures.
 Provider commands should be useful for both humans and agents. If a command
 adds a prompt, browser open, pager, spinner, or selector, it must be gated on
 interactive terminal use and must not affect JSON/YAML output.
+Long-running provider work should report progress through the shared
+`actions.ProgressReporter` surface instead of printing provider-owned terminal
+UI directly.
 
 MCP tools are generated from the same provider action specs as Cobra commands.
 Do not add separate MCP-only provider command trees. If a provider action is

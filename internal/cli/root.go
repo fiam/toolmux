@@ -14,8 +14,11 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/huh"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
@@ -721,6 +724,7 @@ func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
 				if execCtx.OpenBrowser == nil && execCtx.Interactive {
 					execCtx.OpenBrowser = openURL
 				}
+				execCtx.Progress = newConnectUI(cmd, opts)
 				execCtx.SelectString = selectString(cmd)
 				execCtx.SelectInteger = selectInteger(cmd)
 				result, err := handler(execCtx, actions.Invocation{
@@ -1354,12 +1358,14 @@ func writeValue(cmd *cobra.Command, opts *options, value any, table func(io.Writ
 }
 
 type connectUI struct {
-	w           io.Writer
-	output      *termenv.Output
-	palette     semanticPalette
-	interactive bool
-	color       bool
-	active      bool
+	w            io.Writer
+	output       *termenv.Output
+	styles       connectStyles
+	spinner      spinner.Spinner
+	mu           sync.Mutex
+	active       *connectProgressHandle
+	interactive  bool
+	clearOnWrite bool
 }
 
 type semanticTone string
@@ -1371,89 +1377,262 @@ const (
 )
 
 type semanticPalette struct {
-	info    termenv.Color
-	success termenv.Color
-	warning termenv.Color
+	info    string
+	success string
+	warning string
+	muted   string
+}
+
+type connectStyles struct {
+	info    lipgloss.Style
+	success lipgloss.Style
+	warning lipgloss.Style
+	muted   lipgloss.Style
+	spinner lipgloss.Style
 }
 
 func newConnectUI(cmd *cobra.Command, opts *options) *connectUI {
 	stderr := cmd.ErrOrStderr()
 	interactive := opts.output == "table" && isTerminal(cmd.OutOrStdout()) && isTerminal(stderr)
-	output := termenv.NewOutput(stderr, termenv.WithProfile(termenv.EnvColorProfile()), termenv.WithTTY(interactive))
+	terminal := termenv.NewOutput(stderr, termenv.WithProfile(termenv.EnvColorProfile()), termenv.WithTTY(interactive))
+	color := interactive && colorEnabled(opts.color, interactive)
+	palette := semanticPaletteFor(terminal, interactive)
 	return &connectUI{
-		w:           stderr,
-		output:      output,
-		palette:     semanticPaletteFor(output, interactive),
-		interactive: interactive,
-		color:       interactive && colorEnabled(opts.color, interactive),
+		w:            stderr,
+		output:       terminal,
+		styles:       newConnectStyles(color, palette),
+		spinner:      spinner.Line,
+		interactive:  interactive,
+		clearOnWrite: interactive,
 	}
+}
+
+func (ui *connectUI) Start(message string) actions.ProgressHandle {
+	if !ui.interactive {
+		return noopCLIProgressHandle{}
+	}
+	handle := &connectProgressHandle{
+		ui:      ui,
+		message: strings.TrimSpace(message),
+		done:    make(chan struct{}),
+	}
+	ui.mu.Lock()
+	ui.stopLocked()
+	ui.active = handle
+	ui.mu.Unlock()
+	go handle.run()
+	return handle
+}
+
+func (ui *connectUI) Status(message string) {
+	if !ui.interactive {
+		return
+	}
+	ui.writeLine(toneInfo, "i", message)
+}
+
+func (ui *connectUI) Warn(message string) {
+	if !ui.interactive {
+		return
+	}
+	ui.writeLine(toneWarning, "!", message)
+}
+
+func (ui *connectUI) Done(message string) {
+	if !ui.interactive {
+		return
+	}
+	ui.writeLine(toneSuccess, "+", message)
 }
 
 func (ui *connectUI) status(format string, args ...any) {
-	if !ui.interactive {
-		return
-	}
-	ui.stop()
-	fmt.Fprintf(ui.w, "%s %s\n", ui.marker(toneInfo, "i"), fmt.Sprintf(format, args...))
+	ui.Status(fmt.Sprintf(format, args...))
 }
 
 func (ui *connectUI) warn(format string, args ...any) {
-	if !ui.interactive {
-		return
-	}
-	ui.stop()
-	fmt.Fprintf(ui.w, "%s %s\n", ui.marker(toneWarning, "!"), fmt.Sprintf(format, args...))
+	ui.Warn(fmt.Sprintf(format, args...))
 }
 
-func (ui *connectUI) done(format string, args ...any) {
-	if !ui.interactive {
-		return
-	}
-	ui.stop()
-	fmt.Fprintf(ui.w, "%s %s\n", ui.marker(toneSuccess, "+"), fmt.Sprintf(format, args...))
+func (ui *connectUI) writeLine(tone semanticTone, marker, message string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.stopLocked()
+	fmt.Fprintf(ui.w, "%s %s\n", ui.marker(tone, marker), strings.TrimSpace(message))
 }
 
-func (ui *connectUI) stop() {
-	if !ui.interactive || !ui.active {
+func (ui *connectUI) stopLocked() {
+	if ui.active != nil {
+		ui.active.close()
+		ui.active = nil
+	}
+	ui.clearLineLocked()
+}
+
+func (ui *connectUI) clearLineLocked() {
+	if !ui.clearOnWrite {
 		return
 	}
 	fmt.Fprint(ui.w, "\r")
-	ui.output.ClearLine()
-	ui.active = false
+	if ui.output != nil {
+		ui.output.ClearLine()
+	}
 }
 
 func (ui *connectUI) marker(tone semanticTone, value string) string {
-	if !ui.color {
-		return value
-	}
 	switch tone {
 	case toneInfo:
-		return termenv.String(value).Foreground(ui.palette.info).String()
+		return ui.styles.info.Render(value)
 	case toneSuccess:
-		return termenv.String(value).Foreground(ui.palette.success).String()
+		return ui.styles.success.Render(value)
 	case toneWarning:
-		return termenv.String(value).Foreground(ui.palette.warning).String()
+		return ui.styles.warning.Render(value)
 	default:
 		return value
 	}
 }
 
-func semanticPaletteFor(output *termenv.Output, interactive bool) semanticPalette {
-	profile := termenv.EnvColorProfile()
-	if output != nil {
-		profile = output.Profile
+type connectProgressHandle struct {
+	ui      *connectUI
+	message string
+	frame   int
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (handle *connectProgressHandle) run() {
+	handle.render()
+	interval := handle.ui.spinner.FPS
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
 	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-handle.done:
+			return
+		case <-ticker.C:
+			handle.ui.mu.Lock()
+			if handle.ui.active != handle {
+				handle.ui.mu.Unlock()
+				return
+			}
+			handle.frame++
+			handle.renderLocked()
+			handle.ui.mu.Unlock()
+		}
+	}
+}
+
+func (handle *connectProgressHandle) Update(message string) {
+	handle.ui.mu.Lock()
+	defer handle.ui.mu.Unlock()
+	if handle.ui.active != handle {
+		return
+	}
+	handle.message = strings.TrimSpace(message)
+	handle.renderLocked()
+}
+
+func (handle *connectProgressHandle) Stop() {
+	handle.ui.mu.Lock()
+	defer handle.ui.mu.Unlock()
+	if handle.ui.active == handle {
+		handle.close()
+		handle.ui.active = nil
+		handle.ui.clearLineLocked()
+		return
+	}
+	handle.close()
+}
+
+func (handle *connectProgressHandle) Warn(message string) {
+	handle.finish(toneWarning, "!", message)
+}
+
+func (handle *connectProgressHandle) Done(message string) {
+	handle.finish(toneSuccess, "+", message)
+}
+
+func (handle *connectProgressHandle) finish(tone semanticTone, marker, message string) {
+	handle.ui.mu.Lock()
+	defer handle.ui.mu.Unlock()
+	if handle.ui.active != handle {
+		handle.close()
+		return
+	}
+	handle.close()
+	handle.ui.active = nil
+	handle.ui.clearLineLocked()
+	fmt.Fprintf(handle.ui.w, "%s %s\n", handle.ui.marker(tone, marker), strings.TrimSpace(message))
+}
+
+func (handle *connectProgressHandle) render() {
+	handle.ui.mu.Lock()
+	defer handle.ui.mu.Unlock()
+	if handle.ui.active != handle {
+		return
+	}
+	handle.renderLocked()
+}
+
+func (handle *connectProgressHandle) renderLocked() {
+	handle.ui.clearLineLocked()
+	frames := handle.ui.spinner.Frames
+	frame := "-"
+	if len(frames) > 0 {
+		frame = frames[handle.frame%len(frames)]
+	}
+	fmt.Fprintf(handle.ui.w, "%s %s", handle.ui.styles.spinner.Render(frame), handle.ui.styles.muted.Render(handle.message))
+}
+
+func (handle *connectProgressHandle) close() {
+	handle.once.Do(func() {
+		close(handle.done)
+	})
+}
+
+type noopCLIProgressHandle struct{}
+
+func (noopCLIProgressHandle) Update(string) {}
+func (noopCLIProgressHandle) Stop()         {}
+func (noopCLIProgressHandle) Warn(string)   {}
+func (noopCLIProgressHandle) Done(string)   {}
+
+func newConnectStyles(color bool, palette semanticPalette) connectStyles {
+	if !color {
+		style := lipgloss.NewStyle()
+		return connectStyles{
+			info:    style,
+			success: style,
+			warning: style,
+			muted:   style,
+			spinner: style,
+		}
+	}
+	return connectStyles{
+		info:    lipgloss.NewStyle().Foreground(lipgloss.Color(palette.info)),
+		success: lipgloss.NewStyle().Foreground(lipgloss.Color(palette.success)),
+		warning: lipgloss.NewStyle().Foreground(lipgloss.Color(palette.warning)),
+		muted:   lipgloss.NewStyle().Foreground(lipgloss.Color(palette.muted)),
+		spinner: lipgloss.NewStyle().Foreground(lipgloss.Color(palette.info)),
+	}
+}
+
+func semanticPaletteFor(output *termenv.Output, interactive bool) semanticPalette {
 	if interactive && output != nil && !output.HasDarkBackground() {
 		return semanticPalette{
-			info:    profile.Color("#0969da"),
-			success: profile.Color("#1a7f37"),
-			warning: profile.Color("#9a6700"),
+			info:    "#0969da",
+			success: "#1a7f37",
+			warning: "#9a6700",
+			muted:   "#6e7781",
 		}
 	}
 	return semanticPalette{
-		info:    profile.Color("#7dd3fc"),
-		success: profile.Color("#86efac"),
-		warning: profile.Color("#facc15"),
+		info:    "#7dd3fc",
+		success: "#86efac",
+		warning: "#facc15",
+		muted:   "#8ea0b8",
 	}
 }
 
