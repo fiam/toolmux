@@ -2318,6 +2318,8 @@ func mcpBuiltinRemoteServers() map[string]mcpRemoteServer {
 
 func mcpBuiltinRemoteCatalog() map[string]mcpRemoteCatalogDefinition {
 	return map[string]mcpRemoteCatalogDefinition{
+		"airtable": {Server: mcpRemoteServer{URL: "https://mcp.airtable.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"asana":    {Server: mcpRemoteServer{URL: "https://mcp.asana.com/v2/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
 		"atlassian": {
 			Server: mcpRemoteServer{URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
 			DefaultArgumentHints: []mcpRemoteDefaultArgumentHint{{
@@ -2327,11 +2329,30 @@ func mcpBuiltinRemoteCatalog() map[string]mcpRemoteCatalogDefinition {
 			}},
 		},
 		"cloudflare": {Server: mcpRemoteServer{URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"excalidraw": {Server: mcpRemoteServer{URL: "https://mcp.excalidraw.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"figma":      {Server: mcpRemoteServer{URL: "https://mcp.figma.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"gainsight":  {Server: mcpRemoteServer{URL: "https://mcp.staircase.ai/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"github":     {Server: mcpRemoteServer{URL: "https://api.githubcopilot.com/mcp/", Transport: mcpRemoteTransportStreamableHTTP}},
 		"grafana":    {Server: mcpRemoteServer{URL: "https://mcp.grafana.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"iterate":    {Server: mcpRemoteServer{URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP}},
-		"linear":     {Server: mcpRemoteServer{URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"miro":       {Server: mcpRemoteServer{URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP}},
-		"notion":     {Server: mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"granola":    {Server: mcpRemoteServer{URL: "https://mcp.granola.ai/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"incident-io": {
+			Server: mcpRemoteServer{URL: "https://mcp.incident.io/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		},
+		"iterate": {Server: mcpRemoteServer{URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP}},
+		"linear":  {Server: mcpRemoteServer{URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"miro":    {Server: mcpRemoteServer{URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP}},
+		"notion":  {Server: mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"posthog": {Server: mcpRemoteServer{URL: "https://mcp.posthog.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"sentry":  {Server: mcpRemoteServer{URL: "https://mcp.sentry.dev/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+		"stripe":  {Server: mcpRemoteServer{URL: "https://mcp.stripe.com", Transport: mcpRemoteTransportStreamableHTTP}},
+		"supabase": {
+			Server: mcpRemoteServer{URL: "https://mcp.supabase.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+		},
+		"vercel": {Server: mcpRemoteServer{URL: "https://mcp.vercel.com", Transport: mcpRemoteTransportStreamableHTTP}},
+		"zoom": {
+			Server: mcpRemoteServer{URL: "https://mcp.zoom.us/mcp/zoom/streamable", Transport: mcpRemoteTransportStreamableHTTP},
+		},
+		"zoominfo": {Server: mcpRemoteServer{URL: "https://mcp.zoominfo.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
 	}
 }
 

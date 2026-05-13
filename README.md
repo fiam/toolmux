@@ -23,7 +23,7 @@ toolboxes, and local agent setup for Codex, Claude Code, and Gemini CLI.
 | Area | What is supported |
 | --- | --- |
 | Native toolboxes | Slack |
-| Remote MCP catalog | Atlassian, Cloudflare, Grafana, Iterate, Linear, Miro, Notion |
+| Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux catalog --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
 | Agents | Codex, Claude Code, Gemini CLI |
 | Workflow templates | `slack-recap` |
@@ -40,6 +40,15 @@ toolmux workflow templates
 
 `toolmux catalog` lists every built-in toolbox and includes a `Type` column so
 you can distinguish remote MCP toolboxes from internal Toolmux toolboxes.
+Built-in remote MCP entries currently include:
+
+```text
+airtable      asana       atlassian   cloudflare   excalidraw
+figma         gainsight   github      grafana      granola
+incident-io   iterate     linear      miro         notion
+posthog       sentry      stripe      supabase     vercel
+zoom          zoominfo
+```
 
 <p align="center">
   <img src="docs/assets/toolmux-demo.gif" alt="Toolmux terminal demo">

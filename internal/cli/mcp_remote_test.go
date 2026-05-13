@@ -160,6 +160,41 @@ func TestMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
 	}
 }
 
+func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]string{
+		"airtable":    "https://mcp.airtable.com/mcp",
+		"asana":       "https://mcp.asana.com/v2/mcp",
+		"excalidraw":  "https://mcp.excalidraw.com/mcp",
+		"figma":       "https://mcp.figma.com/mcp",
+		"gainsight":   "https://mcp.staircase.ai/mcp",
+		"github":      "https://api.githubcopilot.com/mcp/",
+		"granola":     "https://mcp.granola.ai/mcp",
+		"incident-io": "https://mcp.incident.io/mcp",
+		"posthog":     "https://mcp.posthog.com/mcp",
+		"sentry":      "https://mcp.sentry.dev/mcp",
+		"stripe":      "https://mcp.stripe.com",
+		"supabase":    "https://mcp.supabase.com/mcp",
+		"vercel":      "https://mcp.vercel.com",
+		"zoom":        "https://mcp.zoom.us/mcp/zoom/streamable",
+		"zoominfo":    "https://mcp.zoominfo.com/mcp",
+	}
+	servers := mcpBuiltinRemoteServers()
+	if _, ok := servers["incident"]; ok {
+		t.Fatal("expected incident.io catalog key to be incident-io, not incident")
+	}
+	for name, url := range want {
+		server, ok := servers[name]
+		if !ok {
+			t.Fatalf("expected built-in MCP server %q", name)
+		}
+		if server.URL != url || server.Transport != mcpRemoteTransportStreamableHTTP {
+			t.Fatalf("expected %s to use %s over streamable HTTP, got %#v", name, url, server)
+		}
+	}
+}
+
 func TestToolboxAddURLDerivesNameAndSupportsCustomName(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any

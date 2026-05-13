@@ -307,6 +307,8 @@ are registered, support scriptable `--enable`/`--disable`, and provide
 interactive `--manage` checkbox toggling for built-ins. Catalog
 enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
 can be registered under a non-conflicting command namespace.
+Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
+endpoints, and keep the user-facing catalog summary in `README.md` current.
 `toolmux mcp ls` must use shared table styling for human output, display only
 `project` or `global` scope labels, support `mcp ls <name>` for one server's
 cached tools, and support `mcp ls -R` for a tree of all registered servers and

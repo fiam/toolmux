@@ -161,6 +161,8 @@ be listed regardless of registration state and support scriptable
 enablement must allow
 `--enable <catalog-name>=<registered-name>` so built-ins can be registered
 under a non-conflicting command namespace.
+Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
+endpoints, and keep the user-facing catalog summary in `README.md` current.
 
 ## Common Targets
 

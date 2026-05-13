@@ -132,6 +132,31 @@ func TestMCPRemoteOAuthCallbackPageInfersKnownLogo(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteOAuthCallbackPageInfersNewCatalogNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"https://api.githubcopilot.com/mcp/":          "GitHub",
+		"https://mcp.incident.io/mcp":                 "incident.io",
+		"https://mcp.posthog.com/mcp":                 "PostHog",
+		"https://mcp.zoom.us/mcp/zoom/streamable":     "Zoom",
+		"https://mcp.zoominfo.com/mcp":                "ZoomInfo",
+		"https://mcp.supabase.com/mcp":                "Supabase",
+		"https://mcp.staircase.ai/mcp?name=gainsight": "Gainsight",
+	}
+	for rawURL, wantName := range tests {
+		page := mcpRemoteOAuthCallbackPageFor(mcpRemoteServerEntry{
+			Name: "workspace",
+			Server: mcpRemoteServer{
+				URL: rawURL,
+			},
+		}, mcpRemoteOAuthDiscovery{})
+		if page.DisplayName != wantName {
+			t.Fatalf("expected %s page metadata for %s, got %#v", wantName, rawURL, page)
+		}
+	}
+}
+
 func TestFetchMCPRemoteAuthorizationServerMetadataFallsBackToOIDC(t *testing.T) {
 	t.Parallel()
 

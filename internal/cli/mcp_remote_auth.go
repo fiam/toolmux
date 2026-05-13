@@ -373,7 +373,32 @@ func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemo
 
 func mcpRemoteKnownLogoSlug(values ...string) string {
 	target := strings.ToLower(strings.Join(values, " "))
-	for _, known := range []string{"cloudflare", "grafana", "linear", "miro", "notion", "atlassian"} {
+	if strings.Contains(target, "incident.io") {
+		return "incident-io"
+	}
+	for _, known := range []string{
+		"airtable",
+		"asana",
+		"atlassian",
+		"cloudflare",
+		"excalidraw",
+		"figma",
+		"gainsight",
+		"github",
+		"grafana",
+		"granola",
+		"incident-io",
+		"linear",
+		"miro",
+		"notion",
+		"posthog",
+		"sentry",
+		"stripe",
+		"supabase",
+		"vercel",
+		"zoominfo",
+		"zoom",
+	} {
 		if strings.Contains(target, known) {
 			return known
 		}
@@ -383,18 +408,48 @@ func mcpRemoteKnownLogoSlug(values ...string) string {
 
 func mcpRemoteKnownLogoName(slug string) string {
 	switch slug {
+	case "airtable":
+		return "Airtable"
+	case "asana":
+		return "Asana"
 	case "atlassian":
 		return "Atlassian"
 	case "cloudflare":
 		return "Cloudflare"
+	case "excalidraw":
+		return "Excalidraw"
+	case "figma":
+		return "Figma"
+	case "gainsight":
+		return "Gainsight"
+	case "github":
+		return "GitHub"
 	case "grafana":
 		return "Grafana"
+	case "granola":
+		return "Granola"
+	case "incident-io":
+		return "incident.io"
 	case "linear":
 		return "Linear"
 	case "miro":
 		return "Miro"
 	case "notion":
 		return "Notion"
+	case "posthog":
+		return "PostHog"
+	case "sentry":
+		return "Sentry"
+	case "stripe":
+		return "Stripe"
+	case "supabase":
+		return "Supabase"
+	case "vercel":
+		return "Vercel"
+	case "zoom":
+		return "Zoom"
+	case "zoominfo":
+		return "ZoomInfo"
 	default:
 		return ""
 	}
