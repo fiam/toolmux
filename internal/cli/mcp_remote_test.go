@@ -118,7 +118,7 @@ func TestMCPRemoteDefaultArgumentHintComesFromCatalogMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	catalogOutput := runRootForRemoteTest(t, env, "-o", "json", "mcp", "catalog")
+	catalogOutput := runRootForRemoteTest(t, env, "-o", "json", "catalog", "--mcp")
 	if !strings.Contains(catalogOutput, "default_argument_hints") || !strings.Contains(catalogOutput, "cloudId") {
 		t.Fatalf("expected catalog output to include cloudId default hint, got %q", catalogOutput)
 	}
@@ -230,12 +230,13 @@ func TestDefaultMCPRemoteNameFromURL(t *testing.T) {
 	}
 }
 
-func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
+func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 
-	output := runRootForRemoteTest(t, env, "mcp", "catalog")
+	output := runRootForRemoteTest(t, env, "catalog")
 	for _, want := range []string{
 		"iterate",
+		"mcp",
 		"available",
 		"notion",
 	} {
@@ -244,46 +245,46 @@ func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
 		}
 	}
 
-	enableOutput := runRootForRemoteTest(t, env, "mcp", "catalog", "--enable", "iterate", "--global")
+	enableOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "iterate", "--global")
 	if !strings.Contains(enableOutput, "enabled global MCP server iterate") {
 		t.Fatalf("expected enable output, got %q", enableOutput)
 	}
-	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "mcp", "catalog")
-	var entries []mcpRemoteCatalogEntry
+	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "catalog", "--mcp")
+	var entries []toolboxCatalogEntry
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
 	}
-	var iterate mcpRemoteCatalogEntry
+	var iterate toolboxCatalogEntry
 	for _, entry := range entries {
 		if entry.Name == "iterate" {
 			iterate = entry
 		}
 	}
-	if !iterate.Registered || iterate.Status != "registered" || iterate.Scope != "global" {
+	if iterate.Type != "mcp" || !iterate.Registered || iterate.Status != "registered" || iterate.Scope != "global" {
 		t.Fatalf("expected registered iterate catalog entry, got %#v", iterate)
 	}
 	if len(iterate.RegisteredNames) != 1 || iterate.RegisteredNames[0] != "iterate" {
 		t.Fatalf("expected iterate registered name, got %#v", iterate.RegisteredNames)
 	}
 
-	disableOutput := runRootForRemoteTest(t, env, "mcp", "catalog", "--disable", "iterate")
+	disableOutput := runRootForRemoteTest(t, env, "catalog", "--disable", "iterate")
 	if !strings.Contains(disableOutput, "disabled MCP server iterate") {
 		t.Fatalf("expected disable output, got %q", disableOutput)
 	}
-	output = runRootForRemoteTest(t, env, "mcp", "catalog")
+	output = runRootForRemoteTest(t, env, "catalog", "--mcp")
 	if !strings.Contains(output, "iterate") || !strings.Contains(output, "available") {
 		t.Fatalf("expected iterate to be available after disable, got:\n%s", output)
 	}
 
-	notionOutput := runRootForRemoteTest(t, env, "mcp", "catalog", "--enable", "notion", "--global")
+	notionOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "notion", "--global")
 	if !strings.Contains(notionOutput, "enabled global MCP server notion") {
 		t.Fatalf("expected Notion MCP enable output, got %q", notionOutput)
 	}
-	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "mcp", "catalog")
+	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "catalog", "--mcp")
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
 	}
-	var notion mcpRemoteCatalogEntry
+	var notion toolboxCatalogEntry
 	for _, entry := range entries {
 		if entry.Name == "notion" {
 			notion = entry
@@ -292,14 +293,19 @@ func TestMCPRemoteCatalogListsAndTogglesBuiltins(t *testing.T) {
 	if !notion.Registered || notion.Status != "registered" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion" {
 		t.Fatalf("expected notion registered directly, got %#v", notion)
 	}
-	disableOutput = runRootForRemoteTest(t, env, "mcp", "catalog", "--disable", "notion")
+	disableOutput = runRootForRemoteTest(t, env, "catalog", "--disable", "notion")
 	if !strings.Contains(disableOutput, "disabled MCP server notion") {
 		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
 
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp catalog --enable iterate")
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "catalog --enable iterate")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected catalog manage policy check, got %q", policyOutput)
+	}
+
+	mcpOutput := runRootForRemoteTest(t, env, "catalog", "--mcp")
+	if strings.Contains(mcpOutput, "internal") {
+		t.Fatalf("expected --mcp catalog output to omit internal entries, got:\n%s", mcpOutput)
 	}
 }
 

@@ -249,7 +249,7 @@ Human-oriented examples:
 ```bash
 toolmux slack channels_list
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
-toolmux mcp catalog --enable notion
+toolmux catalog --enable notion
 toolmux notion
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
 ```
@@ -390,8 +390,8 @@ Auth:
 MVP commands:
 
 ```bash
-toolmux mcp catalog
-toolmux mcp catalog --enable notion
+toolmux catalog
+toolmux catalog --enable notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion

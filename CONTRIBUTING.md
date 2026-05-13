@@ -110,7 +110,7 @@ config key, with non-secret server definitions in config and cached tool
 metadata in the user cache directory. Use top-level `toolmux add` to register
 remote MCP toolboxes from a catalog name or URL; use `toolmux mcp sync`,
 `toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
-`toolmux mcp catalog`, and `toolmux mcp defaults` for MCP-specific server
+`toolmux catalog`, and `toolmux mcp defaults` for MCP-specific server
 maintenance. Default arguments are non-secret config values applied only
 to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
@@ -154,10 +154,13 @@ keep help focused on command usage, expose full schemas through the top-level
 `toolmux mcp schema` command, and support `-v`/`--verbose` HTTP tracing with
 credential headers redacted. `toolmux add` and `toolmux mcp sync` should
 support the same redacted tracing for sync-time debugging.
-`mcp catalog` must list built-in remotes regardless of registration state and
-support scriptable `--enable`/`--disable` plus interactive `--manage` toggling.
-Catalog enablement must allow `--enable <catalog-name>=<registered-name>` so
-built-ins can be registered under a non-conflicting command namespace.
+`toolmux catalog` must list all built-in toolboxes, include a toolbox type
+column, and support `--mcp` and `--internal` filters. MCP catalog entries must
+be listed regardless of registration state and support scriptable
+`--enable`/`--disable` plus interactive `--manage` toggling. Catalog
+enablement must allow
+`--enable <catalog-name>=<registered-name>` so built-ins can be registered
+under a non-conflicting command namespace.
 
 ## Common Targets
 

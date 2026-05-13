@@ -121,6 +121,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(toolboxRemoveCommand(opts))
 	root.AddCommand(statusCommand(opts))
 	root.AddCommand(doctorCommand(opts))
+	root.AddCommand(toolboxCatalogCommand(opts))
 	root.AddCommand(policyCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(workflowCommand(opts))
@@ -923,6 +924,8 @@ func rootCommandSpecs() []policy.CommandSpec {
 		toolboxAddSpec(),
 		toolboxRemoveSpec(),
 		toolboxStatusSpec(),
+		toolboxCatalogListSpec(),
+		toolboxCatalogManageSpec(),
 		doctorSpec(),
 		mcpRemoteSyncSpec(),
 		mcpRemoteRenameSpec(),
@@ -1008,6 +1011,12 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	}
 	if len(parts) >= 1 && parts[0] == "doctor" {
 		return doctorSpec(), true
+	}
+	if len(parts) >= 1 && parts[0] == "catalog" {
+		if mcpRemoteCatalogCommandModifies(parts) {
+			return toolboxCatalogManageSpec(), true
+		}
+		return toolboxCatalogListSpec(), true
 	}
 	if len(parts) >= 2 && parts[0] == "workflow" {
 		switch parts[1] {

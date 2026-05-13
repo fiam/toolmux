@@ -65,6 +65,19 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	upstream.assertDirectCookie(t)
 }
 
+func TestSlackAppearsInInternalCatalog(t *testing.T) {
+	t.Parallel()
+	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
+
+	out := toolmuxtest.Run(t, deps, "catalog", "--internal")
+	for _, want := range []string{"slack", "internal", "available"} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+	if strings.Contains(out, "linear") {
+		t.Fatalf("expected internal catalog output to omit MCP entries, got:\n%s", out)
+	}
+}
+
 func TestSlackAuthTestReturnsCurrentUser(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)

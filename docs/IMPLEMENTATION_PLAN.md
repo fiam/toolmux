@@ -506,7 +506,7 @@ Deliverables:
 5. Catalog entries for remote MCP providers:
 
 ```bash
-toolmux mcp catalog --enable notion
+toolmux catalog --enable notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion

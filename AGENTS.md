@@ -297,10 +297,11 @@ debugging. `toolmux mcp auth remove` must still delete matching stored auth
 after the server entry has already been removed.
 Stale remote caches should refresh
 opportunistically after about 24 hours without making existing cached
-commands unusable when a refresh attempt fails. `toolmux mcp catalog` must list
-built-in remotes whether or not they are registered, support scriptable
-`--enable`/`--disable`, and provide interactive `--manage` checkbox toggling
-for built-ins. Catalog
+commands unusable when a refresh attempt fails. `toolmux catalog` must list
+all built-in toolboxes, include a toolbox type column, and support `--mcp` and
+`--internal` filters. MCP catalog entries must be listed whether or not they
+are registered, support scriptable `--enable`/`--disable`, and provide
+interactive `--manage` checkbox toggling for built-ins. Catalog
 enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
 can be registered under a non-conflicting command namespace.
 `toolmux mcp ls` must use shared table styling for human output, display only
