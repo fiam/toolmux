@@ -57,6 +57,11 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "native")
 	toolmuxtest.AssertContains(t, out, "token-cookie")
 
+	out = toolmuxtest.Run(t, deps, "status")
+	toolmuxtest.AssertContains(t, out, "slack")
+	toolmuxtest.AssertContains(t, out, "native")
+	toolmuxtest.AssertContains(t, out, "token-cookie")
+
 	upstream.assertDirectCookie(t)
 }
 

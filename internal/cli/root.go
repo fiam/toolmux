@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -183,6 +184,10 @@ func statusCommand(opts *options) *cobra.Command {
 					return err
 				}
 			}
+			includeDisconnectedNative := len(args) > 0
+			if len(args) == 0 {
+				nativeProviders = nativeStatusProviders()
+			}
 			statuses := make([]toolboxStatusItem, 0, len(selected)+len(nativeProviders))
 			if len(selected) > 0 || len(nativeProviders) > 0 {
 				store, err := opts.credentials()
@@ -201,7 +206,9 @@ func statusCommand(opts *options) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					statuses = append(statuses, status)
+					if includeDisconnectedNative || nativeToolboxStatusRegistered(status) {
+						statuses = append(statuses, status)
+					}
 				}
 			}
 			return writeValue(cmd, opts, statuses, func(w io.Writer) {
@@ -230,6 +237,17 @@ func statusCommand(opts *options) *cobra.Command {
 			})
 		},
 	}
+}
+
+func nativeStatusProviders() []providers.Provider {
+	all := providers.All()
+	return slices.DeleteFunc(all, func(provider providers.Provider) bool {
+		return provider.AddHandler == nil && provider.RemoveHandler == nil
+	})
+}
+
+func nativeToolboxStatusRegistered(status toolboxStatusItem) bool {
+	return status.Status != "disconnected" || status.Auth != "none"
 }
 
 func partitionNativeStatusArgs(args []string) ([]string, []providers.Provider) {
