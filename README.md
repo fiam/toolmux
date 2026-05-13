@@ -4,22 +4,46 @@
 
 # Toolmux
 
-Toolmux is an agentic toolbox for connecting services and tools to your agents,
-with one command surface, local credential storage, and policy checks before
-credentials are read.
+Toolmux connects services to your local agents and gives you the same tools as
+a normal CLI. Add Slack or a remote MCP server once, configure your agent once,
+then ask the agent to use those tools without copying tokens into prompts.
 
-Use Toolmux when you want to:
+Toolmux is built around four ideas:
 
-1. Connect services and tools to local agents.
-2. Give coding agents controlled access to those same tools through MCP.
-3. Import remote MCP servers and call their tools like normal CLI commands.
-4. Keep provider tokens in your operating system credential store.
-5. Use `--read-only` and local policy files to block writes before auth is
-   loaded.
+1. One command surface for people, scripts, and agents.
+2. Local credential custody through the operating system credential store.
+3. Policy and `--read-only` checks before credentials are loaded.
+4. Workflows that turn repeatable prompts into commands.
 
-Toolmux is early software. Today it focuses on remote MCP imports, agent setup
-for Codex, Claude Code, and Gemini CLI, and a native Slack command set for
-internal workflows.
+Toolmux is early software. Today it is most useful for Slack, remote MCP
+toolboxes, and local agent setup for Codex, Claude Code, and Gemini CLI.
+
+## Supported Today
+
+| Area | What is supported |
+| --- | --- |
+| Native toolboxes | Slack |
+| Remote MCP catalog | Atlassian, Cloudflare, Grafana, Iterate, Linear, Miro, Notion |
+| Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
+| Agents | Codex, Claude Code, Gemini CLI |
+| Workflow templates | `slack-recap` |
+
+Use the CLI for the live list in your installed version:
+
+```bash
+toolmux --help
+toolmux catalog
+toolmux catalog --mcp
+toolmux catalog --internal
+toolmux workflow templates
+```
+
+`toolmux catalog` lists every built-in toolbox and includes a `Type` column so
+you can distinguish remote MCP toolboxes from internal Toolmux toolboxes.
+
+<p align="center">
+  <img src="docs/assets/toolmux-demo.gif" alt="Toolmux terminal demo">
+</p>
 
 ## Install
 
@@ -33,120 +57,86 @@ toolmux version
 Release archives for macOS, Linux, and Windows are available from
 [GitHub Releases](https://github.com/fiam/toolmux/releases).
 
-## Add Toolboxes
+## Quick Start
 
-Import a supported remote MCP server from the catalog:
-
-```bash
-toolmux mcp catalog
-toolmux add grafana
-toolmux mcp auth login grafana
-toolmux mcp sync grafana
-toolmux grafana
-```
-
-Try the public no-auth Iterate mock server:
+Start with a no-auth demo toolbox:
 
 ```bash
 toolmux add iterate
-toolmux iterate mock_echo --message hello
+toolmux iterate mock_echo --message "hello from toolmux"
 ```
 
-Remote MCP server definitions and cached tool metadata are non-secret config.
-OAuth tokens, bearer tokens, refresh tokens, dynamic client secrets, manually
-supplied client secrets, and auth codes are stored only in the OS credential
-store or transient process memory.
-
-Toolmux uses a hosted OAuth broker at `https://api.toolmux.com` by default for
-native provider flows that require confidential client secrets. To self-host
-the broker, point the CLI at your own `toolmuxd`:
+Add Slack when you are ready to connect a real workspace:
 
 ```bash
-export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
+toolmux add slack --auth broker
+toolmux status slack
 ```
 
-Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-
-## Native Slack
-
-Slack is available as a native provider under `toolmux slack`. It supports
-these auth models:
-
-1. Browser session extraction through embedded `slackauth`.
-2. User-supplied token plus an optional explicit cookie header.
-3. A user-owned Slack OAuth app with a local loopback callback.
-4. Brokered OAuth through `toolmuxd`.
-
-Use browser session auth for a workspace:
+Configure your local agent to see Toolmux tools over MCP:
 
 ```bash
-toolmux add slack --workspace acme
+toolmux mcp configure
 ```
 
-`--workspace` is required for Slack browser-session auth. Use the Slack
-workspace subdomain, for example `acme` from `https://acme.slack.com`.
-
-By default, Toolmux asks `slackauth` to pick the best local engine. You can
-select one explicitly:
+With no agent argument, Toolmux detects installed supported agents and opens an
+interactive selector. For scripts, name the agents explicitly:
 
 ```bash
-toolmux add slack --workspace acme --from-browser webview
-toolmux add slack --workspace acme --from-browser chrome
+toolmux mcp configure codex claude gemini
 ```
 
-Store a user-supplied token and cookie:
+Now ask your agent to use Toolmux, for example:
 
-```bash
-toolmux add slack \
-  --token-env SLACK_TOKEN \
-  --cookie-env SLACK_COOKIE
+```text
+Use Slack through Toolmux to find the latest messages about the release plan.
 ```
 
-Browser extraction runs only when explicitly requested through
-`toolmux add slack --workspace` or `--from-browser`. The resulting token and
-cookie use the same storage path as manually supplied credentials.
-`toolmux add slack` validates Slack credentials with `auth.test` before storing
-them, records the returned workspace URL, and uses that workspace-specific API
-base for later Slack calls.
-
-Authorize with your own Slack OAuth app:
+Or run the built-in Slack recap workflow:
 
 ```bash
+toolmux workflow init slack-recap --template slack-recap
+toolmux workflow config set default-agent codex
+toolmux workflow run slack-recap --input since=yesterday
+```
+
+If the Slack recap workflow has no `delivery_channel` input, it asks the agent
+to send the recap to you by opening a Slack DM first and posting to that DM
+channel.
+
+## Slack
+
+Slack is a native Toolmux toolbox under `toolmux slack`.
+
+Common setup options:
+
+```bash
+# Hosted Toolmux broker. This is the simplest OAuth path.
+toolmux add slack --auth broker
+
+# Explicit token and cookie values from environment variables.
+toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
+
+# Your own Slack OAuth app with a local loopback callback.
 toolmux add slack \
   --auth oauth \
   --client-id "$SLACK_CLIENT_ID" \
-  --client-secret-env SLACK_CLIENT_SECRET \
-  --scope channels:read,chat:write,im:write,search:read
+  --client-secret-env SLACK_CLIENT_SECRET
+
+# Explicit browser-session setup for a workspace subdomain.
+toolmux add slack --workspace acme
 ```
 
-Authorize through the Toolmux broker:
+`--workspace` is the Slack workspace subdomain, such as `acme` from
+`https://acme.slack.com`. Browser-session setup only runs when you explicitly
+request it with `--workspace` or `--from-browser`.
 
-```bash
-toolmux add slack --auth broker --scope channels:read,chat:write,im:write,search:read
-```
-
-Omit `--scope` to use Toolmux's Slack defaults, which cover channel and DM
-history, opening DMs, posting, reactions, attachment reads, user search, user
-groups, and Slack search.
-
-The Slack broker facet in `toolmuxd` uses these environment variables:
-
-```text
-SLACK_CLIENT_ID
-SLACK_CLIENT_SECRET
-SLACK_AUTH_URL
-SLACK_TOKEN_URL
-SLACK_REVOKE_URL
-SLACK_REDIRECT_URI
-SLACK_SCOPES
-```
-
-Common Slack commands:
+Useful Slack commands:
 
 ```bash
 toolmux slack auth_test
 toolmux slack channels_list --channel_types public_channel,private_channel
-toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000 --limit 50
+toolmux slack conversations_history --channel_id C123456 --limit 50
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
 toolmux slack conversations_open --user_id U123456
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
@@ -155,92 +145,200 @@ toolmux status slack
 toolmux remove slack
 ```
 
-Native Slack command names use Slack MCP-style and Slack Web API method names:
-`auth_test`, `conversations_history`, `conversations_replies`,
-`conversations_add_message`, `conversations_open`, `reactions_add`, `reactions_remove`,
-`attachment_get_data`, `conversations_search_messages`,
-`conversations_unreads`, `conversations_mark`, `channels_list`,
-`usergroups_list`, `usergroups_me`, `usergroups_create`,
-`usergroups_update`, `usergroups_users_update`, and `users_search`.
+Supported native Slack tool names:
+
+- Auth: `auth_test`
+- Channels and history: `channels_list`, `conversations_history`,
+  `conversations_replies`, `conversations_search_messages`,
+  `conversations_unreads`, `conversations_mark`
+- Messages and DMs: `conversations_open`, `conversations_add_message`
+- Files, reactions, users: `attachment_get_data`, `reactions_add`,
+  `reactions_remove`, `users_search`
+- User groups: `usergroups_list`, `usergroups_me`, `usergroups_create`,
+  `usergroups_update`, `usergroups_users_update`
+
+Run `toolmux slack --help` for the command list and per-tool flags.
+
+## Remote MCP Toolboxes
+
+Toolmux can import remote MCP servers, cache their tool definitions, and expose
+them in two places:
+
+1. CLI commands under the registered toolbox name.
+2. Proxied MCP tools from `toolmux mcp serve`.
+
+Add from the built-in catalog:
+
+```bash
+toolmux catalog
+toolmux add notion
+toolmux mcp auth login notion
+toolmux mcp sync notion
+toolmux notion
+```
+
+Register a custom MCP endpoint:
+
+```bash
+toolmux add https://mcp.linear.app/mcp --name linear-work --no-sync
+toolmux mcp auth login linear-work
+toolmux mcp sync linear-work
+toolmux linear-work
+```
+
+The registered name becomes the CLI namespace. A server named `linear-work`
+exposes commands as `toolmux linear-work <tool-name>` and MCP tools as
+`linear-work.<tool-name>`.
+
+For repeated non-secret arguments, configure defaults:
+
+```bash
+toolmux mcp defaults set atlassian cloudId <cloud-id>
+toolmux mcp defaults ls atlassian
+```
+
+Show registered toolboxes and cached tools:
+
+```bash
+toolmux status
+toolmux mcp ls
+toolmux mcp ls -R
+toolmux mcp show linear-work
+```
+
+Inspect schemas and call tools:
+
+```bash
+toolmux mcp schema iterate mock_calculate
+toolmux iterate mock_calculate --operation add --a 2 --b 3
+```
+
+Use `--json` for tool inputs that cannot be represented as flags.
+
+## Agents
+
+Toolmux serves MCP over stdio:
+
+```bash
+toolmux mcp serve
+```
+
+Most users should configure an agent instead of running `mcp serve` manually:
+
+```bash
+toolmux mcp configure
+toolmux mcp configure codex
+toolmux mcp configure claude --scope project
+toolmux mcp configure gemini --scope user
+```
+
+Supported agent names:
+
+| Agent | Names |
+| --- | --- |
+| Codex | `codex` |
+| Claude Code | `claude`, `claude-code` |
+| Gemini CLI | `gemini`, `gemini-cli` |
+
+For non-interactive setup and teardown:
+
+```bash
+toolmux mcp enable codex claude
+toolmux mcp disable gemini
+```
+
+Limit which tools an agent can see with MCP profiles:
+
+```bash
+toolmux mcp profile set readonly \
+  --tool 'grafana.*' \
+  --exclude-tool '*.send'
+
+toolmux mcp profile default readonly
+toolmux mcp configure codex --mcp-profile readonly --read-only
+```
 
 ## Workflows
 
-Workflows are local YAML files that render an agent prompt and run it through a
-configured local agent command. Global workflows live in
-`~/.toolmux/workflows`; project workflows live in `.toolmux/workflows`.
+Workflows are YAML files that render a Go `text/template` prompt and run a
+local agent command.
 
-List workflow templates and create the Slack recap workflow:
+Global workflows live in:
+
+```text
+~/.toolmux/workflows
+```
+
+Project workflows live in:
+
+```text
+.toolmux/workflows
+```
+
+List templates and create a workflow:
 
 ```bash
 toolmux workflow templates
-toolmux workflow init slack-recap --template slack-recap --project
+toolmux workflow init slack-recap --template slack-recap
 ```
 
-Template names in `toolmux workflow templates` are fetched from this
-repository on GitHub. You can also create workflows from
-`github:owner/repo/path[@ref]` or a direct YAML URL:
+Template names are loaded from this repository on GitHub. You can also use a
+GitHub template path or a direct YAML URL:
 
 ```bash
-toolmux workflow init team-recap --template github:acme/workflows/slack-recap.yaml@main
-toolmux workflow init custom --template https://example.com/workflow.yaml
+toolmux workflow init team-recap \
+  --template github:acme/workflows/slack-recap.yaml@main
+
+toolmux workflow init custom \
+  --template https://example.com/workflow.yaml
 ```
 
-Workflow prompts are inline Go `text/template` strings. Inputs without defaults
-are required:
+Render a workflow before running it:
 
 ```bash
 toolmux workflow render slack-recap --input since="yesterday 18:00"
 ```
 
-Run a workflow with an explicit agent:
+Run with an explicit agent:
 
 ```bash
 toolmux workflow run slack-recap \
-  --agent codex \
+  --agent "codex --yolo" \
   --input since="yesterday 18:00"
 ```
 
-If a workflow, `--agent`, or `workflows.default_agent` does not provide an
-agent, `workflow run` opens an agent selector in an interactive terminal and
-fails in non-interactive runs. Agent commands may include `{{ .prompt }}` in
-the command or args; otherwise Toolmux appends the rendered prompt as the final
-argument. The `--agent` value can include arguments, such as
-`--agent "codex --yolo"`.
-
-Set a default workflow agent:
+Set the default workflow agent:
 
 ```bash
 toolmux workflow config set default-agent codex
 ```
 
-In an interactive terminal, omit the agent to choose from detected local agents:
+In an interactive terminal, omit the value to select from detected agents:
 
 ```bash
 toolmux workflow config set default-agent
 ```
 
-Workflows declare required toolboxes with compact requirements such as
-`internal:slack`, `catalog:linear`, or a remote MCP URL. Missing required
-toolboxes are added automatically during `workflow init` and `workflow run`
-unless `--no-setup` is passed.
+Workflows can declare required toolboxes such as `internal:slack`,
+`catalog:linear`, or a remote MCP URL. Missing requirements are added
+automatically during `workflow init` and `workflow run` unless `--no-setup` is
+passed.
 
-The built-in Slack recap template uses `internal:slack`. If no
-`delivery_channel` input is set, the prompt tells the agent to DM the recap to
-itself by opening a Slack IM conversation first, then sending to that DM channel
-ID.
+If a workflow command or agent definition contains `{{ .prompt }}`, Toolmux
+substitutes the rendered prompt there. Otherwise it appends the prompt as the
+final argument.
 
-## Output For Humans And Scripts
+## Output
 
-Human output is the default. When stdout is a terminal, Toolmux can use tables,
-colors, Markdown rendering, links, pagers, browser opens, progress spinners,
-and interactive selectors. Long auth flows show status while Toolmux waits for
-browser approval, callback receipt, token exchange, and credential validation.
+Human output is the default. In an interactive terminal, Toolmux can use
+tables, color, Markdown rendering, links, pagers, progress spinners, browser
+opens, and selectors.
 
-Use structured output when another program is reading the result:
+Use structured output for scripts and agents:
 
 ```bash
 toolmux --output json mcp ls -R
-toolmux --output yaml mcp catalog
+toolmux --output yaml catalog
 ```
 
 JSON and YAML output are stable and undecorated: no ANSI escapes, prompts,
@@ -257,19 +355,36 @@ Common global flags:
 --read-only
 ```
 
-## Read-Only And Policy
+## Safety
+
+Toolmux stores non-secret config in:
+
+```text
+~/.toolmux/config.yaml
+```
+
+Project config lives in:
+
+```text
+.toolmux/config.yaml
+```
+
+Remote MCP server definitions and cached tool metadata are non-secret config.
+Provider tokens, OAuth tokens, refresh tokens, bearer tokens, auth codes,
+client secrets, and Slack token-cookie credentials are stored only in the OS
+credential store or transient process memory.
 
 Use `--read-only` to block commands with local or remote write effects before
-provider credentials are read:
+credentials are read:
 
 ```bash
 toolmux --read-only mcp ls -R
-toolmux --read-only add https://example.com/mcp --name demo --no-sync
+toolmux --read-only slack conversations_add_message \
+  --channel_id C123456 \
+  --text "This will be blocked"
 ```
 
-The first command can run. The second is blocked because it writes config.
-
-For project-specific guardrails, create a local policy file:
+Use local policy files for project guardrails:
 
 ```bash
 toolmux policy init
@@ -282,230 +397,32 @@ Policy discovery order:
 1. `--policy <path>`
 2. `TOOLMUX_POLICY=<path>`
 3. `.toolmux/policy.yaml` in the current directory or a parent directory
-4. No policy file means local usage is allowed by default
+4. No policy file, which allows local usage by default
 
 Policy files are local guardrails for projects and automation. They are not a
 security boundary against a user who controls the machine or working
 directory.
 
-## Use Toolmux With Agents
+## Self-Hosting
 
-Toolmux can expose imported remote MCP tools over Model Context Protocol stdio:
+Toolmux uses the hosted OAuth broker at `https://api.toolmux.com` by default
+for native provider flows that require confidential client secrets.
 
-```bash
-toolmux mcp serve
-```
-
-The MCP server uses the same action metadata as the CLI, so tool calls still
-pass through local policy checks, `--read-only`, profiles, and stored auth.
-
-Configure supported local agent CLIs:
+To self-host the broker, point the CLI at your own `toolmuxd`:
 
 ```bash
-toolmux mcp configure
+export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
 ```
 
-With no agent name, Toolmux autodetects supported installed CLIs. Interactive
-runs show a checkbox selector, preselect agents where Toolmux MCP is already
-enabled, and remove Toolmux from any configured agent you uncheck.
-
-Supported agent targets:
-
-| Agent | Names | Scope support |
-| --- | --- | --- |
-| Codex | `codex` | Codex default MCP config |
-| Claude Code | `claude`, `claude-code` | `local`, `user`, `project` |
-| Gemini CLI | `gemini`, `gemini-cli` | `user`, `project` |
-
-Configure specific agents:
-
-```bash
-toolmux mcp configure codex claude gemini
-```
-
-For scripts, use explicit enable and disable commands:
-
-```bash
-toolmux mcp enable codex claude
-toolmux mcp disable gemini
-```
-
-Limit which tools agents can see with MCP profiles:
-
-```bash
-toolmux mcp profile set readonly \
-  --tool 'grafana.*' \
-  --exclude-tool '*.send'
-
-toolmux mcp profile default readonly
-toolmux mcp configure codex --mcp-profile readonly --read-only
-```
-
-## Import Remote MCP Servers
-
-Toolmux can import a remote Streamable HTTP MCP server, cache its tool
-definitions, and expose those tools in two places:
-
-1. Top-level CLI commands under the registered server name.
-2. Proxied tools from `toolmux mcp serve`.
-
-Try the public no-auth Iterate mock server:
-
-```bash
-toolmux add iterate
-toolmux iterate mock_echo --message hello
-toolmux iterate mock_calculate --operation add --a 2 --b 3
-toolmux mcp schema iterate mock_calculate
-```
-
-Built-in remote MCP catalog names:
-
-```text
-atlassian
-cloudflare
-grafana
-iterate
-linear
-miro
-notion
-```
-
-Use the Notion catalog entry for Notion work instead of a native Toolmux
-integration:
-
-```bash
-toolmux add notion
-toolmux mcp auth login notion
-toolmux mcp sync notion
-toolmux notion
-```
-
-Manage built-ins from the catalog:
-
-```bash
-toolmux mcp catalog
-toolmux add cloudflare
-toolmux mcp auth login cloudflare
-toolmux mcp sync cloudflare
-toolmux cloudflare
-```
-
-Grafana Cloud uses hosted OAuth. The browser flow may ask for your Grafana
-Cloud stack URL before consent:
-
-```bash
-toolmux add grafana
-toolmux mcp auth login grafana
-toolmux mcp sync grafana
-toolmux grafana
-```
-
-Register a custom endpoint:
-
-```bash
-toolmux add https://mcp.linear.app/mcp --name linear-work --no-sync
-toolmux mcp auth login linear-work
-toolmux mcp sync linear-work
-toolmux linear-work
-```
-
-The registered name becomes the command namespace. When `--name` is omitted for
-an MCP URL, Toolmux derives a default name from the URL host, such as `linear`
-for `https://mcp.linear.app/mcp`. MCP config stores the resolved URL, not the
-catalog shorthand. Registering `linear-work` exposes CLI commands as
-`toolmux linear-work <tool-name>` and MCP tools as `linear-work.<tool-name>`.
-
-Show registered toolboxes and their auth state:
-
-```bash
-toolmux status
-toolmux status linear-work
-```
-
-For repeated non-secret tool arguments, configure defaults on the registered
-remote. Defaults apply only to tools whose input schema has that argument, and
-explicit `--json` values or flags override them. The Atlassian catalog entry
-will suggest setting `cloudId` when it is missing:
-
-```bash
-toolmux mcp defaults set atlassian cloudId <cloud-id>
-toolmux mcp defaults ls atlassian
-toolmux atlassian <tool-name>
-```
-
-Remote MCP config writes default to the global Toolmux config. Add `--project`
-when you intentionally want a project-local server, profile, or default
-argument.
-
-Global Toolmux config is `~/.toolmux/config.yaml`. Project config remains
-`.toolmux/config.yaml` in the current project tree.
-
-In an interactive terminal, remote MCP command help and tool listings keep
-upstream descriptions compact and lightly styled so the command list stays
-scannable. Use full descriptions when you need the original upstream text:
-
-```bash
-toolmux linear-work --full-help
-toolmux mcp ls linear-work --full-descriptions
-toolmux mcp ls -R --full-descriptions
-```
-
-Use `-v`/`--verbose` on `toolmux add`, `toolmux mcp sync`, or a remote tool
-command to print redacted Streamable HTTP requests and responses for debugging.
-
-Non-interactive output and JSON/YAML output keep the full cached metadata for
-agents and scripts.
-
-Rename or remove registered remotes:
-
-```bash
-toolmux mcp rename linear-work linear-prod
-toolmux remove linear-prod
-```
-
-Removing a remote also deletes stored auth for that server name in the active
-Toolmux profile. If you already removed a server and want to clear a
-stale token, use:
-
-```bash
-toolmux mcp auth remove <name>
-```
-
-Bearer-token auth is supported for servers that issue tokens outside a browser
-OAuth flow:
-
-```bash
-printenv CLOUDFLARE_API_TOKEN | \
-  toolmux mcp auth set cloudflare --bearer-token-stdin
-```
-
-Remote tool commands translate representable top-level JSON Schema properties
-into flags. Use `--json` for nested objects or schemas that cannot be
-expressed as flags. Use `toolmux mcp schema <server> <tool>` or
-`toolmux mcp schema <server>.<tool>` to print the cached input schema.
-
-## Token Custody
-
-For native provider OAuth integrations:
-
-1. `toolmuxd` starts a browser OAuth flow.
-2. The provider redirects back to `toolmuxd`.
-3. `toolmuxd` exchanges the code when a client secret is required.
-4. The CLI retrieves the token bundle once over HTTPS.
-5. The CLI stores provider tokens in the OS credential store.
-6. `toolmuxd` keeps only short-lived handoff data in process memory.
-
-Remote MCP server definitions and cached tool metadata are non-secret config.
-Bearer tokens, OAuth tokens, refresh tokens, dynamic client secrets, manually
-supplied client secrets, and auth codes are stored only in the OS credential
-store or transient process memory.
+Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 
 ## Help
 
 ```bash
 toolmux --help
-toolmux <remote> --help
+toolmux <toolbox> --help
 toolmux mcp --help
+toolmux workflow --help
 toolmux doctor
 ```
 
