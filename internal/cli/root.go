@@ -45,6 +45,7 @@ type options struct {
 	toolmuxdURL        string
 	mcpCacheDir        string
 	mcpRemoteConflicts []mcpRemoteNameConflict
+	workDir            string
 }
 
 type Dependencies struct {
@@ -55,6 +56,7 @@ type Dependencies struct {
 	ProviderURL map[string]string
 	ProviderAPI map[string]string
 	ToolmuxdURL string
+	WorkDir     string
 }
 
 func NewRootCommand() *cobra.Command {
@@ -88,6 +90,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	}
 	opts.toolmuxdURL = strings.TrimRight(firstNonEmpty(deps.ToolmuxdURL, env("TOOLMUX_TOOLMUXD_URL"), "https://api.toolmux.com"), "/")
 	opts.mcpCacheDir = strings.TrimSpace(env("TOOLMUX_MCP_CACHE_DIR"))
+	opts.workDir = strings.TrimSpace(deps.WorkDir)
 	configureProviders(opts, env)
 
 	root := &cobra.Command{
@@ -117,6 +120,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(policyCommand(opts))
 	root.AddCommand(schemaCommand(opts))
 	root.AddCommand(mcpCommand(opts))
+	root.AddCommand(workflowCommand(opts))
 	registerActionCommands(root, opts)
 	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
 
@@ -913,6 +917,12 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpRemoteAuthRemoveSpec(),
 		mcpRemoteAuthStatusSpec(),
 		schemaSpec(),
+		workflowInitSpec(),
+		workflowListSpec(),
+		workflowShowSpec(),
+		workflowRenderSpec(),
+		workflowRunSpec(),
+		workflowConfigSetDefaultAgentSpec(),
 	}
 }
 
@@ -980,6 +990,24 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	}
 	if len(parts) >= 1 && parts[0] == "schema" {
 		return schemaSpec(), true
+	}
+	if len(parts) >= 2 && parts[0] == "workflow" {
+		switch parts[1] {
+		case "init", "add":
+			return workflowInitSpec(), true
+		case "list", "ls":
+			return workflowListSpec(), true
+		case "show":
+			return workflowShowSpec(), true
+		case "render":
+			return workflowRenderSpec(), true
+		case "run":
+			return workflowRunSpec(), true
+		case "config":
+			if len(parts) >= 4 && parts[2] == "set" && parts[3] == "default-agent" {
+				return workflowConfigSetDefaultAgentSpec(), true
+			}
+		}
 	}
 	if len(parts) >= 2 && parts[0] == "mcp" && parts[1] == "configure" {
 		return mcpConfigureSpec(), true

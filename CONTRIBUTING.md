@@ -84,10 +84,24 @@ configured, preselects agents where Toolmux MCP is enabled, and removes the
 Toolmux MCP server from agents that are unchecked. Use `toolmux mcp enable`
 and `toolmux mcp disable` for non-interactive agent setup and teardown. MCP
 tool profiles are stored in the general Toolmux config under the `mcp` key.
-Project config is `.toolmux/config.yaml`; global config is `toolmux/config.yaml`
-under the user config directory. Manage both with `toolmux mcp profile`.
+Global config is `~/.toolmux/config.yaml`; project config is
+`.toolmux/config.yaml`. Manage both with `toolmux mcp profile`.
 Project config overrides global config for matching profile names and default
 profile selection.
+
+Workflow definitions are non-secret YAML. Global workflows live under
+`~/.toolmux/workflows`; project workflows live under `.toolmux/workflows`.
+Templates listed by `toolmux workflow templates` must be committed as YAML
+files under `workflows/` and loaded through GitHub template sources, not
+hardcoded in Go. Workflow prompts are inline Go `text/template` strings.
+Workflows may declare required toolboxes with compact values such as
+`internal:slack`, `catalog:linear`, or a remote MCP URL. Missing requirements
+should be added automatically during `workflow init` and `workflow run` unless
+the caller passes `--no-setup`. If a workflow run has no selected agent,
+interactive sessions should prompt for a configured or detected local agent;
+non-interactive sessions should fail. The no-agent form of
+`toolmux workflow config set default-agent` should also support an interactive
+selector.
 
 Imported remote MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool

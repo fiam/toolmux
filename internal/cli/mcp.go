@@ -622,8 +622,9 @@ func compactStrings(values []string) []string {
 }
 
 type toolmuxConfigFile struct {
-	Version int       `json:"version" yaml:"version"`
-	MCP     mcpConfig `json:"mcp,omitzero" yaml:"mcp,omitempty"`
+	Version   int            `json:"version" yaml:"version"`
+	MCP       mcpConfig      `json:"mcp,omitzero" yaml:"mcp,omitempty"`
+	Workflows workflowConfig `json:"workflows,omitzero" yaml:"workflows,omitempty"`
 }
 
 type mcpConfig struct {
@@ -637,6 +638,11 @@ type mcpProfileConfig struct {
 	ToolRegex        []string `json:"tool_regex,omitempty" yaml:"tool_regex,omitempty"`
 	ExcludeTools     []string `json:"exclude_tools,omitempty" yaml:"exclude_tools,omitempty"`
 	ExcludeToolRegex []string `json:"exclude_tool_regex,omitempty" yaml:"exclude_tool_regex,omitempty"`
+}
+
+type workflowConfig struct {
+	DefaultAgent string                         `json:"default_agent,omitempty" yaml:"default_agent,omitempty"`
+	Agents       map[string]workflowAgentConfig `json:"agents,omitempty" yaml:"agents,omitempty"`
 }
 
 type mcpProfileEntry struct {
@@ -728,7 +734,7 @@ func (config mcpEffectiveProfileConfig) lookup(name string) (mcpProfileEntry, bo
 		}
 		scopes := []string{source.Scope}
 		if ok {
-			scopes = append(found.Scopes, source.Scope)
+			scopes = appendScope(found.Scopes, source.Scope)
 		}
 		found = mcpProfileEntry{
 			Name:    name,
@@ -769,14 +775,21 @@ func mcpProfileConfigFromSelection(selection mcpToolSelection) mcpProfileConfig 
 }
 
 func mcpProfileWritePath(scope mcpProfileScopeOptions) (string, string, error) {
+	return toolmuxConfigWritePath(scope, "")
+}
+
+func toolmuxConfigWritePath(scope mcpProfileScopeOptions, startDir string) (string, string, error) {
 	if scope.Global && scope.Project {
 		return "", "", fmt.Errorf("use only one of --global or --project")
 	}
 	if scope.Project {
-		if path, ok, err := discoverToolmuxConfigFile(""); err != nil {
+		if path, ok, err := discoverToolmuxConfigFile(startDir); err != nil {
 			return "", "", err
 		} else if ok {
 			return path, "project", nil
+		}
+		if startDir != "" {
+			return filepath.Join(startDir, toolmuxConfigRelPath), "project", nil
 		}
 		return toolmuxConfigRelPath, "project", nil
 	}
@@ -830,7 +843,7 @@ func effectiveMCPProfileEntriesFromPaths(startDir, globalPath string) ([]mcpProf
 			existing, exists := byName[name]
 			scopes := []string{source.Scope}
 			if exists {
-				scopes = append(existing.Scopes, source.Scope)
+				scopes = appendScope(existing.Scopes, source.Scope)
 			}
 			byName[name] = mcpProfileEntry{
 				Name:    name,
@@ -869,6 +882,9 @@ func loadMCPProfileSources(startDir, globalPath string) ([]mcpProfileSource, err
 	if localPath, ok, err := discoverToolmuxConfigFile(startDir); err != nil {
 		return nil, err
 	} else if ok {
+		if hasMCPProfileSourcePath(sources, localPath) {
+			return sources, nil
+		}
 		config, err := readToolmuxConfigFile(localPath)
 		if err != nil {
 			return nil, err
@@ -879,11 +895,47 @@ func loadMCPProfileSources(startDir, globalPath string) ([]mcpProfileSource, err
 }
 
 func globalToolmuxConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := toolmuxHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "toolmux", "config.yaml"), nil
+	return filepath.Join(dir, "config.yaml"), nil
+}
+
+func toolmuxHomeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".toolmux"), nil
+}
+
+func hasMCPProfileSourcePath(sources []mcpProfileSource, path string) bool {
+	for _, source := range sources {
+		if sameFilesystemPath(source.Path, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameFilesystemPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return absA == absB
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func appendScope(scopes []string, scope string) []string {
+	if slices.Contains(scopes, scope) {
+		return scopes
+	}
+	return append(scopes, scope)
 }
 
 func discoverToolmuxConfigFile(startDir string) (string, bool, error) {

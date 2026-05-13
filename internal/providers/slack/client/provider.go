@@ -41,6 +41,7 @@ var defaultOAuthScopes = []string{
 	"groups:read",
 	"im:read",
 	"mpim:read",
+	"im:write",
 	"channels:history",
 	"groups:history",
 	"im:history",
@@ -95,6 +96,13 @@ func Descriptor() providers.Provider {
 					actions.StringFlag("payload", "", "message payload; accepted as an alias for text"),
 					actions.StringFlag("content_type", "text/markdown", "message content type"),
 					actions.BoolFlag("dry-run", false, "show the Slack request without sending it"),
+				),
+				slackTool("conversations_open", "Open a Slack DM or MPIM conversation", "conversation", actions.VerbOpen, actions.EffectWrite,
+					actions.StringFlag("user_id", "", "single Slack user ID to open a DM with"),
+					actions.StringFlag("users", "", "comma-separated Slack user IDs to open a DM or MPIM with"),
+					actions.BoolFlag("prevent_creation", false, "do not create a new conversation"),
+					actions.BoolFlag("return_im", true, "return the full IM conversation"),
+					actions.BoolFlag("dry-run", false, "show the Slack request without opening a conversation"),
 				),
 				slackTool("reactions_add", "Add a Slack reaction", "reaction", actions.VerbCreate, actions.EffectWrite,
 					actions.StringFlag("channel_id", "", "Slack channel, DM, or MPIM ID"),
@@ -185,6 +193,7 @@ func Descriptor() providers.Provider {
 			"slack.conversations_history":         handleConversationsHistory,
 			"slack.conversations_replies":         handleConversationsReplies,
 			"slack.conversations_add_message":     handleConversationsAddMessage,
+			"slack.conversations_open":            handleConversationsOpen,
 			"slack.reactions_add":                 handleReactionsAdd,
 			"slack.reactions_remove":              handleReactionsRemove,
 			"slack.attachment_get_data":           handleAttachmentGetData,
@@ -503,6 +512,38 @@ func handleConversationsAddMessage(exec actions.Context, inv actions.Invocation)
 		return nil, err
 	}
 	return sendMessageResult(response), nil
+}
+
+func handleConversationsOpen(exec actions.Context, inv actions.Invocation) (any, error) {
+	users := firstNonEmpty(inv.String("users"), inv.String("user_id"))
+	if users == "" {
+		return nil, fmt.Errorf("users is required; pass --user_id or --users")
+	}
+	request := openConversationRequest{
+		Users:           users,
+		PreventCreation: inv.Bool("prevent_creation"),
+		ReturnIM:        inv.Bool("return_im"),
+	}
+	if inv.Bool("dry-run") {
+		return actions.NewDryRun("slack.conversations_open", request), nil
+	}
+	client, err := slackClient(exec, inv)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("users", request.Users)
+	if request.PreventCreation {
+		values.Set("prevent_creation", "true")
+	}
+	if request.ReturnIM {
+		values.Set("return_im", "true")
+	}
+	response, err := client.ConversationsOpen(exec.Context, values)
+	if err != nil {
+		return nil, err
+	}
+	return openConversationResult(response), nil
 }
 
 func handleReactionsAdd(exec actions.Context, inv actions.Invocation) (any, error) {
@@ -1427,6 +1468,26 @@ func (result sendMessageResult) Table(opts output.Options) output.Table {
 			result.Channel,
 			result.TS,
 			trimForTable(text, 96),
+		}},
+	}
+}
+
+type openConversationRequest struct {
+	Users           string `json:"users" yaml:"users"`
+	PreventCreation bool   `json:"prevent_creation,omitempty" yaml:"prevent_creation,omitempty"`
+	ReturnIM        bool   `json:"return_im,omitempty" yaml:"return_im,omitempty"`
+}
+
+type openConversationResult slackapi.ConversationsOpenResponse
+
+func (result openConversationResult) Table(opts output.Options) output.Table {
+	kind := conversationKind(result.Channel)
+	return output.Table{
+		Headers: []string{"ID", "Kind", "User"},
+		Rows: [][]string{{
+			result.Channel.ID,
+			kind,
+			result.Channel.User,
 		}},
 	}
 }

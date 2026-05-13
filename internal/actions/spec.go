@@ -33,6 +33,7 @@ const (
 	VerbQuery      Verb = "query"
 	VerbRead       Verb = "read"
 	VerbRestore    Verb = "restore"
+	VerbRun        Verb = "run"
 	VerbSearch     Verb = "search"
 	VerbSend       Verb = "send"
 	VerbShare      Verb = "share"

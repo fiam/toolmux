@@ -207,67 +207,13 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 			if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
 				return err
 			}
-			name, server, err := resolveToolboxAddTarget(target, nameFlag, transport)
-			if err != nil {
-				return err
-			}
-			configPath, scopeName, err := mcpProfileWritePath(scope)
-			if err != nil {
-				return err
-			}
-			config, err := readToolmuxConfigFile(configPath)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			if config.MCP.Servers == nil {
-				config.MCP.Servers = map[string]mcpRemoteServer{}
-			}
-			if _, exists := config.MCP.Servers[name]; exists {
-				return fmt.Errorf("MCP server %q is already registered in %s", name, configPath)
-			}
-			if _, exists, err := lookupMCPRemoteServer(name, ""); err != nil {
-				return err
-			} else if exists {
-				return fmt.Errorf("MCP server %q is already registered; use `toolmux mcp rename %s <new-name>` first", name, name)
-			}
-			if err := ensureMCPRemoteNameAvailable(cmd.Root(), name); err != nil {
-				return err
-			}
-			if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
-				return err
-			}
-			server = normalizeMCPRemoteServer(server)
-			register := func() error {
-				config.Version = 1
-				config.MCP.Servers[name] = server
-				if err := writeToolmuxConfigFile(configPath, config); err != nil {
-					return err
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "registered %s toolbox %s in %s\n", scopeName, name, configPath)
-				writeMCPRemoteDefaultArgumentSuggestions(cmd.OutOrStdout(), name, server)
-				return nil
-			}
-			if noSync {
-				return register()
-			}
-			entry := mcpRemoteServerEntry{
-				Name:   name,
-				Scope:  scopeName,
-				Scopes: []string{scopeName},
-				Path:   configPath,
-				Server: server,
-			}
-			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
-			cache, authRequired, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args, trace)
-			if err != nil {
-				return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
-			}
-			server.AuthRequired = new(authRequired)
-			if err := register(); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "synced toolbox %s: %d tools\n", name, len(cache.Tools))
-			return nil
+			return addMCPRemoteToolbox(cmd, opts, target, mcpRemoteToolboxAddOptions{
+				Scope:       scope,
+				Name:        nameFlag,
+				Transport:   transport,
+				NoSync:      noSync,
+				VerboseHTTP: verboseHTTP,
+			}, args)
 		},
 	}
 	cmd.Flags().StringVar(&nameFlag, "name", "", "registered toolbox name")
@@ -277,6 +223,14 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 	addNativeToolboxAddFlags(cmd, &native)
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
+}
+
+type mcpRemoteToolboxAddOptions struct {
+	Scope       mcpProfileScopeOptions
+	Name        string
+	Transport   string
+	NoSync      bool
+	VerboseHTTP bool
 }
 
 type nativeToolboxAddOptions struct {
@@ -351,6 +305,70 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 		return true, err
 	}
 	return true, writeActionResult(cmd, opts, execCtx, result)
+}
+
+func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add mcpRemoteToolboxAddOptions, args []string) error {
+	name, server, err := resolveToolboxAddTarget(target, add.Name, add.Transport)
+	if err != nil {
+		return err
+	}
+	configPath, scopeName, err := mcpProfileWritePath(add.Scope)
+	if err != nil {
+		return err
+	}
+	config, err := readToolmuxConfigFile(configPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if config.MCP.Servers == nil {
+		config.MCP.Servers = map[string]mcpRemoteServer{}
+	}
+	if _, exists := config.MCP.Servers[name]; exists {
+		return fmt.Errorf("MCP server %q is already registered in %s", name, configPath)
+	}
+	if _, exists, err := lookupMCPRemoteServer(name, ""); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("MCP server %q is already registered; use `toolmux mcp rename %s <new-name>` first", name, name)
+	}
+	if err := ensureMCPRemoteNameAvailable(cmd.Root(), name); err != nil {
+		return err
+	}
+	if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
+		return err
+	}
+	server = normalizeMCPRemoteServer(server)
+	register := func() error {
+		config.Version = 1
+		config.MCP.Servers[name] = server
+		if err := writeToolmuxConfigFile(configPath, config); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "registered %s toolbox %s in %s\n", scopeName, name, configPath)
+		writeMCPRemoteDefaultArgumentSuggestions(cmd.OutOrStdout(), name, server)
+		return nil
+	}
+	if add.NoSync {
+		return register()
+	}
+	entry := mcpRemoteServerEntry{
+		Name:   name,
+		Scope:  scopeName,
+		Scopes: []string{scopeName},
+		Path:   configPath,
+		Server: server,
+	}
+	trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), add.VerboseHTTP)
+	cache, authRequired, err := syncMCPRemoteCacheAfterAdd(cmd, opts, entry, args, trace)
+	if err != nil {
+		return fmt.Errorf("initial sync failed for MCP server %s: %w", name, err)
+	}
+	server.AuthRequired = new(authRequired)
+	if err := register(); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "synced toolbox %s: %d tools\n", name, len(cache.Tools))
+	return nil
 }
 
 func nativeToolboxAddFlagValues(opts nativeToolboxAddOptions) map[string]any {
@@ -2283,7 +2301,7 @@ func effectiveMCPRemoteServerEntriesFromPaths(startDir, globalPath string) ([]mc
 			existing, exists := byName[name]
 			scopes := []string{source.Scope}
 			if exists {
-				scopes = append(existing.Scopes, source.Scope)
+				scopes = appendScope(existing.Scopes, source.Scope)
 			}
 			byName[name] = mcpRemoteServerEntry{
 				Name:   name,

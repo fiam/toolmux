@@ -240,6 +240,18 @@ func TestSlackSendDryRunDoesNotReadCredentials(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, `"channel": "C123"`)
 }
 
+func TestSlackConversationsOpenReturnsDMChannel(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeSlackUpstream(t)
+	store := credentials.NewMemoryStore()
+	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
+
+	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "conversations_open", "--user_id", "U123")
+	toolmuxtest.AssertContains(t, out, `"id": "D123"`)
+	toolmuxtest.AssertContains(t, out, `"user": "U123"`)
+}
+
 func TestSlackAuthSetupSubcommandsAreNotExposed(t *testing.T) {
 	t.Parallel()
 	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
@@ -259,6 +271,7 @@ func TestSlackExposesSlackMCPServerToolNames(t *testing.T) {
 		"slack.conversations_history",
 		"slack.conversations_replies",
 		"slack.conversations_add_message",
+		"slack.conversations_open",
 		"slack.reactions_add",
 		"slack.reactions_remove",
 		"slack.attachment_get_data",
@@ -370,6 +383,8 @@ func newFakeSlackUpstream(t *testing.T) *fakeSlackUpstream {
 			upstream.history(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.replies":
 			upstream.replies(t, w, r)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/conversations.open":
+			upstream.openConversation(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/search.messages":
 			upstream.search(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/chat.postMessage":
@@ -641,6 +656,33 @@ func (s *fakeSlackUpstream) postMessage(t *testing.T, w http.ResponseWriter, r *
 		"channel": r.Form.Get("channel"),
 		"ts":      "2.000002",
 		"message": map[string]any{"text": r.Form.Get("text")},
+	})
+}
+
+func (s *fakeSlackUpstream) openConversation(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	token := bearerToken(r)
+	if token == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		t.Error("missing open token")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		t.Errorf("parse open form: %v", err)
+		return
+	}
+	if r.Form.Get("users") != "U123" {
+		writeSlackJSON(w, map[string]any{"ok": false, "error": "user_not_found"})
+		return
+	}
+	writeSlackJSON(w, map[string]any{
+		"ok": true,
+		"channel": map[string]any{
+			"id":    "D123",
+			"is_im": true,
+			"user":  "U123",
+		},
 	})
 }
 

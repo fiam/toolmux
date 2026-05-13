@@ -53,6 +53,12 @@ type ConversationsInfoResponse struct {
 	Channel Conversation `json:"channel,omitzero"`
 }
 
+type ConversationsOpenResponse struct {
+	OK      bool         `json:"ok"`
+	Error   string       `json:"error,omitempty"`
+	Channel Conversation `json:"channel,omitzero"`
+}
+
 type ConversationMessagesResponse struct {
 	OK               bool      `json:"ok"`
 	Error            string    `json:"error,omitempty"`
@@ -305,6 +311,14 @@ func (c Client) ConversationsInfo(ctx context.Context, values url.Values) (Conve
 	var out ConversationsInfoResponse
 	if err := c.get(ctx, "conversations.info", values, &out); err != nil {
 		return ConversationsInfoResponse{}, err
+	}
+	return out, nil
+}
+
+func (c Client) ConversationsOpen(ctx context.Context, values url.Values) (ConversationsOpenResponse, error) {
+	var out ConversationsOpenResponse
+	if err := c.postForm(ctx, "conversations.open", values, &out); err != nil {
+		return ConversationsOpenResponse{}, err
 	}
 	return out, nil
 }

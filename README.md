@@ -97,18 +97,18 @@ toolmux add slack \
   --auth oauth \
   --client-id "$SLACK_CLIENT_ID" \
   --client-secret-env SLACK_CLIENT_SECRET \
-  --scope channels:read,chat:write,search:read
+  --scope channels:read,chat:write,im:write,search:read
 ```
 
 Authorize through the Toolmux broker:
 
 ```bash
-toolmux add slack --auth broker --scope channels:read,chat:write,search:read
+toolmux add slack --auth broker --scope channels:read,chat:write,im:write,search:read
 ```
 
 Omit `--scope` to use Toolmux's Slack defaults, which cover channel and DM
-history, posting, reactions, attachment reads, user search, user groups, and
-Slack search.
+history, opening DMs, posting, reactions, attachment reads, user search, user
+groups, and Slack search.
 
 The Slack broker facet in `toolmuxd` uses these environment variables:
 
@@ -129,6 +129,7 @@ toolmux slack auth_test
 toolmux slack channels_list --channel_types public_channel,private_channel
 toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000 --limit 50
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
+toolmux slack conversations_open --user_id U123456
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
 toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
 toolmux status slack
@@ -137,11 +138,77 @@ toolmux remove slack
 
 Native Slack command names use Slack MCP-style and Slack Web API method names:
 `auth_test`, `conversations_history`, `conversations_replies`,
-`conversations_add_message`, `reactions_add`, `reactions_remove`,
+`conversations_add_message`, `conversations_open`, `reactions_add`, `reactions_remove`,
 `attachment_get_data`, `conversations_search_messages`,
 `conversations_unreads`, `conversations_mark`, `channels_list`,
 `usergroups_list`, `usergroups_me`, `usergroups_create`,
 `usergroups_update`, `usergroups_users_update`, and `users_search`.
+
+## Workflows
+
+Workflows are local YAML files that render an agent prompt and run it through a
+configured local agent command. Global workflows live in
+`~/.toolmux/workflows`; project workflows live in `.toolmux/workflows`.
+
+List workflow templates and create the Slack recap workflow:
+
+```bash
+toolmux workflow templates
+toolmux workflow init slack-recap --template slack-recap --project
+```
+
+Template names in `toolmux workflow templates` are fetched from this
+repository on GitHub. You can also create workflows from
+`github:owner/repo/path[@ref]` or a direct YAML URL:
+
+```bash
+toolmux workflow init team-recap --template github:acme/workflows/slack-recap.yaml@main
+toolmux workflow init custom --template https://example.com/workflow.yaml
+```
+
+Workflow prompts are inline Go `text/template` strings. Inputs without defaults
+are required:
+
+```bash
+toolmux workflow render slack-recap --input since="yesterday 18:00"
+```
+
+Run a workflow with an explicit agent:
+
+```bash
+toolmux workflow run slack-recap \
+  --agent codex \
+  --input since="yesterday 18:00"
+```
+
+If a workflow, `--agent`, or `workflows.default_agent` does not provide an
+agent, `workflow run` opens an agent selector in an interactive terminal and
+fails in non-interactive runs. Agent commands may include `{{ .prompt }}` in
+the command or args; otherwise Toolmux appends the rendered prompt as the final
+argument. The `--agent` value can include arguments, such as
+`--agent "codex --yolo"`.
+
+Set a default workflow agent:
+
+```bash
+toolmux workflow config set default-agent codex
+```
+
+In an interactive terminal, omit the agent to choose from detected local agents:
+
+```bash
+toolmux workflow config set default-agent
+```
+
+Workflows declare required toolboxes with compact requirements such as
+`internal:slack`, `catalog:linear`, or a remote MCP URL. Missing required
+toolboxes are added automatically during `workflow init` and `workflow run`
+unless `--no-setup` is passed.
+
+The built-in Slack recap template uses `internal:slack`. If no
+`delivery_channel` input is set, the prompt tells the agent to DM the recap to
+itself by opening a Slack IM conversation first, then sending to that DM channel
+ID.
 
 ## Output For Humans And Scripts
 
@@ -349,6 +416,9 @@ toolmux atlassian <tool-name>
 Remote MCP config writes default to the global Toolmux config. Add `--project`
 when you intentionally want a project-local server, profile, or default
 argument.
+
+Global Toolmux config is `~/.toolmux/config.yaml`. Project config remains
+`.toolmux/config.yaml` in the current project tree.
 
 In an interactive terminal, remote MCP command help and tool listings keep
 upstream descriptions compact and lightly styled so the command list stays

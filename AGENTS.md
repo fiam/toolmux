@@ -237,13 +237,29 @@ agent scope behavior consistent across agents where their CLIs support the same
 scope.
 
 MCP tool profiles are non-secret configuration under the general Toolmux config
-`mcp` key. Global config lives at `toolmux/config.yaml` under the user config
-directory; project config lives in `.toolmux/config.yaml`. Manage both through
-`toolmux mcp profile`. Project config overrides global config for matching
-profile names and default profile selection, similar to Git config layering.
+`mcp` key. Global config lives at `~/.toolmux/config.yaml`; project config
+lives in `.toolmux/config.yaml`. Manage both through `toolmux mcp profile`.
+Project config overrides global config for matching profile names and default
+profile selection, similar to Git config layering.
 Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
 regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
 and tests in sync when changing selection behavior.
+
+Workflow definitions are non-secret YAML. Global workflows live under
+`~/.toolmux/workflows`; project workflows live under `.toolmux/workflows`.
+Template catalog entries must point at YAML files committed under `workflows/`
+and loaded from GitHub, not hardcoded as Go workflow structs. Workflow prompts
+are inline Go `text/template` strings. Missing template inputs without defaults
+must fail clearly. A workflow can declare an agent, but `workflow run` must also
+support `--agent` and `workflows.default_agent`; if no agent is available,
+interactive runs should prompt for a detected or configured local agent and
+non-interactive runs must fail. `toolmux workflow config set default-agent`
+with no agent argument should open the same selector interactively. Agent
+command definitions may include `{{ .prompt }}`; otherwise Toolmux appends the
+rendered prompt as an extra argument. Workflows may declare required toolboxes
+with compact values such as `internal:slack`, `catalog:linear`, or a remote MCP
+URL, and missing requirements should be added automatically during
+`workflow init` and `workflow run` unless `--no-setup` is passed.
 
 Imported remote MCP servers are also managed under the general Toolmux `mcp`
 config key through `toolmux mcp`. Server definitions and cached
