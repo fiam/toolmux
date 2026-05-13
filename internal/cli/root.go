@@ -118,7 +118,6 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(statusCommand(opts))
 	root.AddCommand(doctorCommand(opts))
 	root.AddCommand(policyCommand(opts))
-	root.AddCommand(schemaCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(workflowCommand(opts))
 	registerActionCommands(root, opts)
@@ -988,9 +987,6 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	if len(parts) >= 1 && parts[0] == "doctor" {
 		return doctorSpec(), true
 	}
-	if len(parts) >= 1 && parts[0] == "schema" {
-		return schemaSpec(), true
-	}
 	if len(parts) >= 2 && parts[0] == "workflow" {
 		switch parts[1] {
 		case "init", "add":
@@ -1026,6 +1022,8 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	}
 	if len(parts) >= 2 && parts[0] == "mcp" {
 		switch parts[1] {
+		case "schema":
+			return schemaSpec(), true
 		case "sync":
 			return mcpRemoteSyncSpec(), true
 		case "rename":

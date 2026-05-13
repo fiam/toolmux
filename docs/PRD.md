@@ -258,7 +258,7 @@ Discovery commands:
 
 ```bash
 toolmux policy catalog
-toolmux schema
+toolmux mcp schema <server.tool>
 ```
 
 Optional later UX:
@@ -395,7 +395,7 @@ toolmux mcp catalog --enable notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion
-toolmux schema notion <tool>
+toolmux mcp schema notion <tool>
 ```
 
 Out of scope for MVP:

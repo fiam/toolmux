@@ -79,6 +79,7 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(mcpRemoteShowCommand(opts))
 	cmd.AddCommand(mcpRemoteCatalogCommand(opts))
 	cmd.AddCommand(mcpRemoteDefaultsCommand(opts))
+	cmd.AddCommand(schemaCommand(opts))
 	cmd.AddCommand(mcpProfileCommand(opts))
 	return cmd
 }

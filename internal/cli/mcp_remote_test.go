@@ -427,7 +427,7 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 		"--b float",
 		"--operation string",
 		"-v, --verbose",
-		"toolmux schema linear calculate",
+		"toolmux mcp schema linear calculate",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("expected help to contain %q, got:\n%s", want, help)
@@ -437,7 +437,7 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 		t.Fatalf("expected help to omit full input schema, got:\n%s", help)
 	}
 
-	schemaOutput := runRootForRemoteTest(t, env, "schema", "linear", "calculate")
+	schemaOutput := runRootForRemoteTest(t, env, "mcp", "schema", "linear", "calculate")
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(schemaOutput), &schema); err != nil {
 		t.Fatalf("decode schema output: %v\n%s", err, schemaOutput)
@@ -446,13 +446,18 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	if _, ok := properties["a"]; !ok || schema["type"] != "object" {
 		t.Fatalf("unexpected schema output: %#v", schema)
 	}
-	dottedSchemaOutput := runRootForRemoteTest(t, env, "schema", "linear.calculate")
+	dottedSchemaOutput := runRootForRemoteTest(t, env, "mcp", "schema", "linear.calculate")
 	if dottedSchemaOutput != schemaOutput {
 		t.Fatalf("expected dotted schema lookup to match two-arg lookup:\n%s\n---\n%s", dottedSchemaOutput, schemaOutput)
 	}
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "schema linear.calculate")
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp schema linear.calculate")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected schema command policy check, got %q", policyOutput)
+	}
+
+	_, rootSchemaErr := runRootForRemoteTestError(t, env, "schema", "linear.calculate")
+	if rootSchemaErr == nil || !strings.Contains(rootSchemaErr.Error(), "unknown command") {
+		t.Fatalf("expected root schema command to be unavailable, got %v", rootSchemaErr)
 	}
 
 	cmd := rootForRemoteTest(env)

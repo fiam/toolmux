@@ -354,7 +354,7 @@ Try the public no-auth Iterate mock server:
 toolmux add iterate
 toolmux iterate mock_echo --message hello
 toolmux iterate mock_calculate --operation add --a 2 --b 3
-toolmux schema iterate mock_calculate
+toolmux mcp schema iterate mock_calculate
 ```
 
 Built-in remote MCP catalog names:
@@ -480,8 +480,8 @@ printenv CLOUDFLARE_API_TOKEN | \
 
 Remote tool commands translate representable top-level JSON Schema properties
 into flags. Use `--json` for nested objects or schemas that cannot be
-expressed as flags. Use `toolmux schema <server> <tool>` or
-`toolmux schema <server>.<tool>` to print the cached input schema.
+expressed as flags. Use `toolmux mcp schema <server> <tool>` or
+`toolmux mcp schema <server>.<tool>` to print the cached input schema.
 
 ## Token Custody
 

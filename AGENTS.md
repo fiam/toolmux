@@ -402,7 +402,7 @@ existing imported MCP server, startup must fail with an actionable error that
 prints `toolmux mcp rename <old-name> <new-name>`.
 Synthetic remote MCP tool commands must generate flags for representable
 top-level input-schema properties, keep help focused on command usage, expose
-full schemas through the top-level `toolmux schema` command, and provide
+full schemas through the `toolmux mcp schema` command, and provide
 `-v`/`--verbose` HTTP tracing on stderr with authorization and cookie headers
 redacted.
 

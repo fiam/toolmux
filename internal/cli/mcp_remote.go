@@ -3692,7 +3692,7 @@ func setMCPRemoteToolHelp(cmd *cobra.Command, entry mcpRemoteServerEntry, tool m
 			fmt.Fprint(cmd.OutOrStdout(), cmd.UsageString())
 		}
 		fmt.Fprintln(cmd.OutOrStdout())
-		fmt.Fprintf(cmd.OutOrStdout(), "Run `toolmux schema %s %s` to view the full input schema.\n", entry.Name, tool.Name)
+		fmt.Fprintf(cmd.OutOrStdout(), "Run `toolmux mcp schema %s %s` to view the full input schema.\n", entry.Name, tool.Name)
 	})
 }
 
@@ -4101,8 +4101,8 @@ func mcpRemoteAuthStatusSpec() actions.Spec {
 }
 
 func schemaSpec() actions.Spec {
-	return actions.Command("schema", "schema",
-		actions.Use("schema <server.tool|server tool>"),
+	return actions.Command("toolmux.mcp.schema", "schema",
+		actions.Use("mcp schema <server.tool|server tool>"),
 		actions.Short("Show a tool input schema"),
 		actions.RBAC("tool_schema", actions.VerbRead, actions.EffectNone, actions.EffectRead),
 	)

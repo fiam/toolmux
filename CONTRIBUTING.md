@@ -151,7 +151,7 @@ opportunistically after about 24 hours without breaking use of an existing cache
 when refresh fails. Remote tool commands
 should translate representable top-level input-schema properties into flags,
 keep help focused on command usage, expose full schemas through the top-level
-`toolmux schema` command, and support `-v`/`--verbose` HTTP tracing with
+`toolmux mcp schema` command, and support `-v`/`--verbose` HTTP tracing with
 credential headers redacted. `toolmux add` and `toolmux mcp sync` should
 support the same redacted tracing for sync-time debugging.
 `mcp catalog` must list built-in remotes regardless of registration state and
