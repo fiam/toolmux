@@ -99,7 +99,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:           "toolmux",
-		Short:         "A local-first mega CLI for SaaS services",
+		Short:         "An agentic toolbox for connecting services to local agents",
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true

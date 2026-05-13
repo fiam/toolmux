@@ -4,13 +4,13 @@
 
 # Toolmux
 
-Toolmux connects your terminal and local agents to the tools you already use,
+Toolmux is an agentic toolbox for connecting services and tools to your agents,
 with one command surface, local credential storage, and policy checks before
 credentials are read.
 
 Use Toolmux when you want to:
 
-1. Work with SaaS tools from the command line.
+1. Connect services and tools to local agents.
 2. Give coding agents controlled access to those same tools through MCP.
 3. Import remote MCP servers and call their tools like normal CLI commands.
 4. Keep provider tokens in your operating system credential store.
