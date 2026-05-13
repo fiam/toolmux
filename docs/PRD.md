@@ -31,13 +31,16 @@ The first release optimizes for a simple connection experience without asking us
 2. No team-shared connections.
 3. No scheduled cloud workflows or background jobs.
 4. No native workspace bot automation by default.
-5. No attempt to bypass provider OAuth policies or scrape browser/session tokens.
+5. No attempt to bypass provider OAuth policies or scrape browser/session
+   tokens, except explicit Slack browser-session setup initiated by
+   `toolmux add slack`.
 6. No AWS Lambda, DNS, certificate, production secret, or hosted deployment infrastructure in the OSS repo.
 7. No native Notion OAuth integration while Notion has a usable remote MCP
    path; do not ask users or hosted Toolmux operators to register a Notion
    public connection for native commands.
 10. No browser credential harvesting, cookie extraction, or session-token
-    scraping as an auth shortcut for MCP or native integrations.
+    scraping as an auth shortcut for MCP or native integrations, except the
+    explicit Slack browser-session setup flow.
 
 ## Users
 
@@ -400,16 +403,18 @@ Out of scope for MVP:
 1. Native provider-specific Notion commands.
 2. Bypassing provider admin approval, OAuth policy, or workspace governance.
 3. Scraping browser sessions, local browser storage, or copying tokens out of
-   provider-owned clients.
+   provider-owned clients, except Slack's explicit `toolmux add slack`
+   browser-session setup.
 
 ### Slack
 
 Auth:
 
-1. Explicit user-supplied token plus optional cookie header.
-2. User-owned Slack OAuth app with local loopback callback.
-3. toolmuxd-backed Slack OAuth for hosted or self-hosted broker flows.
-4. Store scopes, team metadata, access token, refresh token, and refresh
+1. Explicit browser-session setup through embedded slackauth.
+2. Explicit user-supplied token plus optional cookie header.
+3. User-owned Slack OAuth app with local loopback callback.
+4. toolmuxd-backed Slack OAuth for hosted or self-hosted broker flows.
+5. Store scopes, team metadata, access token, refresh token, and refresh
    metadata locally.
 
 Candidate scopes:
@@ -422,10 +427,10 @@ Candidate scopes:
 MVP commands:
 
 ```bash
+toolmux add slack --workspace acme
 toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
 toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
 toolmux add slack --auth broker
-toolmux slack auth_test
 toolmux slack channels_list
 toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
@@ -523,8 +528,9 @@ All provider-like toolboxes must support:
 9. The OSS server repo must include secret scanning and clear documentation that deployment operators must provide provider client secrets out of band.
 10. Local policy denies must be checked before provider tokens are read from the OS credential store.
 11. Browser cookies, local browser databases, workspace session tokens, and
-    provider web-app bearer tokens are credential material and must not be
-    harvested or transformed into Toolmux credentials.
+    provider web-app bearer tokens are credential material. Slack browser
+    session extraction is allowed only through explicit `toolmux add slack`
+    browser auth and must validate with `auth.test` before storing credentials.
 
 ## Quality Requirements
 

@@ -242,6 +242,7 @@ type nativeToolboxAddOptions struct {
 	Cookie          string
 	CookieEnv       string
 	CookieFile      string
+	FromBrowser     string
 	TeamID          string
 	Workspace       string
 	ClientID        string
@@ -258,15 +259,16 @@ type nativeToolboxAddOptions struct {
 
 func addNativeToolboxAddFlags(cmd *cobra.Command, opts *nativeToolboxAddOptions) {
 	cmd.Flags().StringVar(&opts.Account, "account", "default", "native provider account name")
-	cmd.Flags().StringVar(&opts.Auth, "auth", "", "native provider auth mode: broker, oauth, token, or token-cookie")
+	cmd.Flags().StringVar(&opts.Auth, "auth", "", "native provider auth mode: broker, browser, oauth, token, or token-cookie")
 	cmd.Flags().StringVar(&opts.Token, "token", "", "provider access token to store")
 	cmd.Flags().StringVar(&opts.TokenEnv, "token-env", "", "environment variable containing the provider access token")
 	cmd.Flags().StringVar(&opts.TokenFile, "token-file", "", "file containing the provider access token")
 	cmd.Flags().StringVar(&opts.Cookie, "cookie", "", "provider cookie header to store with the token")
 	cmd.Flags().StringVar(&opts.CookieEnv, "cookie-env", "", "environment variable containing the provider cookie header")
 	cmd.Flags().StringVar(&opts.CookieFile, "cookie-file", "", "file containing the provider cookie header")
+	cmd.Flags().StringVar(&opts.FromBrowser, "from-browser", "", "native provider browser auth source, such as webview or chrome")
 	cmd.Flags().StringVar(&opts.TeamID, "team-id", "", "provider team or workspace ID to store as metadata")
-	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "provider workspace name to store as metadata")
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "provider workspace name, Slack subdomain, or metadata; required for Slack browser auth")
 	cmd.Flags().StringVar(&opts.ClientID, "client-id", "", "OAuth client ID")
 	cmd.Flags().StringVar(&opts.ClientSecret, "client-secret", "", "OAuth client secret")
 	cmd.Flags().StringVar(&opts.ClientSecretEnv, "client-secret-env", "", "environment variable containing the OAuth client secret")
@@ -381,6 +383,7 @@ func nativeToolboxAddFlagValues(opts nativeToolboxAddOptions) map[string]any {
 		"cookie":            opts.Cookie,
 		"cookie-env":        opts.CookieEnv,
 		"cookie-file":       opts.CookieFile,
+		"from-browser":      opts.FromBrowser,
 		"team-id":           opts.TeamID,
 		"workspace":         opts.Workspace,
 		"client-id":         opts.ClientID,

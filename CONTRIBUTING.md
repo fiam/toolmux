@@ -71,10 +71,12 @@ native providers should register only when their provider-owned specs,
 handlers, fake upstreams, and tests are ready.
 
 Do not add browser credential harvesting, cookie extraction, session-token
-scraping, or provider-policy bypasses to make an MCP server easier to use. For
-local or self-hosted MCP servers, prefer OAuth, documented provider tokens, or
-explicit `toolmux mcp auth set` flows that store credentials in the OS
-credential store.
+scraping, or provider-policy bypasses to make an MCP server easier to use. The
+only current exception is Slack's explicit browser-session setup through
+`toolmux add slack --workspace` or `--from-browser`, which must validate with
+`auth.test` before storing credentials. For local or self-hosted MCP servers,
+prefer OAuth, documented provider tokens, or explicit `toolmux mcp auth set`
+flows that store credentials in the OS credential store.
 
 MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
 manual protocol testing and `toolmux mcp configure` to register the server with
@@ -293,13 +295,14 @@ For commands that mutate or delete data, include `--dry-run` where useful and
 require explicit confirmation for destructive or broad replacement actions.
 
 Slack is the first native provider command set. Its client facet lives under
-`internal/providers/slack/client`, shared Slack HTTP/OAuth helpers live under
+`internal/providers/slack/client`, browser-session extraction lives under
+`internal/slackauth`, shared Slack HTTP/OAuth helpers live under
 `internal/providers/slack/slackapi`, and the toolmuxd broker facet lives under
-`internal/providers/slack/broker`. Slack tests must cover direct token+cookie
-auth, user-owned OAuth, brokered OAuth, token refresh, `toolmux add slack`
-flags, add-time `auth.test` validation failures, workspace URL enrichment,
-`toolmux remove slack`, and representative Web API commands against fake
-upstream servers.
+`internal/providers/slack/broker`. Slack tests must cover browser extraction
+flag routing, direct token+cookie auth, user-owned OAuth, brokered OAuth, token
+refresh, `toolmux add slack` flags, add-time `auth.test` validation failures,
+workspace URL enrichment, `toolmux remove slack`, and representative Web API
+commands against fake upstream servers.
 
 For Slack broker testing, configure fake or local upstream endpoints through
 `brokers.Config` in tests instead of environment variables. For deployed

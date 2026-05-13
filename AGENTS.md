@@ -337,10 +337,13 @@ for providers or workflows that do not have a usable MCP path, or when a native
 surface is explicitly justified by product requirements.
 
 Do not implement browser credential harvesting, cookie extraction, session-token
-scraping, or provider-policy bypasses. If Toolmux needs to support a local or
-self-hosted MCP server that accepts tokens, require explicit user-supplied
-credentials through the OS credential store, `mcp auth set`, OAuth, or the
-server's own documented setup flow.
+scraping, or provider-policy bypasses. The only current exception is Slack's
+explicit browser-session setup through `toolmux add slack --workspace` or
+`--from-browser`, which must validate with `auth.test` before storing
+credentials. If Toolmux needs to support a local or self-hosted MCP server that
+accepts tokens, require explicit user-supplied credentials through the OS
+credential store, `mcp auth set`, OAuth, or the server's own documented setup
+flow.
 
 ## Hosted Broker
 
@@ -375,12 +378,10 @@ crash reports, telemetry, or committed files.
 
 Browser cookies, local browser databases, workspace session tokens, and
 provider web-app bearer tokens are also credential material. Do not read,
-extract, transform, sync, print, or store them unless the provider documents
-that flow for application integration and the user supplies the credential
-explicitly through a supported Toolmux auth command.
-Slack token+cookie auth is limited to explicit user-supplied token and cookie
-header values passed to `toolmux add slack`; do not add browser cookie
-harvesting or Slack session extraction helpers. Slack auth setup and legacy
+extract, transform, sync, print, or store them unless the provider-specific
+flow is explicitly supported by `toolmux add` and requested by the user.
+Slack browser-session auth must stay confined to the `internal/slackauth`
+package and the `toolmux add slack` flow. Slack auth setup and legacy
 credential migration must use `auth.test` to validate credentials and store the
 returned workspace URL for workspace-specific API calls.
 Expose Slack identity through provider-owned read-only actions such as

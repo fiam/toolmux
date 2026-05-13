@@ -70,11 +70,29 @@ Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 ## Native Slack
 
 Slack is available as a native provider under `toolmux slack`. It supports
-three auth models:
+these auth models:
 
-1. User-supplied token plus an optional explicit cookie header.
-2. A user-owned Slack OAuth app with a local loopback callback.
-3. Brokered OAuth through `toolmuxd`.
+1. Browser session extraction through embedded `slackauth`.
+2. User-supplied token plus an optional explicit cookie header.
+3. A user-owned Slack OAuth app with a local loopback callback.
+4. Brokered OAuth through `toolmuxd`.
+
+Use browser session auth for a workspace:
+
+```bash
+toolmux add slack --workspace acme
+```
+
+`--workspace` is required for Slack browser-session auth. Use the Slack
+workspace subdomain, for example `acme` from `https://acme.slack.com`.
+
+By default, Toolmux asks `slackauth` to pick the best local engine. You can
+select one explicitly:
+
+```bash
+toolmux add slack --workspace acme --from-browser webview
+toolmux add slack --workspace acme --from-browser chrome
+```
 
 Store a user-supplied token and cookie:
 
@@ -84,11 +102,12 @@ toolmux add slack \
   --cookie-env SLACK_COOKIE
 ```
 
-Toolmux never reads browser cookie stores or extracts Slack session material.
-The cookie path only stores the exact cookie header you provide through a
-supported `toolmux add slack` command. `toolmux add slack` validates Slack
-credentials with `auth.test` before storing them, records the returned
-workspace URL, and uses that workspace-specific API base for later Slack calls.
+Browser extraction runs only when explicitly requested through
+`toolmux add slack --workspace` or `--from-browser`. The resulting token and
+cookie use the same storage path as manually supplied credentials.
+`toolmux add slack` validates Slack credentials with `auth.test` before storing
+them, records the returned workspace URL, and uses that workspace-specific API
+base for later Slack calls.
 
 Authorize with your own Slack OAuth app:
 

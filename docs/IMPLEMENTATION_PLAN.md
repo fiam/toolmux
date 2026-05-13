@@ -14,7 +14,8 @@ Do not build credential-harvesting flows for convenience. Local/self-hosted MCP
 servers may be supported through OAuth, documented provider tokens, explicit
 `toolmux mcp auth set` flows, or server-owned setup commands, but Toolmux must
 not scrape browser cookies, local browser storage, session tokens, or
-provider-owned client credentials.
+provider-owned client credentials except for Slack's explicit browser-session
+setup through `toolmux add slack`.
 
 Use the latest stable Go release. As of 2026-05-07, `govulncheck` reports Go
 1.26.3 as the security-fix patch release for the Go 1.26 line. Set the module
@@ -528,16 +529,17 @@ Acceptance criteria:
 
 Deliverables:
 
-1. Slack explicit token+cookie auth storage.
-2. Slack user-owned OAuth with local loopback callback and refresh.
-3. Slack toolmuxd broker OAuth exchange and refresh.
-4. Slack provider commands:
+1. Slack explicit browser-session auth through embedded slackauth.
+2. Slack explicit token+cookie auth storage.
+3. Slack user-owned OAuth with local loopback callback and refresh.
+4. Slack toolmuxd broker OAuth exchange and refresh.
+5. Slack provider commands:
 
 ```bash
+toolmux add slack --workspace acme
 toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
 toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
 toolmux add slack --auth broker
-toolmux slack auth_test
 toolmux slack channels_list
 toolmux slack conversations_history
 toolmux slack conversations_search_messages
@@ -681,7 +683,8 @@ Security tests:
 6. toolmuxd persistence tests that fail if token-shaped fields are written to files, databases, telemetry, or logs.
 7. Tests for any local MCP setup helpers must prove Toolmux does not read
    browser cookie stores, browser profile databases, or provider web-app
-   session-token files.
+   session-token files. Slack browser auth tests must use fake extraction hooks
+   and fake upstreams rather than live workspaces.
 
 Lint and quality gates:
 
