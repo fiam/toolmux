@@ -6,13 +6,26 @@ metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
 
 builds:
-  - id: toolmux
+  - id: toolmux-darwin
+    main: ./cmd/toolmux
+    binary: toolmux
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/fiam/toolmux/internal/version.Version={{ .Version }}
+  - id: toolmux-cross
     main: ./cmd/toolmux
     binary: toolmux
     env:
       - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
       - windows
     goarch:
@@ -25,7 +38,8 @@ builds:
 archives:
   - id: toolmux
     ids:
-      - toolmux
+      - toolmux-darwin
+      - toolmux-cross
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -36,7 +50,7 @@ archives:
 
 kos:
   - id: toolmuxd
-    build: toolmux
+    build: toolmux-cross
     main: ./cmd/toolmuxd
     repositories:
       - ghcr.io/fiam/toolmuxd

@@ -55,14 +55,16 @@ pass also checks Go formatting and import order through `golangci-lint fmt`.
 GitHub Actions runs these checks for pull requests and pushes to `main`, plus
 race tests, fake-upstream integration tests, coverage generation, binary
 builds, commit-message validation, and the generic `toolmuxd` container image
-build. CI also runs a GoReleaser snapshot release so the CLI archive matrix and
-Ko-built `toolmuxd` image manifest are validated before a release.
+build. CI also runs a macOS GoReleaser snapshot release so the cgo-enabled
+Darwin CLI artifacts and no-cgo Linux/Windows CLI artifacts are validated
+before a release.
 PR and Make-based local builds use the Make defaults: `toolmux` is compiled
 with `CGO_ENABLED=1`, and `toolmuxd` is compiled with `CGO_ENABLED=0`.
 The `release dry run` workflow also runs weekly and can be triggered manually;
 it checks out latest `main`, builds native `toolmux` with cgo and `toolmuxd`
-without cgo, and runs the same GoReleaser snapshot path without publishing
-artifacts, container images, or Homebrew updates.
+without cgo, runs the GoReleaser CLI snapshot path without publishing
+artifacts or Homebrew updates, and validates the generic `toolmuxd` container
+image separately on Linux.
 Live-provider tests stay opt-in and are not part of default CI.
 
 Imported remote MCP servers remain the preferred path when a provider already
@@ -196,7 +198,8 @@ Releases are managed by release-please and GoReleaser.
 2. The `release` workflow opens or updates a release-please PR.
 3. Merge the release PR to create the GitHub release and tag.
 4. GoReleaser builds `toolmux` archives for macOS, Linux, and Windows on amd64
-   and arm64.
+   and arm64. macOS CLI artifacts are cgo-enabled so Slack browser-session
+   auth can call Cocoa/WKWebView.
 5. GoReleaser publishes a Ko-built `toolmuxd` Linux image for amd64 and arm64
    to `ghcr.io/fiam/toolmuxd:<tag>`.
 6. GoReleaser uploads CLI release artifacts and checksums to GitHub Releases.
@@ -206,16 +209,14 @@ Releases are managed by release-please and GoReleaser.
 For a no-publish release rehearsal, run the `release dry run` workflow. It
 checks out latest `main`, runs `goreleaser check`, builds native `toolmux` with
 cgo and `toolmuxd` without cgo, and runs
-`goreleaser release --snapshot --clean` with read-only repository permissions.
-It does not log in to GHCR, require the Homebrew tap token, or publish release
-artifacts.
+`goreleaser release --snapshot --clean --skip=ko` with read-only repository
+permissions. It does not log in to GHCR, require the Homebrew tap token, or
+publish release artifacts.
 
-PR and local Make builds use split cgo settings: `toolmux` is cgo-enabled and
-`toolmuxd` is pure-Go. The current GoReleaser CLI artifact matrix still pins
-`CGO_ENABLED=0`, so a required cgo dependency in release-packaged `toolmux`
-artifacts needs a release toolchain update before it can ship. Update the
-GoReleaser matrix, CI runner/toolchain setup, and release dry run together when
-enabling cgo release artifacts. Keep `toolmuxd` release images built with
+PR, local Make builds, and GoReleaser releases use split cgo settings:
+`toolmux` is cgo-enabled where native platform integrations require it,
+Darwin release artifacts are built on macOS with cgo, Linux/Windows CLI
+artifacts are built without cgo, and `toolmuxd` remains pure-Go with
 `CGO_ENABLED=0`.
 
 Required repository secrets:

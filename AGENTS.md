@@ -133,10 +133,12 @@ CI should run at least:
 8. Commit-message validation.
 9. Generic `toolmuxd` container image build validation.
 10. Coverage generation with `make coverage`.
-11. GoReleaser snapshot release validation for the CLI archive matrix and
-    Ko-built `toolmuxd` image manifest.
+11. GoReleaser snapshot release validation for the CLI archive matrix on
+    macOS, covering cgo-enabled Darwin artifacts and no-cgo Linux/Windows
+    artifacts.
 12. A non-publishing release dry run against latest `main` through
-    `goreleaser release --snapshot --clean`.
+    `goreleaser release --snapshot --clean --skip=ko`, plus Linux validation
+    of the generic `toolmuxd` container image.
 
 ## Releases
 
@@ -146,12 +148,10 @@ Release automation uses release-please and GoReleaser.
    release PRs, changelog generation, GitHub releases, and tags.
 2. `.goreleaser.yaml` controls CLI archives for `toolmux` and the Ko-built
    `toolmuxd` container image.
-3. PR and local Make builds compile `toolmux` with cgo and `toolmuxd` without
-   cgo. The current GoReleaser CLI artifact matrix still pins
-   `CGO_ENABLED=0`, so do not add required cgo dependencies to
-   release-packaged `toolmux` artifacts until the release matrix, CI
-   toolchains, and dry-run workflow have been updated to build cgo artifacts
-   intentionally. Keep GoReleaser's `toolmuxd` image build at
+3. PR, local Make builds, and GoReleaser releases use split cgo settings:
+   `toolmux` is cgo-enabled where native platform integrations require it,
+   Darwin release artifacts are built on macOS with cgo, Linux/Windows CLI
+   artifacts are built without cgo, and `toolmuxd` remains pure-Go with
    `CGO_ENABLED=0`.
 4. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
    and arm64 unless release support is intentionally changed and documented.
@@ -159,8 +159,8 @@ Release automation uses release-please and GoReleaser.
    Linux amd64/arm64 image at `ghcr.io/fiam/toolmuxd:<tag>`.
 6. The release workflow publishes a Homebrew cask to `fiam/homebrew-tap`.
 7. The release dry-run workflow must stay read-only, check out latest `main`,
-   and must not log in to GHCR, publish GitHub release artifacts, or update
-   Homebrew.
+   skip Ko publishing in the GoReleaser snapshot, and must not log in to GHCR,
+   publish GitHub release artifacts, or update Homebrew.
 8. Keep the Homebrew cask binary stanza aligned with released binary names.
 9. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
    `fiam/homebrew-tap`.

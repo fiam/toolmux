@@ -20,7 +20,7 @@ func Extract(ctx context.Context, opts Options) (*Session, error) {
 		opts.Engine = defaultEngine()
 	}
 	if opts.Engine == "" {
-		return nil, fmt.Errorf("no engine available on %s; both chrome and webview engines are currently macOS-only", runtime.GOOS)
+		return nil, fmt.Errorf("no browser auth engine available on %s", runtime.GOOS)
 	}
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc

@@ -2,13 +2,10 @@
 
 package slackauth
 
-// webviewAvailable: on non-macOS platforms the EngineWebView path isn't
-// implemented yet (WebView2 wiring on Windows is the natural next step;
-// WebKitGTK on Linux is a maybe). Returning false here keeps autodetect
-// honest and lets EngineRod be the default fallback.
+// webviewAvailable: this file only covers OSes without a native WebView
+// backend. Returning false keeps autodetect honest.
 func webviewAvailable() bool { return false }
 
-// chromeAvailable: the ride-along engine relies on macOS-specific paths
-// and Keychain plumbing today. Linux (libsecret/KWallet) and Windows
-// (DPAPI / app-bound encryption) are future work.
+// chromeAvailable: the ride-along engine only supports platforms with
+// provider-specific browser profile and credential-store handling.
 func chromeAvailable() bool { return false }

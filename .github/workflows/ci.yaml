@@ -116,7 +116,7 @@ jobs:
 
   release-build:
     name: release build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -139,4 +139,4 @@ jobs:
       - name: Check GoReleaser config
         run: goreleaser check
       - name: Build release snapshot
-        run: goreleaser release --snapshot --clean
+        run: goreleaser release --snapshot --clean --skip=ko
