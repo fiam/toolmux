@@ -168,10 +168,10 @@ Supported native Slack tool names:
 
 Run `toolmux slack --help` for the command list and per-tool flags.
 
-## Remote MCP Toolboxes
+## MCP Toolboxes
 
-Toolmux can import remote MCP servers, cache their tool definitions, and expose
-them in two places:
+Toolmux can import MCP servers, cache their tool definitions, and expose them
+in two places:
 
 1. CLI commands under the registered toolbox name.
 2. Proxied MCP tools from `toolmux mcp serve`.
@@ -194,6 +194,20 @@ toolmux mcp auth login linear-work
 toolmux mcp sync linear-work
 toolmux linear-work
 ```
+
+Register a command-backed MCP server over stdio:
+
+```bash
+toolmux add -- npx -y @upstash/context7-mcp
+toolmux add -- docker run -i --rm browser-tools-mcp
+```
+
+Toolmux infers stdio MCP commands when the input is not a URL, built-in
+catalog entry, or native toolbox. Use `--name` to override the derived command
+namespace, and use `--stdio` only when the first command word would otherwise
+match a built-in catalog entry or native toolbox. The `--` separator is needed
+when command arguments use dash-prefixed flags, so those flags are passed to
+the command instead of Toolmux.
 
 The registered name becomes the CLI namespace. A server named `linear-work`
 exposes commands as `toolmux linear-work <tool-name>` and MCP tools as
@@ -365,9 +379,9 @@ Common global flags:
 --mcp-tool-call-timeout <duration>
 ```
 
-Remote MCP tool calls wait up to `60s` of response inactivity by default. Use
+MCP toolbox calls wait up to `60s` of response inactivity by default. Use
 `--mcp-tool-call-timeout`, for example `--mcp-tool-call-timeout 2m`, when a
-remote MCP tool needs more time to return a `tools/call` response.
+proxied MCP tool needs more time to return a `tools/call` response.
 
 ## Safety
 
@@ -383,7 +397,7 @@ Project config lives in:
 .toolmux/config.yaml
 ```
 
-Remote MCP server definitions and cached tool metadata are non-secret config.
+MCP server definitions and cached tool metadata are non-secret config.
 Provider tokens, OAuth tokens, refresh tokens, bearer tokens, auth codes,
 client secrets, and Slack token-cookie credentials are stored only in the OS
 credential store or transient process memory.

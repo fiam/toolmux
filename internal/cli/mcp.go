@@ -1352,13 +1352,17 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: err.Error()}
 	}
 	arguments = mcpRemoteMergeDefaultArguments(arguments, ref.Entry.Server.DefaultArguments, ref.Tool.InputSchema)
-	spec := mcpRemoteActionSpec(ref.Entry.Name, ref.Tool)
+	spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
 	if err := authorize(server.cmd, server.opts, spec, nil); err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	token, err := loadMCPRemoteAccessToken(ctx, server.opts, ref.Entry)
-	if err != nil {
-		return mcpErrorToolResult(err), nil
+	token := ""
+	if ref.Entry.Server.Transport != mcpRemoteTransportStdio {
+		var err error
+		token, err = loadMCPRemoteAccessToken(ctx, server.opts, ref.Entry)
+		if err != nil {
+			return mcpErrorToolResult(err), nil
+		}
 	}
 	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, mcpRemoteToolCallTimeout(server.opts), nil)
 	if err != nil {

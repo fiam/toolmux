@@ -104,6 +104,9 @@ func mcpRemoteAuthLoginCommand(opts *options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
 			}
+			if normalizeMCPRemoteServer(entry.Server).Transport == mcpRemoteTransportStdio {
+				return fmt.Errorf("MCP server %q uses stdio; configure auth in the command environment or arguments", name)
+			}
 			if err := authorize(cmd, opts, mcpRemoteAuthLoginSpec(), args); err != nil {
 				return err
 			}

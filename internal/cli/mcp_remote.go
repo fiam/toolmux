@@ -12,11 +12,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -32,10 +35,12 @@ import (
 
 const (
 	mcpRemoteTransportStreamableHTTP = "streamable-http"
+	mcpRemoteTransportStdio          = "stdio"
 	mcpRemoteCacheVersion            = 1
 	mcpRemoteCacheMaxAge             = 24 * time.Hour
 	mcpRemoteToolsListMaxPages       = 128
 	mcpRemoteSSEIdleTimeout          = 60 * time.Second
+	mcpRemoteStdioCloseTimeout       = 2 * time.Second
 	mcpRemoteTraceBodyLimit          = 8 << 20
 	mcpRemoteCompactDescriptionLimit = 120
 	mcpRemoteServerAnnotation        = "toolmux.remote_mcp.server"
@@ -49,6 +54,8 @@ var (
 
 type mcpRemoteServer struct {
 	URL              string         `json:"url" yaml:"url"`
+	Command          string         `json:"command,omitempty" yaml:"command,omitempty"`
+	Args             []string       `json:"args,omitempty" yaml:"args,omitempty"`
 	Transport        string         `json:"transport,omitempty" yaml:"transport,omitempty"`
 	AuthRequired     *bool          `json:"auth_required,omitempty" yaml:"auth_required,omitempty"`
 	DefaultArguments map[string]any `json:"default_arguments,omitempty" yaml:"default_arguments,omitempty"`
@@ -100,6 +107,7 @@ type mcpRemoteListItem struct {
 	Scopes    []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path      string   `json:"path" yaml:"path"`
 	URL       string   `json:"url" yaml:"url"`
+	Command   string   `json:"command,omitempty" yaml:"command,omitempty"`
 	Transport string   `json:"transport" yaml:"transport"`
 	Tools     *int     `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
@@ -116,6 +124,7 @@ type mcpRemoteTreeItem struct {
 	Scopes    []string        `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path      string          `json:"path" yaml:"path"`
 	URL       string          `json:"url" yaml:"url"`
+	Command   string          `json:"command,omitempty" yaml:"command,omitempty"`
 	Transport string          `json:"transport" yaml:"transport"`
 	Tools     []mcpRemoteTool `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
@@ -217,29 +226,37 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	var nameFlag string
 	var transport string
+	var stdio bool
 	var noSync bool
 	var verboseHTTP bool
 	var native nativeToolboxAddOptions
 	cmd := &cobra.Command{
-		Use:   "add <toolbox-or-url>",
+		Use:   "add <toolbox-or-url|command> [args...]",
 		Short: "Add a toolbox",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := strings.TrimSpace(args[0])
-			if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
-				return err
-			}
-			return addMCPRemoteToolbox(cmd, opts, target, mcpRemoteToolboxAddOptions{
+			commandArgs := append([]string(nil), args[1:]...)
+			add := mcpRemoteToolboxAddOptions{
 				Scope:       scope,
 				Name:        nameFlag,
 				Transport:   transport,
+				Stdio:       stdio,
+				CommandArgs: commandArgs,
 				NoSync:      noSync,
 				VerboseHTTP: verboseHTTP,
-			}, args)
+			}
+			if !add.ExplicitStdio() && len(commandArgs) == 0 {
+				if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
+					return err
+				}
+			}
+			return addMCPRemoteToolbox(cmd, opts, target, add, args)
 		},
 	}
 	cmd.Flags().StringVar(&nameFlag, "name", "", "registered toolbox name")
-	cmd.Flags().StringVar(&transport, "transport", "", "remote MCP transport: streamable-http")
+	cmd.Flags().StringVar(&transport, "transport", "", "MCP transport: streamable-http or stdio")
+	cmd.Flags().BoolVar(&stdio, "stdio", false, "register a command-backed MCP server over stdio")
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "register without immediately syncing tools")
 	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
 	addNativeToolboxAddFlags(cmd, &native)
@@ -251,8 +268,14 @@ type mcpRemoteToolboxAddOptions struct {
 	Scope       mcpProfileScopeOptions
 	Name        string
 	Transport   string
+	Stdio       bool
+	CommandArgs []string
 	NoSync      bool
 	VerboseHTTP bool
+}
+
+func (add mcpRemoteToolboxAddOptions) ExplicitStdio() bool {
+	return add.Stdio || strings.TrimSpace(add.Transport) == mcpRemoteTransportStdio
 }
 
 type nativeToolboxAddOptions struct {
@@ -335,7 +358,7 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 }
 
 func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add mcpRemoteToolboxAddOptions, args []string) error {
-	name, server, err := resolveToolboxAddTarget(target, add.Name, add.Transport)
+	name, server, err := resolveToolboxAddTarget(target, add.Name, add.Transport, add.Stdio, add.CommandArgs)
 	if err != nil {
 		return err
 	}
@@ -365,6 +388,12 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 		return err
 	}
 	server = normalizeMCPRemoteServer(server)
+	if err := validateMCPRemoteServer(server); err != nil {
+		return err
+	}
+	if server.Transport == mcpRemoteTransportStdio {
+		server.AuthRequired = new(false)
+	}
 	register := func() error {
 		config.Version = 1
 		config.MCP.Servers[name] = server
@@ -424,16 +453,29 @@ func nativeToolboxAddFlagValues(opts nativeToolboxAddOptions) map[string]any {
 	}
 }
 
-func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mcpRemoteServer, error) {
+func resolveToolboxAddTarget(target, nameFlag, transportFlag string, stdio bool, commandArgs []string) (string, mcpRemoteServer, error) {
 	if strings.TrimSpace(target) == "" {
 		return "", mcpRemoteServer{}, fmt.Errorf("toolbox name or URL is required")
 	}
+	transport := strings.TrimSpace(transportFlag)
+	if stdio {
+		if transport != "" && transport != mcpRemoteTransportStdio {
+			return "", mcpRemoteServer{}, fmt.Errorf("--stdio conflicts with --transport %s", transport)
+		}
+		transport = mcpRemoteTransportStdio
+	}
+	allArgs := append([]string{target}, commandArgs...)
+	if transport == mcpRemoteTransportStdio {
+		return resolveMCPStdioAddTarget(nameFlag, allArgs)
+	}
 	if isMCPRemoteURLArgument(target) {
+		if len(commandArgs) > 0 {
+			return "", mcpRemoteServer{}, fmt.Errorf("MCP URL adds do not accept extra command arguments; pass --stdio to register a command")
+		}
 		name, err := cleanToolboxAddName(nameFlag, target)
 		if err != nil {
 			return "", mcpRemoteServer{}, err
 		}
-		transport := strings.TrimSpace(transportFlag)
 		if transport == "" {
 			transport = mcpRemoteTransportStreamableHTTP
 		}
@@ -446,12 +488,22 @@ func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mc
 		return name, mcpRemoteServer{URL: strings.TrimSpace(target), Transport: transport}, nil
 	}
 	catalogName, err := cleanMCPRemoteName(target)
-	if err != nil {
-		return "", mcpRemoteServer{}, err
+	if err == nil {
+		if _, ok := mcpBuiltinRemoteServers()[catalogName]; ok && len(commandArgs) > 0 {
+			return "", mcpRemoteServer{}, fmt.Errorf("toolbox %q is a known catalog entry; pass --stdio to register a command with this name", catalogName)
+		}
+		if provider, ok := providers.Lookup(catalogName); ok && provider.AddHandler != nil && len(commandArgs) > 0 {
+			return "", mcpRemoteServer{}, fmt.Errorf("toolbox %q is a native provider; pass --stdio to register a command with this name", catalogName)
+		}
+	} else if len(commandArgs) == 0 {
+		return resolveMCPStdioAddTarget(nameFlag, allArgs)
+	}
+	if len(commandArgs) > 0 {
+		return resolveMCPStdioAddTarget(nameFlag, allArgs)
 	}
 	builtin, ok := mcpBuiltinRemoteServers()[catalogName]
 	if !ok {
-		return "", mcpRemoteServer{}, fmt.Errorf("unknown toolbox %q; pass an MCP URL or a known catalog name", catalogName)
+		return resolveMCPStdioAddTarget(nameFlag, allArgs)
 	}
 	name := catalogName
 	if strings.TrimSpace(nameFlag) != "" {
@@ -460,7 +512,6 @@ func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mc
 			return "", mcpRemoteServer{}, err
 		}
 	}
-	transport := strings.TrimSpace(transportFlag)
 	if transport == "" {
 		transport = builtin.Transport
 	}
@@ -475,6 +526,197 @@ func resolveToolboxAddTarget(target, nameFlag, transportFlag string) (string, mc
 		return "", mcpRemoteServer{}, err
 	}
 	return name, builtin, nil
+}
+
+func resolveMCPStdioAddTarget(nameFlag string, argv []string) (string, mcpRemoteServer, error) {
+	command, commandArgv, err := cleanMCPRemoteCommand(argv)
+	if err != nil {
+		return "", mcpRemoteServer{}, err
+	}
+	name := strings.TrimSpace(nameFlag)
+	if name == "" {
+		name, err = defaultMCPRemoteNameFromCommand(command, commandArgv)
+		if err != nil {
+			return "", mcpRemoteServer{}, err
+		}
+	}
+	cleanedName, err := cleanMCPRemoteName(name)
+	if err != nil {
+		return "", mcpRemoteServer{}, err
+	}
+	return cleanedName, mcpRemoteServer{
+		Command:   command,
+		Args:      commandArgv,
+		Transport: mcpRemoteTransportStdio,
+	}, nil
+}
+
+func cleanMCPRemoteCommand(argv []string) (string, []string, error) {
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return "", nil, fmt.Errorf("stdio MCP transport requires a command after --")
+	}
+	cleaned := append([]string(nil), argv...)
+	cleaned[0] = strings.TrimSpace(cleaned[0])
+	for _, arg := range cleaned {
+		if strings.ContainsRune(arg, 0) {
+			return "", nil, fmt.Errorf("stdio MCP command arguments cannot contain NUL bytes")
+		}
+	}
+	return cleaned[0], append([]string(nil), cleaned[1:]...), nil
+}
+
+func defaultMCPRemoteNameFromCommand(command string, args []string) (string, error) {
+	candidate := mcpRemoteCommandNameCandidate(command, args)
+	name := mcpRemoteNameFromPackageLikeValue(candidate)
+	if name == "" {
+		return "", fmt.Errorf("could not derive a toolbox name from command %q; pass --name", command)
+	}
+	if _, err := cleanMCPRemoteName(name); err != nil {
+		return "", fmt.Errorf("could not derive a valid toolbox name from command %q; pass --name", command)
+	}
+	return name, nil
+}
+
+func mcpRemoteCommandNameCandidate(command string, args []string) string {
+	base := strings.TrimSuffix(filepath.Base(command), ".exe")
+	switch base {
+	case "npx", "bunx", "uvx":
+		if value := firstMCPRemotePackageArg(args); value != "" {
+			return value
+		}
+	case "npm", "pnpm", "yarn", "bun":
+		remaining := args
+		if len(remaining) > 0 {
+			switch remaining[0] {
+			case "exec", "dlx", "x":
+				remaining = remaining[1:]
+			}
+		}
+		if value := firstMCPRemotePackageArg(remaining); value != "" {
+			return value
+		}
+	case "docker", "podman":
+		if value := mcpRemoteContainerRunImage(args); value != "" {
+			return value
+		}
+	}
+	return base
+}
+
+func firstMCPRemotePackageArg(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		if arg == "--" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if strings.HasPrefix(arg, "-") {
+			if (arg == "-p" || arg == "--package") && i+1 < len(args) {
+				return args[i+1]
+			}
+			if !strings.Contains(arg, "=") && mcpRemoteOptionLikelyHasValue(arg) && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		return arg
+	}
+	return ""
+}
+
+func mcpRemoteContainerRunImage(args []string) string {
+	runIndex := slices.Index(args, "run")
+	if runIndex < 0 {
+		return ""
+	}
+	for i := runIndex + 1; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		if arg == "--" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if strings.HasPrefix(arg, "-") {
+			if !strings.Contains(arg, "=") && mcpRemoteOptionLikelyHasValue(arg) && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		return arg
+	}
+	return ""
+}
+
+func mcpRemoteOptionLikelyHasValue(option string) bool {
+	switch option {
+	case "-e", "--env", "--env-file", "--label", "--label-file",
+		"-p", "--publish", "--expose", "-v", "--volume", "--mount",
+		"--name", "--network", "-w", "--workdir", "-u", "--user",
+		"--platform", "--entrypoint", "--add-host", "--hostname",
+		"--pull", "--package", "--cache", "--registry", "--tag":
+		return true
+	default:
+		return false
+	}
+}
+
+func mcpRemoteNameFromPackageLikeValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "docker.io/")
+	if at := strings.Index(value, "@sha256:"); at >= 0 {
+		value = value[:at]
+	}
+	if colon := strings.LastIndex(value, ":"); colon > strings.LastIndex(value, "/") {
+		value = value[:colon]
+	}
+	value = strings.Trim(value, "/")
+	if slash := strings.LastIndex(value, "/"); slash >= 0 {
+		value = value[slash+1:]
+	}
+	value = strings.TrimPrefix(value, "@")
+	value = strings.TrimSuffix(value, ".git")
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"mcp-server-", ""},
+		{"server-", ""},
+		{"-mcp-server", ""},
+		{"_mcp_server", ""},
+		{".mcp-server", ""},
+		{"-mcp", ""},
+		{"_mcp", ""},
+		{".mcp", ""},
+	}
+	for _, replacement := range replacements {
+		value = strings.TrimPrefix(value, replacement.old)
+		value = strings.TrimSuffix(value, replacement.old)
+		value = strings.ReplaceAll(value, replacement.old, replacement.new)
+	}
+	value = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r + ('a' - 'A')
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, value)
+	return strings.Trim(value, "-_")
 }
 
 func cleanToolboxAddName(nameFlag, rawURL string) (string, error) {
@@ -789,6 +1031,9 @@ func mcpRemoteAuthSetCommand(opts *options) *cobra.Command {
 			}
 			if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
+			}
+			if normalizeMCPRemoteServer(entry.Server).Transport == mcpRemoteTransportStdio {
+				return fmt.Errorf("MCP server %q uses stdio; configure auth in the command environment or arguments", name)
 			}
 			if err := authorize(cmd, opts, mcpRemoteAuthSetSpec(), args); err != nil {
 				return err
@@ -1588,7 +1833,37 @@ func matchingMCPRemoteCatalogRegistrations(catalogName string, server mcpRemoteS
 func sameMCPRemoteServer(left, right mcpRemoteServer) bool {
 	left = normalizeMCPRemoteServer(left)
 	right = normalizeMCPRemoteServer(right)
-	return strings.TrimRight(left.URL, "/") == strings.TrimRight(right.URL, "/") && left.Transport == right.Transport
+	if left.Transport != right.Transport {
+		return false
+	}
+	if left.Transport == mcpRemoteTransportStdio {
+		return left.Command == right.Command && slices.Equal(left.Args, right.Args)
+	}
+	return strings.TrimRight(left.URL, "/") == strings.TrimRight(right.URL, "/")
+}
+
+func mcpRemoteServerSource(server mcpRemoteServer) string {
+	server = normalizeMCPRemoteServer(server)
+	if server.Transport == mcpRemoteTransportStdio {
+		return mcpRemoteCommandDisplay(server)
+	}
+	return server.URL
+}
+
+func mcpRemoteKind(server mcpRemoteServer) string {
+	if normalizeMCPRemoteServer(server).Transport == mcpRemoteTransportStdio {
+		return "stdio-mcp"
+	}
+	return "remote-mcp"
+}
+
+func mcpRemoteCommandDisplay(server mcpRemoteServer) string {
+	parts := make([]string, 0, 1+len(server.Args))
+	if strings.TrimSpace(server.Command) != "" {
+		parts = append(parts, strings.TrimSpace(server.Command))
+	}
+	parts = append(parts, server.Args...)
+	return strings.Join(parts, " ")
 }
 
 func findMCPRemoteServerEntry(entries []mcpRemoteServerEntry, name string) (mcpRemoteServerEntry, bool) {
@@ -1617,6 +1892,7 @@ func mcpRemoteListItems(opts *options, entries []mcpRemoteServerEntry) []mcpRemo
 			Scopes:    mcpRemoteNormalizedScopes(entry.Scopes),
 			Path:      entry.Path,
 			URL:       entry.Server.URL,
+			Command:   mcpRemoteCommandDisplay(entry.Server),
 			Transport: entry.Server.Transport,
 			Tools:     tools,
 		})
@@ -1641,11 +1917,11 @@ func renderMCPRemoteListTable(w io.Writer, cmd *cobra.Command, opts *options, it
 			status,
 			mcpRemoteScopesLabel(item.Scopes),
 			tools,
-			item.URL,
+			mcpRemoteServerSource(mcpRemoteServer{URL: item.URL, Command: item.Command, Transport: item.Transport}),
 		})
 	}
 	output.RenderTable(w, human, output.Table{
-		Headers: []string{"Name", "Status", "Scope", "Tools", "URL"},
+		Headers: []string{"Name", "Status", "Scope", "Tools", "Source"},
 		Rows:    rows,
 		Empty:   "no remote MCP servers registered",
 	})
@@ -1678,6 +1954,7 @@ func mcpRemoteTreeItems(entries []mcpRemoteServerEntry, caches map[string]mcpRem
 			Scopes:    mcpRemoteNormalizedScopes(entry.Scopes),
 			Path:      entry.Path,
 			URL:       entry.Server.URL,
+			Command:   mcpRemoteCommandDisplay(entry.Server),
 			Transport: entry.Server.Transport,
 		}
 		if cache, ok := caches[entry.Name]; ok {
@@ -2429,6 +2706,25 @@ func validateMCPRemoteURL(raw string) error {
 	return nil
 }
 
+func validateMCPRemoteServer(server mcpRemoteServer) error {
+	server = normalizeMCPRemoteServer(server)
+	switch server.Transport {
+	case mcpRemoteTransportStreamableHTTP:
+		if strings.TrimSpace(server.Command) != "" || len(server.Args) > 0 {
+			return fmt.Errorf("streamable HTTP MCP servers cannot include command arguments")
+		}
+		return validateMCPRemoteURL(server.URL)
+	case mcpRemoteTransportStdio:
+		if strings.TrimSpace(server.URL) != "" {
+			return fmt.Errorf("stdio MCP servers cannot include a URL")
+		}
+		_, _, err := cleanMCPRemoteCommand(append([]string{server.Command}, server.Args...))
+		return err
+	default:
+		return validateMCPRemoteTransport(server.Transport)
+	}
+}
+
 func isMCPRemoteURLArgument(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
@@ -2436,7 +2732,7 @@ func isMCPRemoteURLArgument(raw string) bool {
 
 func validateMCPRemoteTransport(transport string) error {
 	switch strings.TrimSpace(transport) {
-	case "", mcpRemoteTransportStreamableHTTP:
+	case "", mcpRemoteTransportStreamableHTTP, mcpRemoteTransportStdio:
 		return nil
 	default:
 		return fmt.Errorf("unsupported MCP transport %q", transport)
@@ -2541,6 +2837,7 @@ func lookupMCPRemoteServer(name, startDir string) (mcpRemoteServerEntry, bool, e
 
 func normalizeMCPRemoteServer(server mcpRemoteServer) mcpRemoteServer {
 	server.URL = strings.TrimSpace(server.URL)
+	server.Command = strings.TrimSpace(server.Command)
 	server.Transport = strings.TrimSpace(server.Transport)
 	if server.Transport == "" {
 		server.Transport = mcpRemoteTransportStreamableHTTP
@@ -2651,9 +2948,13 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), args); err != nil {
 		return mcpRemoteCache{}, false, err
 	}
-	token, err := loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
-	if err != nil {
-		return mcpRemoteCache{}, false, err
+	token := ""
+	if entry.Server.Transport != mcpRemoteTransportStdio {
+		var err error
+		token, err = loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
+		if err != nil {
+			return mcpRemoteCache{}, false, err
+		}
 	}
 	cache, err := syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, token, trace)
 	if err != nil {
@@ -2723,9 +3024,13 @@ func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts 
 	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), []string{entry.Name}); err != nil {
 		return cache, ok
 	}
-	token, err := loadMCPRemoteAccessToken(ctx, opts, entry)
-	if err != nil {
-		return cache, ok
+	token := ""
+	if entry.Server.Transport != mcpRemoteTransportStdio {
+		var err error
+		token, err = loadMCPRemoteAccessToken(ctx, opts, entry)
+		if err != nil {
+			return cache, ok
+		}
 	}
 	refreshed, err := syncMCPRemoteServer(ctx, opts.httpClient, entry, token, trace)
 	if err != nil {
@@ -2754,6 +3059,13 @@ func mcpRemoteToolFromCache(cache mcpRemoteCache, name string) (mcpRemoteTool, b
 }
 
 func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemoteServerEntry, bearerToken string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, error) {
+	entry.Server = normalizeMCPRemoteServer(entry.Server)
+	if err := validateMCPRemoteServer(entry.Server); err != nil {
+		return mcpRemoteCache{}, err
+	}
+	if entry.Server.Transport == mcpRemoteTransportStdio {
+		return syncMCPRemoteStdioServer(ctx, entry)
+	}
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -2761,15 +3073,19 @@ func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemo
 	if err != nil {
 		return mcpRemoteCache{}, err
 	}
+	tools, toolsResult, err := listMCPRemoteTools(ctx, client, entry.Server, bearerToken, sessionID, trace)
+	if err != nil {
+		return mcpRemoteCache{}, err
+	}
+	return mcpRemoteCacheFromSync(entry, initResult, toolsResult, tools), nil
+}
+
+func mcpRemoteCacheFromSync(entry mcpRemoteServerEntry, initResult, toolsResult json.RawMessage, tools []mcpRemoteTool) mcpRemoteCache {
 	var init struct {
 		ProtocolVersion string         `json:"protocolVersion"`
 		ServerInfo      map[string]any `json:"serverInfo"`
 	}
 	_ = json.Unmarshal(initResult, &init)
-	tools, toolsResult, err := listMCPRemoteTools(ctx, client, entry.Server, bearerToken, sessionID, trace)
-	if err != nil {
-		return mcpRemoteCache{}, err
-	}
 	for i := range tools {
 		tools[i].Name = strings.TrimSpace(tools[i].Name)
 		if tools[i].InputSchema == nil {
@@ -2797,7 +3113,287 @@ func syncMCPRemoteServer(ctx context.Context, client *http.Client, entry mcpRemo
 			"initialize": initResult,
 			"tools_list": toolsResult,
 		},
+	}
+}
+
+func syncMCPRemoteStdioServer(ctx context.Context, entry mcpRemoteServerEntry) (mcpRemoteCache, error) {
+	session, err := startMCPRemoteStdioSession(ctx, entry.Server)
+	if err != nil {
+		return mcpRemoteCache{}, err
+	}
+	defer session.Close()
+	initResult, err := session.call(ctx, "initialize", mcpRemoteInitializeParams(), mcpRemoteSSEIdleTimeout)
+	if err != nil {
+		return mcpRemoteCache{}, err
+	}
+	if err := session.notify(ctx, "notifications/initialized", nil); err != nil {
+		return mcpRemoteCache{}, err
+	}
+	tools, toolsResult, err := listMCPRemoteStdioTools(ctx, session)
+	if err != nil {
+		return mcpRemoteCache{}, err
+	}
+	return mcpRemoteCacheFromSync(entry, initResult, toolsResult, tools), nil
+}
+
+func listMCPRemoteStdioTools(ctx context.Context, session *mcpRemoteStdioSession) ([]mcpRemoteTool, json.RawMessage, error) {
+	var tools []mcpRemoteTool
+	var pages []json.RawMessage
+	var cursor *string
+	for range mcpRemoteToolsListMaxPages {
+		var params any
+		if cursor != nil {
+			params = map[string]any{"cursor": *cursor}
+		}
+		result, err := session.call(ctx, "tools/list", params, mcpRemoteSSEIdleTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		var decoded struct {
+			Tools      *[]mcpRemoteTool `json:"tools"`
+			NextCursor *string          `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(result, &decoded); err != nil {
+			return nil, nil, fmt.Errorf("decode stdio MCP tools/list: %w", err)
+		}
+		if decoded.Tools == nil {
+			return nil, nil, fmt.Errorf("stdio MCP tools/list returned no tools array")
+		}
+		tools = append(tools, (*decoded.Tools)...)
+		pages = append(pages, result)
+		if decoded.NextCursor == nil {
+			return tools, aggregateMCPRemoteToolsListResult(tools, pages), nil
+		}
+		cursor = decoded.NextCursor
+	}
+	return nil, nil, fmt.Errorf("stdio MCP tools/list exceeded %d pages", mcpRemoteToolsListMaxPages)
+}
+
+func callMCPRemoteStdioTool(ctx context.Context, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, responseIdleTimeout time.Duration) (mcpCallToolResult, error) {
+	session, err := startMCPRemoteStdioSession(ctx, entry.Server)
+	if err != nil {
+		return mcpCallToolResult{}, err
+	}
+	defer session.Close()
+	if _, err := session.call(ctx, "initialize", mcpRemoteInitializeParams(), mcpRemoteSSEIdleTimeout); err != nil {
+		return mcpCallToolResult{}, err
+	}
+	if err := session.notify(ctx, "notifications/initialized", nil); err != nil {
+		return mcpCallToolResult{}, err
+	}
+	result, err := session.call(ctx, "tools/call", map[string]any{
+		"name":      tool.Name,
+		"arguments": arguments,
+	}, responseIdleTimeout)
+	if err != nil {
+		return mcpCallToolResult{}, err
+	}
+	var callResult mcpCallToolResult
+	if err := json.Unmarshal(result, &callResult); err == nil && mcpRemoteCallToolResultHasPayload(callResult) {
+		return callResult, nil
+	}
+	return mcpTextToolResult(string(result)), nil
+}
+
+type mcpRemoteStdioSession struct {
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	messages <-chan mcpRemoteStdioMessage
+	nextID   int64
+	waitOnce sync.Once
+	waitErr  error
+}
+
+type mcpRemoteStdioMessage struct {
+	Data []byte
+	Err  error
+}
+
+func startMCPRemoteStdioSession(ctx context.Context, server mcpRemoteServer) (*mcpRemoteStdioSession, error) {
+	server = normalizeMCPRemoteServer(server)
+	command, args, err := cleanMCPRemoteCommand(append([]string{server.Command}, server.Args...))
+	if err != nil {
+		return nil, err
+	}
+	// #nosec G204 -- stdio MCP commands are explicit user configuration.
+	cmd := exec.CommandContext(ctx, command, args...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start stdio MCP command %q: %w", command, err)
+	}
+	messages := make(chan mcpRemoteStdioMessage, 8)
+	go scanMCPRemoteStdioMessages(stdout, messages)
+	return &mcpRemoteStdioSession{
+		cmd:      cmd,
+		stdin:    stdin,
+		messages: messages,
 	}, nil
+}
+
+func (session *mcpRemoteStdioSession) notify(ctx context.Context, method string, params any) error {
+	_, err := session.write(ctx, method, params, false)
+	return err
+}
+
+func (session *mcpRemoteStdioSession) call(ctx context.Context, method string, params any, responseIdleTimeout time.Duration) (json.RawMessage, error) {
+	requestID, err := session.write(ctx, method, params, true)
+	if err != nil {
+		return nil, err
+	}
+	return session.readResponse(ctx, method, requestID, responseIdleTimeout)
+}
+
+func (session *mcpRemoteStdioSession) write(ctx context.Context, method string, params any, includeID bool) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var rawParams json.RawMessage
+	if params != nil {
+		data, err := json.Marshal(params)
+		if err != nil {
+			return nil, err
+		}
+		rawParams = data
+	}
+	request := mcpRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  rawParams,
+	}
+	var requestID json.RawMessage
+	if includeID {
+		session.nextID++
+		requestID = json.RawMessage(strconv.FormatInt(session.nextID, 10))
+		request.ID = requestID
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	body = append(body, '\n')
+	if _, err := session.stdin.Write(body); err != nil {
+		return nil, fmt.Errorf("write stdio MCP %s request: %w", method, err)
+	}
+	return requestID, nil
+}
+
+func (session *mcpRemoteStdioSession) readResponse(ctx context.Context, method string, expectedID json.RawMessage, responseIdleTimeout time.Duration) (json.RawMessage, error) {
+	if responseIdleTimeout <= 0 {
+		responseIdleTimeout = mcpRemoteSSEIdleTimeout
+	}
+	timer := time.NewTimer(responseIdleTimeout)
+	defer timer.Stop()
+	resetTimer := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(responseIdleTimeout)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+			session.kill()
+			return nil, fmt.Errorf("decode stdio MCP %s response: timed out waiting for response message after %s of inactivity", method, responseIdleTimeout)
+		case item, ok := <-session.messages:
+			resetTimer()
+			if !ok {
+				if err := session.wait(); err != nil {
+					return nil, fmt.Errorf("stdio MCP command exited before %s response: %w", method, err)
+				}
+				return nil, fmt.Errorf("stdio MCP command exited before %s response", method)
+			}
+			if item.Err != nil {
+				return nil, fmt.Errorf("decode stdio MCP %s response: %w", method, item.Err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(item.Data, &fields); err != nil {
+				return nil, fmt.Errorf("decode stdio MCP %s response: %w", method, err)
+			}
+			id, hasID := fields["id"]
+			if !hasID || !bytes.Equal(bytes.TrimSpace(id), bytes.TrimSpace(expectedID)) {
+				continue
+			}
+			var decoded mcpResponse
+			if err := json.Unmarshal(item.Data, &decoded); err != nil {
+				return nil, fmt.Errorf("decode stdio MCP %s response: %w", method, err)
+			}
+			if decoded.Error != nil {
+				return nil, decoded.Error
+			}
+			result, err := json.Marshal(decoded.Result)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		}
+	}
+}
+
+func (session *mcpRemoteStdioSession) Close() {
+	if session == nil {
+		return
+	}
+	if session.stdin != nil {
+		_ = session.stdin.Close()
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = session.wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(mcpRemoteStdioCloseTimeout):
+		session.kill()
+		<-done
+	}
+}
+
+func (session *mcpRemoteStdioSession) wait() error {
+	if session == nil || session.cmd == nil {
+		return nil
+	}
+	session.waitOnce.Do(func() {
+		session.waitErr = session.cmd.Wait()
+	})
+	return session.waitErr
+}
+
+func (session *mcpRemoteStdioSession) kill() {
+	if session == nil || session.cmd == nil || session.cmd.Process == nil {
+		return
+	}
+	_ = session.cmd.Process.Kill()
+}
+
+func scanMCPRemoteStdioMessages(reader io.Reader, messages chan<- mcpRemoteStdioMessage) {
+	defer close(messages)
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		data := append([]byte(nil), line...)
+		messages <- mcpRemoteStdioMessage{Data: data}
+	}
+	if err := scanner.Err(); err != nil {
+		messages <- mcpRemoteStdioMessage{Err: err}
+	}
 }
 
 func mcpRemoteToolsFingerprint(tools []mcpRemoteTool) string {
@@ -3289,6 +3885,10 @@ func mcpRemoteSSEMessageIsResponse(message []byte, expectedID json.RawMessage) (
 }
 
 func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, bearerToken string, responseIdleTimeout time.Duration, trace *mcpRemoteHTTPTrace) (mcpCallToolResult, error) {
+	entry.Server = normalizeMCPRemoteServer(entry.Server)
+	if entry.Server.Transport == mcpRemoteTransportStdio {
+		return callMCPRemoteStdioTool(ctx, entry, tool, arguments, responseIdleTimeout)
+	}
 	_, sessionID, err := initializeMCPRemoteSession(ctx, client, entry.Server, bearerToken, trace)
 	if err != nil {
 		return mcpCallToolResult{}, err
@@ -3361,7 +3961,7 @@ func mcpRemoteRootCommand(opts *options, entry mcpRemoteServerEntry) *cobra.Comm
 func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRemoteTool) *cobra.Command {
 	var rawJSON string
 	var verboseHTTP bool
-	spec := mcpRemoteActionSpec(entry.Name, tool)
+	spec := mcpRemoteActionSpecForEntry(entry, tool)
 	description := firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name)
 	cmd := &cobra.Command{
 		Use:   tool.Name,
@@ -3385,9 +3985,13 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 				}
 				toolForCall = freshTool
 			}
-			token, err := loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
-			if err != nil {
-				return err
+			token := ""
+			if entry.Server.Transport != mcpRemoteTransportStdio {
+				var err error
+				token, err = loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
+				if err != nil {
+					return err
+				}
 			}
 			result, err := callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, token, mcpRemoteToolCallTimeout(opts), trace)
 			if err != nil {
@@ -3926,13 +4530,20 @@ func writeMCPRemoteToolResult(cmd *cobra.Command, opts *options, result mcpCallT
 	return writeValue(cmd, opts, result, nil)
 }
 
-func mcpRemoteActionSpec(serverName string, tool mcpRemoteTool) actions.Spec {
+func mcpRemoteActionSpecForEntry(entry mcpRemoteServerEntry, tool mcpRemoteTool) actions.Spec {
+	serverName := entry.Name
 	id := serverName + "." + tool.Name
+	localEffect := actions.EffectNone
+	risks := []string{"remote-mcp", "remote-write"}
+	if entry.Server.Transport == mcpRemoteTransportStdio {
+		localEffect = actions.EffectWrite
+		risks = []string{"stdio-mcp", "local-command", "remote-write", "local-write"}
+	}
 	spec := actions.Command(actions.LocalName(id), tool.Name,
 		actions.Use(tool.Name),
 		actions.Short(firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name)),
-		actions.RBAC(actions.ResourceName("mcp_remote"), actions.Verb("call"), actions.EffectWrite, actions.EffectNone),
-		actions.Risks("remote-mcp", "remote-write"),
+		actions.RBAC(actions.ResourceName("mcp_remote"), actions.Verb("call"), actions.EffectWrite, localEffect),
+		actions.Risks(risks...),
 		actions.Scopes("mcp:"+serverName),
 	)
 	spec.Provider = serverName
@@ -3947,7 +4558,7 @@ func cachedMCPRemoteCommandSpecs(opts *options) []policy.CommandSpec {
 	refs := mcpRemoteToolRefs(opts.mcpCacheDir)
 	specs := make([]policy.CommandSpec, 0, len(refs))
 	for _, ref := range refs {
-		specs = append(specs, mcpRemoteActionSpec(ref.Entry.Name, ref.Tool))
+		specs = append(specs, mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool))
 	}
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
@@ -3961,7 +4572,7 @@ func mcpRemoteSpecForCommandParts(opts *options, parts []string) (policy.Command
 	}
 	for _, ref := range mcpRemoteToolRefs(opts.mcpCacheDir) {
 		if ref.Entry.Name == parts[0] && ref.Tool.Name == parts[1] {
-			return mcpRemoteActionSpec(ref.Entry.Name, ref.Tool), true
+			return mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool), true
 		}
 	}
 	return policy.CommandSpec{}, false
@@ -3974,7 +4585,7 @@ func (server mcpServer) remoteMCPTools(ctx context.Context) []any {
 	refs := server.remoteMCPToolRefs(ctx)
 	tools := make([]any, 0, len(refs))
 	for _, ref := range refs {
-		spec := mcpRemoteActionSpec(ref.Entry.Name, ref.Tool)
+		spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
 		if !server.selector.matches(spec) {
 			continue
 		}
@@ -4059,7 +4670,7 @@ func mcpRemoteToolRefsWithRefresh(ctx context.Context, cmd *cobra.Command, opts 
 
 func (server mcpServer) lookupRemoteMCPTool(ctx context.Context, name string) (mcpRemoteToolRef, bool) {
 	for _, ref := range server.remoteMCPToolRefs(ctx) {
-		spec := mcpRemoteActionSpec(ref.Entry.Name, ref.Tool)
+		spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
 		if spec.ID == name && server.selector.matches(spec) {
 			return ref, true
 		}

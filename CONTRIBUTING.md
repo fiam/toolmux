@@ -107,10 +107,14 @@ non-interactive sessions should fail. The no-agent form of
 `toolmux workflow config set default-agent` should also support an interactive
 selector.
 
-Imported remote MCP servers are also stored under the general Toolmux `mcp`
+Imported MCP servers are also stored under the general Toolmux `mcp`
 config key, with non-secret server definitions in config and cached tool
 metadata in the user cache directory. Use top-level `toolmux add` to register
-remote MCP toolboxes from a catalog name or URL; use `toolmux mcp sync`,
+remote MCP toolboxes from a catalog name or URL, or command-backed stdio
+toolboxes with `toolmux add <command> [args...]`; use `--name` to override
+the derived namespace, `--stdio` only to disambiguate a command name that
+matches a catalog or native toolbox, and `--` before command-owned flags; use
+`toolmux mcp sync`,
 `toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
 `toolmux catalog`, and `toolmux mcp defaults` for MCP-specific server
 maintenance. Default arguments are non-secret config values applied only
@@ -118,7 +122,8 @@ to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
 the global config; require `--project` for project-local writes. Server config
 should record `auth_required` after sync or auth setup when the requirement is
-known. Use
+known. Stdio MCP toolboxes do not use Toolmux-managed MCP OAuth or bearer-token
+auth; configure auth through the command environment or command arguments. Use
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
 registration, and `toolmux mcp auth set` for externally issued bearer tokens.
 `toolmux remove` and its `rm` alias should accept one or more toolbox names.

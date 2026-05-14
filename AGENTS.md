@@ -266,7 +266,7 @@ with compact values such as `internal:slack`, `catalog:linear`, or a remote MCP
 URL, and missing requirements should be added automatically during
 `workflow init` and `workflow run` unless `--no-setup` is passed.
 
-Imported remote MCP servers are also managed under the general Toolmux `mcp`
+Imported MCP servers are also managed under the general Toolmux `mcp`
 config key through `toolmux mcp`. Server definitions and cached
 `tools/list` metadata are non-secret; bearer tokens, OAuth tokens, refresh
 tokens, dynamic client secrets, manually supplied client secrets, and auth codes
@@ -285,6 +285,16 @@ sessionful remote servers. Remote MCP `tools/call` response inactivity timeout
 defaults to 60 seconds and is controlled by the top-level
 `--mcp-tool-call-timeout` flag for both CLI remote commands and
 `toolmux mcp serve`.
+Command-backed MCP servers use the `stdio` transport and are added with
+`toolmux add <command> [args...]` when the input is not a URL, catalog entry,
+or native toolbox. Use `--name` to override the derived namespace, `--stdio` or
+`--transport stdio` only to disambiguate a command name that matches a catalog
+or native toolbox, and `--` before command-owned flags. Stdio command
+definitions are non-secret config, inherit the Toolmux process environment, do
+not use Toolmux-managed MCP OAuth or bearer tokens, and must run policy before
+the configured process is started. Treat stdio tool calls as both remote-write
+and local-write for policy because the configured command can touch local
+files, caches, containers, browsers, or network services.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
 client registration when advertised; keep `--client-id` available for servers

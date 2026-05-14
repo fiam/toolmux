@@ -171,6 +171,7 @@ type toolboxStatusItem struct {
 	Scope        string     `json:"scope" yaml:"scope"`
 	Scopes       []string   `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	URL          string     `json:"url" yaml:"url"`
+	Command      string     `json:"command,omitempty" yaml:"command,omitempty"`
 	Transport    string     `json:"transport" yaml:"transport"`
 	Tools        *int       `json:"tools,omitempty" yaml:"tools,omitempty"`
 	SyncedAt     *time.Time `json:"synced_at,omitempty" yaml:"synced_at,omitempty"`
@@ -238,11 +239,11 @@ func statusCommand(opts *options) *cobra.Command {
 						output.Value(status.Auth),
 						mcpRemoteScopesLabel(status.Scopes),
 						tools,
-						status.URL,
+						mcpRemoteServerSource(mcpRemoteServer{URL: status.URL, Command: status.Command, Transport: status.Transport}),
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope", "Tools", "URL"},
+					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope", "Tools", "Source"},
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
 				})
@@ -363,16 +364,21 @@ func providerBaseURL(opts *options, provider providers.Provider) string {
 
 func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store credentials.Store, entry mcpRemoteServerEntry) (toolboxStatusItem, error) {
 	ref := mcpRemoteCredentialRef(opts, entry.Name)
+	authRequired := entry.Server.AuthRequired
+	if entry.Server.Transport == mcpRemoteTransportStdio && authRequired == nil {
+		authRequired = new(false)
+	}
 	item := toolboxStatusItem{
 		Name:         entry.Name,
-		Kind:         "remote-mcp",
+		Kind:         mcpRemoteKind(entry.Server),
 		Status:       "not_synced",
-		Auth:         mcpRemoteAuthLabel(false, credentials.OAuthTokens{}, entry.Server.AuthRequired),
+		Auth:         mcpRemoteAuthLabel(false, credentials.OAuthTokens{}, authRequired),
 		Scope:        mcpRemoteScopeLabel(entry.Scope),
 		Scopes:       mcpRemoteNormalizedScopes(entry.Scopes),
 		URL:          entry.Server.URL,
+		Command:      mcpRemoteCommandDisplay(entry.Server),
 		Transport:    entry.Server.Transport,
-		AuthRequired: entry.Server.AuthRequired,
+		AuthRequired: authRequired,
 		Path:         entry.Path,
 	}
 	if cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name); err != nil {
@@ -389,10 +395,10 @@ func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store creden
 		return toolboxStatusItem{}, err
 	}
 	authStored := err == nil
-	if entry.Server.AuthRequired != nil && *entry.Server.AuthRequired && !authStored {
+	if authRequired != nil && *authRequired && !authStored {
 		item.Status = "needs_auth"
 	}
-	item.Auth = mcpRemoteAuthLabel(authStored, tokens, entry.Server.AuthRequired)
+	item.Auth = mcpRemoteAuthLabel(authStored, tokens, authRequired)
 	return item, nil
 }
 
@@ -558,6 +564,9 @@ func mcpRemoteAuthDiagnostic(ctx context.Context, opts *options, store credentia
 		Check:    "toolbox-auth",
 		Status:   "ok",
 		Message:  "auth not required",
+	}
+	if entry.Server.Transport == mcpRemoteTransportStdio {
+		return diagnostic
 	}
 	tokens, err := store.LoadOAuthTokens(ctx, mcpRemoteCredentialRef(opts, entry.Name))
 	if err != nil {

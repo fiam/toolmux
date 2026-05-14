@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,6 +59,50 @@ func TestMCPRemoteServerSyncAndTopLevelCommand(t *testing.T) {
 	labels, ok := called["labels"].([]any)
 	if !ok || len(labels) != 2 || labels[0] != "backend" || labels[1] != "urgent" {
 		t.Fatalf("unexpected labels argument: %#v", called["labels"])
+	}
+}
+
+func TestMCPStdioServerAddAndExposeTools(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	addArgs := append([]string{"add", "--name", "localmcp", "--global", "--"}, mcpRemoteStdioHelperCommand()...)
+	addOutput := runRootForRemoteTest(t, env, addArgs...)
+	for _, want := range []string{
+		"registered global toolbox localmcp",
+		"synced toolbox localmcp: 2 tools",
+	} {
+		if !strings.Contains(addOutput, want) {
+			t.Fatalf("expected stdio add output to contain %q, got:\n%s", want, addOutput)
+		}
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := config.MCP.Servers["localmcp"]
+	if server.Transport != mcpRemoteTransportStdio || server.Command != os.Args[0] || len(server.Args) == 0 {
+		t.Fatalf("expected stdio command config, got %#v", server)
+	}
+	if server.AuthRequired == nil || *server.AuthRequired {
+		t.Fatalf("expected stdio server to record auth_required false, got %#v", server.AuthRequired)
+	}
+
+	output := runRootForRemoteTest(t, env, "localmcp", "create_issue", "--title", "Stdio")
+	if !strings.Contains(output, "stdio create_issue: Stdio") {
+		t.Fatalf("expected stdio tool output, got %q", output)
+	}
+
+	status := runRootForRemoteTest(t, env, "status", "localmcp")
+	if !strings.Contains(status, "stdio-mcp") || !strings.Contains(status, os.Args[0]) {
+		t.Fatalf("expected stdio status, got:\n%s", status)
+	}
+
+	callOutput := runRootForRemoteTestWithInput(t, env,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"localmcp.create_issue","arguments":{"title":"From MCP"}}}`,
+		"mcp", "serve",
+	)
+	result := decodeMCPCallResult(t, callOutput)
+	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "From MCP") {
+		t.Fatalf("unexpected stdio MCP call result: %+v", result)
 	}
 }
 
@@ -244,6 +290,51 @@ func TestToolboxAddCatalogNameStoresResolvedURL(t *testing.T) {
 	}
 }
 
+func TestToolboxAddInfersStdioCommand(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+
+	addOutput := runRootForRemoteTest(t, env, "add", "npx", "foo/bar", "--no-sync", "--global")
+	if !strings.Contains(addOutput, "registered global toolbox bar") {
+		t.Fatalf("expected inferred stdio add output, got:\n%s", addOutput)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := config.MCP.Servers["bar"]
+	if server.Transport != mcpRemoteTransportStdio || server.Command != "npx" {
+		t.Fatalf("expected inferred stdio command config, got %#v", server)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "foo/bar" {
+		t.Fatalf("expected inferred stdio args, got %#v", server.Args)
+	}
+}
+
+func TestToolboxAddStdioDisambiguatesCatalogName(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+
+	_, err := runRootForRemoteTestError(t, env, "add", "linear", "foo", "--no-sync", "--global")
+	if err == nil || !strings.Contains(err.Error(), "pass --stdio") {
+		t.Fatalf("expected catalog command ambiguity error, got %v", err)
+	}
+
+	addOutput := runRootForRemoteTest(t, env, "add", "--stdio", "linear", "foo", "--name", "linearcmd", "--no-sync", "--global")
+	if !strings.Contains(addOutput, "registered global toolbox linearcmd") {
+		t.Fatalf("expected stdio-disambiguated add output, got:\n%s", addOutput)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := config.MCP.Servers["linearcmd"]
+	if server.Transport != mcpRemoteTransportStdio || server.Command != "linear" {
+		t.Fatalf("expected stdio command config, got %#v", server)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "foo" {
+		t.Fatalf("expected stdio command arg, got %#v", server.Args)
+	}
+}
+
 func TestDefaultMCPRemoteNameFromURL(t *testing.T) {
 	t.Parallel()
 
@@ -261,6 +352,45 @@ func TestDefaultMCPRemoteNameFromURL(t *testing.T) {
 		}
 		if got != want {
 			t.Fatalf("defaultMCPRemoteNameFromURL(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestDefaultMCPRemoteNameFromCommand(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		command string
+		args    []string
+		want    string
+	}{
+		"npx package": {
+			command: "npx",
+			args:    []string{"-y", "@upstash/context7-mcp"},
+			want:    "context7",
+		},
+		"npx slash package": {
+			command: "npx",
+			args:    []string{"foo/bar"},
+			want:    "bar",
+		},
+		"docker image": {
+			command: "docker",
+			args:    []string{"run", "-i", "--rm", "ghcr.io/acme/browser-tools-mcp:latest"},
+			want:    "browser-tools",
+		},
+		"plain command": {
+			command: "/opt/bin/my-mcp-server",
+			want:    "my",
+		},
+	}
+	for name, test := range tests {
+		got, err := defaultMCPRemoteNameFromCommand(test.command, test.args)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got != test.want {
+			t.Fatalf("%s: got %q, want %q", name, got, test.want)
 		}
 	}
 }
@@ -1557,6 +1687,99 @@ func writeRemoteTestConfig(t *testing.T, env mcpRemoteTestEnv, servers map[strin
 func newFakeMCPRemoteServer(t *testing.T, called *map[string]any) *httptest.Server {
 	t.Helper()
 	return newFakeMCPRemoteServerWithBearer(t, called, "")
+}
+
+func TestMCPRemoteStdioHelper(t *testing.T) {
+	if !mcpRemoteStdioHelperRequested() {
+		return
+	}
+	os.Exit(runFakeMCPStdioServer())
+}
+
+func mcpRemoteStdioHelperCommand() []string {
+	return []string{os.Args[0], "-test.run=^TestMCPRemoteStdioHelper$", "--", "--toolmux-test-mcp-stdio"}
+}
+
+func mcpRemoteStdioHelperRequested() bool {
+	return slices.Contains(os.Args, "--toolmux-test-mcp-stdio")
+}
+
+func runFakeMCPStdioServer() int {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	encoder := json.NewEncoder(os.Stdout)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var req mcpRequest
+		if err := json.Unmarshal(line, &req); err != nil {
+			fmt.Fprintf(os.Stderr, "decode request: %v\n", err)
+			return 2
+		}
+		if len(req.ID) == 0 {
+			continue
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": mcpProtocolVersion,
+				"serverInfo": map[string]any{
+					"name": "fake-stdio",
+				},
+			}
+		case "tools/list":
+			result = map[string]any{
+				"tools": []map[string]any{fakeMCPCreateIssueTool(), fakeMCPCalculateTool()},
+			}
+		case "tools/call":
+			var params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				fmt.Fprintf(os.Stderr, "decode call params: %v\n", err)
+				return 2
+			}
+			switch params.Name {
+			case "create_issue":
+				result = mcpCallToolResult{
+					Content: []mcpContent{{
+						Type: "text",
+						Text: "stdio create_issue: " + fmt.Sprint(params.Arguments["title"]),
+					}},
+				}
+			case "calculate":
+				result = mcpCallToolResult{
+					Content: []mcpContent{{
+						Type: "text",
+						Text: "stdio calculate: " + fmt.Sprint(params.Arguments["operation"]),
+					}},
+				}
+			default:
+				result = mcpCallToolResult{
+					IsError: true,
+					Content: []mcpContent{{
+						Type: "text",
+						Text: "unexpected tool " + params.Name,
+					}},
+				}
+			}
+		default:
+			result = nil
+		}
+		if err := encoder.Encode(mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: result}); err != nil {
+			fmt.Fprintf(os.Stderr, "encode response: %v\n", err)
+			return 2
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "scan stdin: %v\n", err)
+		return 2
+	}
+	return 0
 }
 
 func newFakeMCPRemoteServerWithBearer(t *testing.T, called *map[string]any, bearerToken string) *httptest.Server {
