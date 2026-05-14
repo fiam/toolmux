@@ -362,7 +362,12 @@ Common global flags:
 --profile <name>
 --policy <path>
 --read-only
+--mcp-tool-call-timeout <duration>
 ```
+
+Remote MCP tool calls wait up to `60s` of response inactivity by default. Use
+`--mcp-tool-call-timeout`, for example `--mcp-tool-call-timeout 2m`, when a
+remote MCP tool needs more time to return a `tools/call` response.
 
 ## Safety
 

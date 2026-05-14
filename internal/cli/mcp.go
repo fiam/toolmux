@@ -1360,7 +1360,7 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, nil)
+	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, mcpRemoteToolCallTimeout(server.opts), nil)
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
@@ -1993,6 +1993,9 @@ func mcpConfiguredServeArgs(opts *options, configure mcpConfigureOptions) []stri
 	}
 	if opts.readOnly {
 		args = append(args, "--read-only")
+	}
+	if timeout := mcpRemoteToolCallTimeout(opts); timeout != mcpRemoteSSEIdleTimeout {
+		args = append(args, "--mcp-tool-call-timeout", timeout.String())
 	}
 	args = append(args, mcpToolSelectionArgs(configure.mcpToolSelection)...)
 	return args

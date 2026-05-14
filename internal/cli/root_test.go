@@ -80,6 +80,39 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	}
 }
 
+func TestRootHelpShowsMCPToolCallTimeout(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommand()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "--mcp-tool-call-timeout") {
+		t.Fatalf("expected MCP tool call timeout flag in help, got %q", out.String())
+	}
+}
+
+func TestMCPToolCallTimeoutMustBePositive(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommand()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--mcp-tool-call-timeout", "0s", "version"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected timeout validation error")
+	}
+	if !strings.Contains(err.Error(), "--mcp-tool-call-timeout must be greater than 0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{

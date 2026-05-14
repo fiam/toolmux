@@ -264,6 +264,9 @@ Imported remote MCP tools are the exception: they are generated from cached
 remote `tools/list` metadata and exposed under the registered server name.
 Their synthetic action specs must still run policy and `--read-only` checks
 before stored auth is read or remote HTTP calls are made.
+Remote MCP `tools/call` response inactivity timeout defaults to 60 seconds and
+is controlled by the top-level `--mcp-tool-call-timeout` flag for both CLI
+remote commands and `toolmux mcp serve`.
 
 ## Documentation Expectations
 

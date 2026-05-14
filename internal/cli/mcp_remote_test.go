@@ -1205,6 +1205,14 @@ func TestReadMCPRemoteSSEResponseSkipsNotifications(t *testing.T) {
 	}
 }
 
+func TestReadMCPRemoteSSEResponseDefaultTimeoutIsSixtySeconds(t *testing.T) {
+	t.Parallel()
+
+	if mcpRemoteSSEIdleTimeout != time.Minute {
+		t.Fatalf("expected default SSE idle timeout to be 60s, got %s", mcpRemoteSSEIdleTimeout)
+	}
+}
+
 func TestReadMCPRemoteSSEResponseReturnsBeforeStreamCloses(t *testing.T) {
 	t.Parallel()
 
@@ -1285,6 +1293,25 @@ func TestReadMCPRemoteSSEResponseTimesOutWhenStreamGoesIdle(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for idle SSE response error")
+	}
+}
+
+func TestRemoteMCPToolCommandUsesConfiguredCallTimeout(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	upstream := newFakeMCPRemoteIdleToolCallServer(t)
+	defer upstream.Close()
+
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
+	_, err := runRootForRemoteTestError(t, env,
+		"--mcp-tool-call-timeout", "100ms",
+		"linear", "create_issue",
+		"--title", "Slow",
+	)
+	if err == nil {
+		t.Fatal("expected MCP tool call timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out waiting for response message after 100ms of inactivity") {
+		t.Fatalf("expected configured timeout in error, got %v", err)
 	}
 }
 
@@ -2022,6 +2049,73 @@ func newFakeMCPRemoteSSESessionServer(t *testing.T, called *map[string]any) *htt
 					}},
 				},
 			})
+		default:
+			writeFakeMCPSSE(t, w, mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &mcpError{Code: -32601, Message: "method not found"},
+			})
+		}
+	}))
+}
+
+func newFakeMCPRemoteIdleToolCallServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	sessionCounter := 0
+	sessions := map[string]bool{}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch req.Method {
+		case "initialize":
+			sessionCounter++
+			sessionID := fmt.Sprintf("session-%d", sessionCounter)
+			sessions[sessionID] = true
+			w.Header().Set("Mcp-Session-Id", sessionID)
+			writeFakeMCPSSE(t, w, mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpProtocolVersion,
+					"serverInfo":      map[string]any{"name": "fake-idle"},
+				},
+			})
+		case "notifications/initialized":
+			if !sessions[r.Header.Get("Mcp-Session-Id")] {
+				http.Error(w, "missing session", http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			if !sessions[r.Header.Get("Mcp-Session-Id")] {
+				http.Error(w, "missing session", http.StatusBadRequest)
+				return
+			}
+			writeFakeMCPSSE(t, w, mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"tools": []map[string]any{fakeMCPCreateIssueTool()},
+				},
+			})
+		case "tools/call":
+			if !sessions[r.Header.Get("Mcp-Session-Id")] {
+				http.Error(w, "missing session", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: message\n")
+			fmt.Fprint(w, `data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}`)
+			fmt.Fprint(w, "\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
 		default:
 			writeFakeMCPSSE(t, w, mcpResponse{
 				JSONRPC: "2.0",

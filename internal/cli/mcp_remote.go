@@ -35,7 +35,7 @@ const (
 	mcpRemoteCacheVersion            = 1
 	mcpRemoteCacheMaxAge             = 24 * time.Hour
 	mcpRemoteToolsListMaxPages       = 128
-	mcpRemoteSSEIdleTimeout          = 30 * time.Second
+	mcpRemoteSSEIdleTimeout          = 60 * time.Second
 	mcpRemoteTraceBodyLimit          = 8 << 20
 	mcpRemoteCompactDescriptionLimit = 120
 	mcpRemoteServerAnnotation        = "toolmux.remote_mcp.server"
@@ -2924,7 +2924,7 @@ func notifyMCPRemoteInitialized(ctx context.Context, client *http.Client, server
 	return nil
 }
 
-func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteServer, bearerToken, sessionID, method string, params any, trace *mcpRemoteHTTPTrace) (json.RawMessage, string, error) {
+func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteServer, bearerToken, sessionID, method string, params any, trace *mcpRemoteHTTPTrace, responseIdleTimeouts ...time.Duration) (json.RawMessage, string, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -2966,7 +2966,7 @@ func callMCPRemote(ctx context.Context, client *http.Client, server mcpRemoteSer
 			Body:       strings.TrimSpace(string(data)),
 		}
 	}
-	result, err := decodeMCPRemoteResponse(resp, method, requestID)
+	result, err := decodeMCPRemoteResponse(resp, method, requestID, responseIdleTimeouts...)
 	if err != nil {
 		return nil, responseSessionID, err
 	}
@@ -3125,10 +3125,10 @@ func mcpRemoteReadAndRestoreResponseBody(resp *http.Response) ([]byte, bool, err
 	return data, truncated, nil
 }
 
-func decodeMCPRemoteResponse(resp *http.Response, method string, expectedID json.RawMessage) (json.RawMessage, error) {
+func decodeMCPRemoteResponse(resp *http.Response, method string, expectedID json.RawMessage, responseIdleTimeouts ...time.Duration) (json.RawMessage, error) {
 	var decoded mcpResponse
 	if mcpRemoteResponseIsSSE(resp.Header.Get("Content-Type")) {
-		eventData, err := readMCPRemoteSSEResponse(resp.Body, expectedID)
+		eventData, err := readMCPRemoteSSEResponse(resp.Body, expectedID, responseIdleTimeouts...)
 		if err != nil {
 			return nil, fmt.Errorf("decode remote MCP %s SSE response: %w", method, err)
 		}
@@ -3150,6 +3150,13 @@ func decodeMCPRemoteResponse(resp *http.Response, method string, expectedID json
 
 func mcpRemoteResponseIsSSE(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
+}
+
+func mcpRemoteToolCallTimeout(opts *options) time.Duration {
+	if opts == nil || opts.mcpToolCallTimeout <= 0 {
+		return mcpRemoteSSEIdleTimeout
+	}
+	return opts.mcpToolCallTimeout
 }
 
 func readMCPRemoteSSEResponse(reader io.Reader, expectedID json.RawMessage, idleTimeouts ...time.Duration) ([]byte, error) {
@@ -3281,7 +3288,7 @@ func mcpRemoteSSEMessageIsResponse(message []byte, expectedID json.RawMessage) (
 	return hasResult || hasError, nil
 }
 
-func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, bearerToken string, trace *mcpRemoteHTTPTrace) (mcpCallToolResult, error) {
+func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, bearerToken string, responseIdleTimeout time.Duration, trace *mcpRemoteHTTPTrace) (mcpCallToolResult, error) {
 	_, sessionID, err := initializeMCPRemoteSession(ctx, client, entry.Server, bearerToken, trace)
 	if err != nil {
 		return mcpCallToolResult{}, err
@@ -3289,7 +3296,7 @@ func callMCPRemoteTool(ctx context.Context, client *http.Client, entry mcpRemote
 	result, _, err := callMCPRemote(ctx, client, entry.Server, bearerToken, sessionID, "tools/call", map[string]any{
 		"name":      tool.Name,
 		"arguments": arguments,
-	}, trace)
+	}, trace, responseIdleTimeout)
 	if err != nil {
 		return mcpCallToolResult{}, err
 	}
@@ -3382,7 +3389,7 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 			if err != nil {
 				return err
 			}
-			result, err := callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, token, trace)
+			result, err := callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, token, mcpRemoteToolCallTimeout(opts), trace)
 			if err != nil {
 				return err
 			}

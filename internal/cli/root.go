@@ -48,6 +48,7 @@ type options struct {
 	providerAPI        map[string]string
 	toolmuxdURL        string
 	mcpCacheDir        string
+	mcpToolCallTimeout time.Duration
 	mcpRemoteConflicts []mcpRemoteNameConflict
 	workDir            string
 }
@@ -68,7 +69,13 @@ func NewRootCommand() *cobra.Command {
 }
 
 func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
-	opts := &options{output: "table", color: "auto", pager: "auto", profile: "default"}
+	opts := &options{
+		output:             "table",
+		color:              "auto",
+		pager:              "auto",
+		profile:            "default",
+		mcpToolCallTimeout: mcpRemoteSSEIdleTimeout,
+	}
 	opts.credentials = func() (credentials.Store, error) {
 		if deps.Credentials != nil {
 			return deps.Credentials, nil
@@ -103,6 +110,9 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			if opts.mcpToolCallTimeout <= 0 {
+				return fmt.Errorf("--mcp-tool-call-timeout must be greater than 0")
+			}
 			if mcpRemoteCommandAllowsConflicts(cmd) {
 				return nil
 			}
@@ -115,6 +125,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.profile, "profile", "default", "Toolmux profile")
 	root.PersistentFlags().StringVar(&opts.policy, "policy", "", "policy file path")
 	root.PersistentFlags().BoolVar(&opts.readOnly, "read-only", false, "deny actions with remote or local write effects")
+	root.PersistentFlags().DurationVar(&opts.mcpToolCallTimeout, "mcp-tool-call-timeout", mcpRemoteSSEIdleTimeout, "remote MCP tools/call inactivity timeout, such as 60s or 2m")
 
 	root.AddCommand(versionCommand())
 	root.AddCommand(toolboxAddCommand(opts))

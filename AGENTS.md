@@ -281,7 +281,10 @@ global config; use `--project` only for explicit project-local writes. Server
 config should record `auth_required` after sync or auth setup when the
 requirement is known. Streamable HTTP clients must handle JSON and
 `text/event-stream` responses and preserve `Mcp-Session-Id` headers for
-sessionful remote servers.
+sessionful remote servers. Remote MCP `tools/call` response inactivity timeout
+defaults to 60 seconds and is controlled by the top-level
+`--mcp-tool-call-timeout` flag for both CLI remote commands and
+`toolmux mcp serve`.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
 client registration when advertised; keep `--client-id` available for servers

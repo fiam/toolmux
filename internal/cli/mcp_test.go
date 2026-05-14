@@ -58,6 +58,31 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	}
 }
 
+func TestMCPConfigureDryRunIncludesMCPToolCallTimeout(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{
+		"--mcp-tool-call-timeout", "2m",
+		"mcp", "configure", "codex",
+		"--dry-run",
+		"--command", "/opt/toolmux/bin/toolmux",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	want := "codex: codex mcp add toolmux -- /opt/toolmux/bin/toolmux mcp serve --mcp-tool-call-timeout 2m0s"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, out.String())
+	}
+}
+
 func TestMCPEnableDryRunSupportsKnownAgents(t *testing.T) {
 	t.Parallel()
 
