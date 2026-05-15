@@ -11,13 +11,14 @@ func TestLeafSpecsResolveProviderTree(t *testing.T) {
 				Short("Operate messages"),
 				Children(
 					Command("message.send", "send", RBAC("message", VerbSend, EffectWrite), Short("Send a message")),
+					Command("message.search", "search", RBAC("message", VerbSearch, EffectRead), Short("Search messages"), Description("Search messages visible to the current user.")),
 				),
 			),
 		),
 	)
 	specs := LeafSpecs("linear", tree)
-	if len(specs) != 1 {
-		t.Fatalf("expected one spec, got %d", len(specs))
+	if len(specs) != 2 {
+		t.Fatalf("expected two specs, got %d", len(specs))
 	}
 	spec := specs[0]
 	if spec.ID != "linear.message.send" {
@@ -32,6 +33,9 @@ func TestLeafSpecsResolveProviderTree(t *testing.T) {
 	expectedPath := []string{"linear", "message", "send"}
 	if !equalStrings(spec.Path, expectedPath) {
 		t.Fatalf("expected path %#v, got %#v", expectedPath, spec.Path)
+	}
+	if specs[1].Description != "Search messages visible to the current user." {
+		t.Fatalf("expected description to resolve, got %#v", specs[1])
 	}
 }
 

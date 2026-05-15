@@ -145,6 +145,8 @@ Useful Slack commands:
 ```bash
 toolmux slack auth_test
 toolmux slack channels_list --channel_types public_channel,private_channel
+toolmux slack users_conversations --limit 20
+toolmux slack experimental_conversations_list --query build
 toolmux slack conversations_history --channel_id C123456 --limit 50
 toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
 toolmux slack conversations_open --user_id U123456
@@ -159,12 +161,20 @@ Supported native Slack tool names:
 - Auth: `auth_test`
 - Channels and history: `channels_list`, `conversations_history`,
   `conversations_replies`, `conversations_search_messages`,
-  `conversations_unreads`, `conversations_mark`
+  `conversations_unreads`, `conversations_mark`, `users_conversations`,
+  `experimental_conversations_list`
 - Messages and DMs: `conversations_open`, `conversations_add_message`
 - Files, reactions, users: `attachment_get_data`, `reactions_add`,
   `reactions_remove`, `users_search`
 - User groups: `usergroups_list`, `usergroups_me`, `usergroups_create`,
   `usergroups_update`, `usergroups_users_update`
+
+In Enterprise/Grid workspaces, Slack may restrict workspace-wide
+`channels_list`. Try `users_conversations` to list conversations the
+authenticated user is a member of; this documented Slack API method can still
+be restricted by workspace policy. `experimental_conversations_list` is a
+read-only Slack web-session fallback for browser-session auth and is explicitly
+prefixed as experimental because it uses an undocumented Slack web app endpoint.
 
 Run `toolmux slack --help` for the command list and per-tool flags.
 

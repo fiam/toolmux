@@ -1232,10 +1232,7 @@ func mcpToolFromSpec(spec actions.Spec) mcpTool {
 		schema.Properties[flag.Name] = mcpPropertyFromFlag(flag)
 	}
 	sort.Strings(schema.Required)
-	description := spec.Short
-	if description == "" {
-		description = actionShort(spec)
-	}
+	description := firstNonEmpty(spec.Description, spec.Short, actionShort(spec))
 	return mcpTool{
 		Name:        spec.ID,
 		Description: description,

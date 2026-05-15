@@ -405,6 +405,10 @@ Slack browser-session auth must stay confined to the `internal/slackauth`
 package and the `toolmux add slack` flow. Slack auth setup and legacy
 credential migration must use `auth.test` to validate credentials and store the
 returned workspace URL for workspace-specific API calls.
+Slack tools that use undocumented web-session endpoints must be read-only,
+prefixed with `experimental_`, documented as experimental in CLI and MCP
+descriptions, and tested against fake upstreams. Prefer documented Slack Web
+API methods when they work.
 Expose Slack identity through provider-owned read-only actions such as
 `slack.auth_test`; do not add special self-DM shortcuts when existing Slack
 message commands can address a user or configured conversation.
@@ -434,6 +438,10 @@ instead of maintaining a parallel group model. Do not hardcode provider command
 trees or provider command flags in the Cobra root layer. Root `add`, `remove`,
 `rm`, `status`, and `doctor` are the only code-driven CLI-only command
 surfaces.
+Use `actions.Short` for compact command listings and `actions.Description` for
+detailed long help and MCP `tools/list` descriptions. Keep provider
+descriptions concrete enough for agents to understand identifiers, timestamp
+formats, pagination, write effects, and provider-specific restrictions.
 
 Provider command behavior must also live with the provider's client package, not
 in `internal/cli`. Register provider-owned `actions.Handler` functions through

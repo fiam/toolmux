@@ -743,6 +743,7 @@ func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
 		Use:     use,
 		Aliases: spec.Aliases,
 		Short:   short,
+		Long:    firstNonEmpty(spec.Description, short),
 		Args:    actionArgs(spec),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authorize(cmd, opts, spec, args); err != nil {
@@ -797,6 +798,7 @@ func actionGroupCommand(group actions.Spec) *cobra.Command {
 		Use:                use,
 		Aliases:            group.Aliases,
 		Short:              short,
+		Long:               firstNonEmpty(group.Description, short),
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	}
 }

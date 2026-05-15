@@ -262,9 +262,11 @@ Long-running provider work should report progress through the shared
 UI directly.
 
 MCP tools are generated from the same provider action specs as Cobra commands.
-Do not add separate MCP-only provider command trees. If a provider action is
-not safe or useful for agents, control exposure with MCP profiles or policy
-rather than forking provider metadata.
+Use `actions.Short` for compact command lists and `actions.Description` for
+detailed agent-facing MCP tool descriptions and long CLI help. Do not add
+separate MCP-only provider command trees. If a provider action is not safe or
+useful for agents, control exposure with MCP profiles or policy rather than
+forking provider metadata.
 
 Imported remote MCP tools are the exception: they are generated from cached
 remote `tools/list` metadata and exposed under the registered server name.
@@ -319,7 +321,10 @@ Slack is the first native provider command set. Its client facet lives under
 flag routing, direct token+cookie auth, user-owned OAuth, brokered OAuth, token
 refresh, `toolmux add slack` flags, add-time `auth.test` validation failures,
 workspace URL enrichment, `toolmux remove slack`, and representative Web API
-commands against fake upstream servers.
+commands against fake upstream servers. Slack tools that use undocumented
+web-session endpoints must be read-only, prefixed with `experimental_`,
+documented as experimental in both CLI and MCP descriptions, and covered by
+fake-upstream tests.
 
 For Slack broker testing, configure fake or local upstream endpoints through
 `brokers.Config` in tests instead of environment variables. For deployed

@@ -47,6 +47,7 @@ type Spec struct {
 	Path         []string `json:"path" yaml:"path"`
 	Use          string   `json:"use" yaml:"use"`
 	Short        string   `json:"short" yaml:"short"`
+	Description  string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Aliases      []string `json:"aliases,omitempty" yaml:"aliases,omitempty"`
 	Args         ArgsSpec `json:"args,omitzero" yaml:"args,omitempty"`
 	Flags        []Flag   `json:"flags,omitempty" yaml:"flags,omitempty"`
@@ -140,6 +141,12 @@ func Use(use string) Option {
 func Short(short string) Option {
 	return func(spec *Spec) {
 		spec.Short = short
+	}
+}
+
+func Description(description string) Option {
+	return func(spec *Spec) {
+		spec.Description = description
 	}
 }
 

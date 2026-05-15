@@ -47,6 +47,14 @@ type ConversationsListResponse struct {
 	ResponseMetadata Metadata       `json:"response_metadata,omitzero"`
 }
 
+type ClientUserBootResponse struct {
+	OK       bool           `json:"ok"`
+	Error    string         `json:"error,omitempty"`
+	Channels []Conversation `json:"channels"`
+	IMs      []Conversation `json:"ims"`
+	MPIMs    []Conversation `json:"mpims"`
+}
+
 type ConversationsInfoResponse struct {
 	OK      bool         `json:"ok"`
 	Error   string       `json:"error,omitempty"`
@@ -303,6 +311,22 @@ func (c Client) ConversationsList(ctx context.Context, values url.Values) (Conve
 	var out ConversationsListResponse
 	if err := c.get(ctx, "conversations.list", values, &out); err != nil {
 		return ConversationsListResponse{}, err
+	}
+	return out, nil
+}
+
+func (c Client) UsersConversations(ctx context.Context, values url.Values) (ConversationsListResponse, error) {
+	var out ConversationsListResponse
+	if err := c.get(ctx, "users.conversations", values, &out); err != nil {
+		return ConversationsListResponse{}, err
+	}
+	return out, nil
+}
+
+func (c Client) ClientUserBoot(ctx context.Context) (ClientUserBootResponse, error) {
+	var out ClientUserBootResponse
+	if err := c.get(ctx, "client.userBoot", nil, &out); err != nil {
+		return ClientUserBootResponse{}, err
 	}
 	return out, nil
 }

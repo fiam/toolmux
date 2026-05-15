@@ -53,6 +53,14 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "C123")
 	toolmuxtest.AssertContains(t, out, "general")
 
+	out = toolmuxtest.Run(t, deps, "slack", "users_conversations", "--limit", "10")
+	toolmuxtest.AssertContains(t, out, "C123")
+	toolmuxtest.AssertContains(t, out, "general")
+
+	out = toolmuxtest.Run(t, deps, "slack", "experimental_conversations_list", "--query", "general", "--limit", "10")
+	toolmuxtest.AssertContains(t, out, "C123")
+	toolmuxtest.AssertContains(t, out, "general")
+
 	out = toolmuxtest.Run(t, deps, "status", "slack")
 	toolmuxtest.AssertContains(t, out, "native")
 	toolmuxtest.AssertContains(t, out, "token-cookie")
@@ -297,6 +305,8 @@ func TestSlackExposesSlackMCPServerToolNames(t *testing.T) {
 		"slack.conversations_unreads",
 		"slack.conversations_mark",
 		"slack.channels_list",
+		"slack.users_conversations",
+		"slack.experimental_conversations_list",
 		"slack.usergroups_list",
 		"slack.usergroups_me",
 		"slack.usergroups_create",
@@ -324,6 +334,7 @@ func TestSlackSearchMessagesExposedOverMCPServe(t *testing.T) {
 		"mcp", "serve", "--tool", "slack.*",
 	)
 	toolmuxtest.AssertContains(t, out, `"name":"slack.conversations_search_messages"`)
+	toolmuxtest.AssertContains(t, out, "Slack search syntax")
 	toolmuxtest.AssertContains(t, out, `"search_query"`)
 }
 
@@ -397,6 +408,10 @@ func newFakeSlackUpstream(t *testing.T) *fakeSlackUpstream {
 			writeSlackJSON(w, map[string]any{"ok": true, "revoked": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.list":
 			upstream.conversations(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/users.conversations":
+			upstream.conversations(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/client.userBoot":
+			upstream.userBoot(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.history":
 			upstream.history(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/conversations.replies":
@@ -571,6 +586,27 @@ func (s *fakeSlackUpstream) conversations(t *testing.T, w http.ResponseWriter, r
 			"name":        "general",
 			"is_channel":  true,
 			"num_members": 3,
+		}},
+	})
+}
+
+func (s *fakeSlackUpstream) userBoot(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeDirectRead(t, w, r) {
+		return
+	}
+	writeSlackJSON(w, map[string]any{
+		"ok": true,
+		"channels": []map[string]any{{
+			"id":          "C123",
+			"name":        "general",
+			"is_channel":  true,
+			"num_members": 3,
+		}},
+		"ims": []map[string]any{{
+			"id":    "D123",
+			"user":  "U123",
+			"is_im": true,
 		}},
 	})
 }

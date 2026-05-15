@@ -58,6 +58,20 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	}
 }
 
+func TestMCPToolUsesActionDescription(t *testing.T) {
+	t.Parallel()
+
+	spec := actions.Command("demo.search", "search",
+		actions.Short("Search demo"),
+		actions.Description("Search demo records visible to the current user."),
+		actions.RBAC("record", actions.VerbSearch, actions.EffectRead),
+	)
+	tool := mcpToolFromSpec(spec)
+	if tool.Description != "Search demo records visible to the current user." {
+		t.Fatalf("expected MCP tool description from action metadata, got %q", tool.Description)
+	}
+}
+
 func TestMCPConfigureDryRunIncludesMCPToolCallTimeout(t *testing.T) {
 	t.Parallel()
 
