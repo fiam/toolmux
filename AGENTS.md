@@ -321,7 +321,11 @@ interactive `--manage` checkbox toggling for built-ins. Catalog
 enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
 can be registered under a non-conflicting command namespace.
 Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
-endpoints, and keep the user-facing catalog summary in `README.md` current.
+endpoints that can be added and authenticated through the server's own OAuth
+flow without users creating their own OAuth app first. Keep built-in remote MCP
+catalog data in `internal/cli/mcp_remote_catalog.yaml`, include a
+`display_name` for every entry, and keep the user-facing catalog summary in
+`README.md` current.
 `toolmux mcp ls` must use shared table styling for human output, display only
 `project` or `global` scope labels, support `mcp ls <name>` for one server's
 cached tools, and support `mcp ls -R` for a tree of all registered servers and

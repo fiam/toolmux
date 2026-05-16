@@ -169,7 +169,11 @@ enablement must allow
 `--enable <catalog-name>=<registered-name>` so built-ins can be registered
 under a non-conflicting command namespace.
 Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
-endpoints, and keep the user-facing catalog summary in `README.md` current.
+endpoints that can be added and authenticated through the server's own OAuth
+flow without users creating their own OAuth app first. Keep built-in remote MCP
+catalog data in `internal/cli/mcp_remote_catalog.yaml`, include a
+`display_name` for every entry, and keep the user-facing catalog summary in
+`README.md` current.
 
 ## Common Targets
 
@@ -375,7 +379,7 @@ Use these commands while developing:
 ```bash
 ./bin/toolmux policy catalog
 ./bin/toolmux policy check --command "mcp ls"
-./bin/toolmux policy check --command "iterate mock_echo"
+./bin/toolmux policy check --command "catalog --enable linear"
 ./bin/toolmux policy doctor
 ```
 

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -353,8 +354,14 @@ func normalizeMCPRemoteOAuthCallbackPage(page mcpRemoteOAuthCallbackPage) mcpRem
 }
 
 func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemoteOAuthDiscovery) mcpRemoteOAuthCallbackPage {
+	_, catalogDefinition, inCatalog := mcpRemoteCatalogDefinitionForServer(entry.Name, entry.Server)
+	catalogDisplayName := ""
+	if inCatalog {
+		catalogDisplayName = catalogDefinition.DisplayName
+	}
 	logoSlug := mcpRemoteKnownLogoSlug(
 		entry.Name,
+		catalogDisplayName,
 		entry.Server.URL,
 		discovery.Resource.ResourceName,
 		discovery.ResourceURI,
@@ -362,7 +369,7 @@ func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemo
 	)
 	displayName := firstNonEmpty(
 		strings.TrimSpace(discovery.Resource.ResourceName),
-		mcpRemoteKnownLogoName(logoSlug),
+		catalogDisplayName,
 		humanMCPRemoteName(entry.Name),
 		"MCP server",
 	)
@@ -375,87 +382,52 @@ func mcpRemoteOAuthCallbackPageFor(entry mcpRemoteServerEntry, discovery mcpRemo
 }
 
 func mcpRemoteKnownLogoSlug(values ...string) string {
-	target := strings.ToLower(strings.Join(values, " "))
-	if strings.Contains(target, "incident.io") {
-		return "incident-io"
+	target := normalizeMCPRemoteLogoMatch(strings.Join(values, " "))
+	catalog := mcpBuiltinRemoteCatalog()
+	type candidate struct {
+		slug  string
+		match string
 	}
-	for _, known := range []string{
-		"airtable",
-		"asana",
-		"atlassian",
-		"cloudflare",
-		"excalidraw",
-		"figma",
-		"gainsight",
-		"github",
-		"grafana",
-		"granola",
-		"incident-io",
-		"linear",
-		"miro",
-		"notion",
-		"posthog",
-		"sentry",
-		"stripe",
-		"supabase",
-		"vercel",
-		"zoominfo",
-		"zoom",
-	} {
-		if strings.Contains(target, known) {
-			return known
+	candidates := make([]candidate, 0, len(catalog)*2)
+	for name, definition := range catalog {
+		candidates = append(candidates, candidate{slug: name, match: normalizeMCPRemoteLogoMatch(name)})
+		if displayName := normalizeMCPRemoteLogoMatch(definition.DisplayName); displayName != "" {
+			candidates = append(candidates, candidate{slug: name, match: displayName})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if len(candidates[i].match) != len(candidates[j].match) {
+			return len(candidates[i].match) > len(candidates[j].match)
+		}
+		return candidates[i].slug < candidates[j].slug
+	})
+	for _, candidate := range candidates {
+		if candidate.match != "" && strings.Contains(target, candidate.match) {
+			return candidate.slug
 		}
 	}
 	return "generic"
 }
 
-func mcpRemoteKnownLogoName(slug string) string {
-	switch slug {
-	case "airtable":
-		return "Airtable"
-	case "asana":
-		return "Asana"
-	case "atlassian":
-		return "Atlassian"
-	case "cloudflare":
-		return "Cloudflare"
-	case "excalidraw":
-		return "Excalidraw"
-	case "figma":
-		return "Figma"
-	case "gainsight":
-		return "Gainsight"
-	case "github":
-		return "GitHub"
-	case "grafana":
-		return "Grafana"
-	case "granola":
-		return "Granola"
-	case "incident-io":
-		return "incident.io"
-	case "linear":
-		return "Linear"
-	case "miro":
-		return "Miro"
-	case "notion":
-		return "Notion"
-	case "posthog":
-		return "PostHog"
-	case "sentry":
-		return "Sentry"
-	case "stripe":
-		return "Stripe"
-	case "supabase":
-		return "Supabase"
-	case "vercel":
-		return "Vercel"
-	case "zoom":
-		return "Zoom"
-	case "zoominfo":
-		return "ZoomInfo"
-	default:
+func normalizeMCPRemoteLogoMatch(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
 		return ""
 	}
+	var b strings.Builder
+	lastSpace := true
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func humanMCPRemoteName(name string) string {

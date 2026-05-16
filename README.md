@@ -40,14 +40,17 @@ toolmux workflow templates
 
 `toolmux catalog` lists every built-in toolbox and includes a `Type` column so
 you can distinguish remote MCP toolboxes from internal Toolmux toolboxes.
+Remote MCP catalog entries are hosted endpoints that can be added and
+authenticated through the server's own OAuth flow without creating your own
+OAuth app first.
 Built-in remote MCP entries currently include:
 
 ```text
-airtable      asana       atlassian   cloudflare   excalidraw
-figma         gainsight   github      grafana      granola
-incident-io   iterate     linear      miro         notion
-posthog       sentry      stripe      supabase     vercel
-zoom          zoominfo
+airtable      asana        atlassian    cloudflare    datadog
+excalidraw    figma        gainsight     github        grafana
+granola       incident-io  linear        miro          neon
+notion        pagerduty    pagerduty-eu  posthog       sentry
+stripe        supabase     vercel        zoom          zoominfo
 ```
 
 <p align="center">
@@ -68,11 +71,11 @@ Release archives for macOS, Linux, and Windows are available from
 
 ## Quick Start
 
-Start with a no-auth demo toolbox:
+Start by seeing what Toolmux can connect:
 
 ```bash
-toolmux add iterate
-toolmux iterate mock_echo --message "hello from toolmux"
+toolmux catalog
+toolmux catalog --mcp
 ```
 
 Add Slack when you are ready to connect a real workspace:
@@ -242,8 +245,9 @@ toolmux mcp show linear-work
 Inspect schemas and call tools:
 
 ```bash
-toolmux mcp schema iterate mock_calculate
-toolmux iterate mock_calculate --operation add --a 2 --b 3
+toolmux mcp ls linear-work
+toolmux mcp schema linear-work <tool>
+toolmux linear-work <tool> --json '{"key":"value"}'
 ```
 
 Use `--json` for tool inputs that cannot be represented as flags.

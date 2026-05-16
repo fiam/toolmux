@@ -1,0 +1,130 @@
+servers:
+  airtable:
+    display_name: Airtable
+    server:
+      url: https://mcp.airtable.com/mcp
+      transport: streamable-http
+  asana:
+    display_name: Asana
+    server:
+      url: https://mcp.asana.com/v2/mcp
+      transport: streamable-http
+  atlassian:
+    display_name: Atlassian
+    server:
+      url: https://mcp.atlassian.com/v1/mcp/authv2
+      transport: streamable-http
+    default_argument_hints:
+      - name: cloudId
+        description: Atlassian Cloud site ID used by many Atlassian MCP tools.
+        example: <cloud-id>
+  cloudflare:
+    display_name: Cloudflare
+    server:
+      url: https://mcp.cloudflare.com/mcp
+      transport: streamable-http
+  datadog:
+    display_name: Datadog
+    server:
+      url: https://mcp.datadoghq.com/api/unstable/mcp-server/mcp
+      transport: streamable-http
+  excalidraw:
+    display_name: Excalidraw
+    server:
+      url: https://mcp.excalidraw.com/mcp
+      transport: streamable-http
+  figma:
+    display_name: Figma
+    server:
+      url: https://mcp.figma.com/mcp
+      transport: streamable-http
+  gainsight:
+    display_name: Gainsight
+    server:
+      url: https://mcp.staircase.ai/mcp
+      transport: streamable-http
+  github:
+    display_name: GitHub
+    server:
+      url: https://api.githubcopilot.com/mcp/
+      transport: streamable-http
+  grafana:
+    display_name: Grafana
+    server:
+      url: https://mcp.grafana.com/mcp
+      transport: streamable-http
+  granola:
+    display_name: Granola
+    server:
+      url: https://mcp.granola.ai/mcp
+      transport: streamable-http
+  incident-io:
+    display_name: incident.io
+    server:
+      url: https://mcp.incident.io/mcp
+      transport: streamable-http
+  linear:
+    display_name: Linear
+    server:
+      url: https://mcp.linear.app/mcp
+      transport: streamable-http
+  miro:
+    display_name: Miro
+    server:
+      url: https://mcp.miro.com/
+      transport: streamable-http
+  neon:
+    display_name: Neon
+    server:
+      url: https://mcp.neon.tech/mcp
+      transport: streamable-http
+  notion:
+    display_name: Notion
+    server:
+      url: https://mcp.notion.com/mcp
+      transport: streamable-http
+  pagerduty:
+    display_name: PagerDuty
+    server:
+      url: https://mcp.pagerduty.com/mcp
+      transport: streamable-http
+  pagerduty-eu:
+    display_name: PagerDuty EU
+    server:
+      url: https://mcp.eu.pagerduty.com/mcp
+      transport: streamable-http
+  posthog:
+    display_name: PostHog
+    server:
+      url: https://mcp.posthog.com/mcp
+      transport: streamable-http
+  sentry:
+    display_name: Sentry
+    server:
+      url: https://mcp.sentry.dev/mcp
+      transport: streamable-http
+  stripe:
+    display_name: Stripe
+    server:
+      url: https://mcp.stripe.com
+      transport: streamable-http
+  supabase:
+    display_name: Supabase
+    server:
+      url: https://mcp.supabase.com/mcp
+      transport: streamable-http
+  vercel:
+    display_name: Vercel
+    server:
+      url: https://mcp.vercel.com
+      transport: streamable-http
+  zoom:
+    display_name: Zoom
+    server:
+      url: https://mcp.zoom.us/mcp/zoom/streamable
+      transport: streamable-http
+  zoominfo:
+    display_name: ZoomInfo
+    server:
+      url: https://mcp.zoominfo.com/mcp
+      transport: streamable-http

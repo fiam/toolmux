@@ -136,13 +136,16 @@ func TestMCPRemoteOAuthCallbackPageInfersNewCatalogNames(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"https://api.githubcopilot.com/mcp/":          "GitHub",
-		"https://mcp.incident.io/mcp":                 "incident.io",
-		"https://mcp.posthog.com/mcp":                 "PostHog",
-		"https://mcp.zoom.us/mcp/zoom/streamable":     "Zoom",
-		"https://mcp.zoominfo.com/mcp":                "ZoomInfo",
-		"https://mcp.supabase.com/mcp":                "Supabase",
-		"https://mcp.staircase.ai/mcp?name=gainsight": "Gainsight",
+		"https://api.githubcopilot.com/mcp/":      "GitHub",
+		"https://mcp.incident.io/mcp":             "incident.io",
+		"https://mcp.neon.tech/mcp":               "Neon",
+		"https://mcp.pagerduty.com/mcp":           "PagerDuty",
+		"https://mcp.eu.pagerduty.com/mcp":        "PagerDuty EU",
+		"https://mcp.posthog.com/mcp":             "PostHog",
+		"https://mcp.zoom.us/mcp/zoom/streamable": "Zoom",
+		"https://mcp.zoominfo.com/mcp":            "ZoomInfo",
+		"https://mcp.supabase.com/mcp":            "Supabase",
+		"https://mcp.staircase.ai/mcp":            "Gainsight",
 	}
 	for rawURL, wantName := range tests {
 		page := mcpRemoteOAuthCallbackPageFor(mcpRemoteServerEntry{

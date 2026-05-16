@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/credentials"
@@ -50,6 +52,15 @@ const (
 var (
 	mcpRemoteNamePattern         = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 	mcpRemoteMarkdownLinkPattern = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+)
+
+//go:embed mcp_remote_catalog.yaml
+var mcpBuiltinRemoteCatalogYAML []byte
+
+var (
+	mcpBuiltinRemoteCatalogOnce  sync.Once
+	mcpBuiltinRemoteCatalogValue map[string]mcpRemoteCatalogDefinition
+	mcpBuiltinRemoteCatalogErr   error
 )
 
 type mcpRemoteServer struct {
@@ -158,6 +169,7 @@ func (err mcpRemoteMissingRequiredArgumentsError) Error() string {
 
 type mcpRemoteCatalogEntry struct {
 	Name                    string                         `json:"name" yaml:"name"`
+	DisplayName             string                         `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Status                  string                         `json:"status" yaml:"status"`
 	Registered              bool                           `json:"registered" yaml:"registered"`
 	RegisteredNames         []string                       `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
@@ -174,6 +186,7 @@ type mcpRemoteCatalogEntry struct {
 
 type toolboxCatalogEntry struct {
 	Name                    string                         `json:"name" yaml:"name"`
+	DisplayName             string                         `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Type                    string                         `json:"type" yaml:"type"`
 	Status                  string                         `json:"status" yaml:"status"`
 	Registered              bool                           `json:"registered" yaml:"registered"`
@@ -200,8 +213,9 @@ type mcpRemoteCatalogEnable struct {
 }
 
 type mcpRemoteCatalogDefinition struct {
-	Server               mcpRemoteServer
-	DefaultArgumentHints []mcpRemoteDefaultArgumentHint
+	Server               mcpRemoteServer                `json:"server" yaml:"server"`
+	DisplayName          string                         `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	DefaultArgumentHints []mcpRemoteDefaultArgumentHint `json:"default_argument_hints,omitempty" yaml:"default_argument_hints,omitempty"`
 }
 
 type mcpRemoteDefaultArgumentHint struct {
@@ -1662,6 +1676,7 @@ func toolboxCatalogEntries(root *cobra.Command, opts *options, filters toolboxCa
 		for _, entry := range mcpEntries {
 			entries = append(entries, toolboxCatalogEntry{
 				Name:                    entry.Name,
+				DisplayName:             entry.DisplayName,
 				Type:                    "mcp",
 				Status:                  entry.Status,
 				Registered:              entry.Registered,
@@ -1726,8 +1741,9 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 		if entry.Tools != nil {
 			tools = fmt.Sprint(*entry.Tools)
 		}
+		name := mcpRemoteCatalogDisplayName(entry.Name, entry.DisplayName)
 		rows = append(rows, []string{
-			output.ToneText(human, output.ToneInfo, entry.Name),
+			output.ToneText(human, output.ToneInfo, name),
 			entry.Type,
 			toolboxCatalogStatusCell(human, entry.Status),
 			output.JoinList(entry.RegisteredNames),
@@ -1758,6 +1774,14 @@ func toolboxCatalogStatusCell(human output.Options, status string) string {
 	}
 }
 
+func mcpRemoteCatalogDisplayName(name, displayName string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" || displayName == name {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, displayName)
+}
+
 func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCatalogEntry, error) {
 	registered, err := effectiveMCPRemoteServerEntries("")
 	if err != nil {
@@ -1775,6 +1799,7 @@ func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCat
 		server := normalizeMCPRemoteServer(definition.Server)
 		entry := mcpRemoteCatalogEntry{
 			Name:                 name,
+			DisplayName:          definition.DisplayName,
 			Status:               "available",
 			Registered:           false,
 			URL:                  server.URL,
@@ -2012,8 +2037,9 @@ func renderMCPRemoteCatalogTable(w io.Writer, cmd *cobra.Command, opts *options,
 		if entry.Tools != nil {
 			tools = fmt.Sprint(*entry.Tools)
 		}
+		name := mcpRemoteCatalogDisplayName(entry.Name, entry.DisplayName)
 		rows = append(rows, []string{
-			output.ToneText(human, output.ToneInfo, entry.Name),
+			output.ToneText(human, output.ToneInfo, name),
 			mcpRemoteCatalogStatusCell(human, entry),
 			output.JoinList(entry.RegisteredNames),
 			mcpRemoteScopesLabel(entry.Scopes),
@@ -2594,43 +2620,58 @@ func mcpBuiltinRemoteServers() map[string]mcpRemoteServer {
 }
 
 func mcpBuiltinRemoteCatalog() map[string]mcpRemoteCatalogDefinition {
-	return map[string]mcpRemoteCatalogDefinition{
-		"airtable": {Server: mcpRemoteServer{URL: "https://mcp.airtable.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"asana":    {Server: mcpRemoteServer{URL: "https://mcp.asana.com/v2/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"atlassian": {
-			Server: mcpRemoteServer{URL: "https://mcp.atlassian.com/v1/mcp/authv2", Transport: mcpRemoteTransportStreamableHTTP},
-			DefaultArgumentHints: []mcpRemoteDefaultArgumentHint{{
-				Name:        "cloudId",
-				Description: "Atlassian Cloud site ID used by many Atlassian MCP tools.",
-				Example:     "<cloud-id>",
-			}},
-		},
-		"cloudflare": {Server: mcpRemoteServer{URL: "https://mcp.cloudflare.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"excalidraw": {Server: mcpRemoteServer{URL: "https://mcp.excalidraw.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"figma":      {Server: mcpRemoteServer{URL: "https://mcp.figma.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"gainsight":  {Server: mcpRemoteServer{URL: "https://mcp.staircase.ai/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"github":     {Server: mcpRemoteServer{URL: "https://api.githubcopilot.com/mcp/", Transport: mcpRemoteTransportStreamableHTTP}},
-		"grafana":    {Server: mcpRemoteServer{URL: "https://mcp.grafana.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"granola":    {Server: mcpRemoteServer{URL: "https://mcp.granola.ai/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"incident-io": {
-			Server: mcpRemoteServer{URL: "https://mcp.incident.io/mcp", Transport: mcpRemoteTransportStreamableHTTP},
-		},
-		"iterate": {Server: mcpRemoteServer{URL: "https://mock.iterate.com/no-auth", Transport: mcpRemoteTransportStreamableHTTP}},
-		"linear":  {Server: mcpRemoteServer{URL: "https://mcp.linear.app/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"miro":    {Server: mcpRemoteServer{URL: "https://mcp.miro.com/", Transport: mcpRemoteTransportStreamableHTTP}},
-		"notion":  {Server: mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"posthog": {Server: mcpRemoteServer{URL: "https://mcp.posthog.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"sentry":  {Server: mcpRemoteServer{URL: "https://mcp.sentry.dev/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
-		"stripe":  {Server: mcpRemoteServer{URL: "https://mcp.stripe.com", Transport: mcpRemoteTransportStreamableHTTP}},
-		"supabase": {
-			Server: mcpRemoteServer{URL: "https://mcp.supabase.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
-		},
-		"vercel": {Server: mcpRemoteServer{URL: "https://mcp.vercel.com", Transport: mcpRemoteTransportStreamableHTTP}},
-		"zoom": {
-			Server: mcpRemoteServer{URL: "https://mcp.zoom.us/mcp/zoom/streamable", Transport: mcpRemoteTransportStreamableHTTP},
-		},
-		"zoominfo": {Server: mcpRemoteServer{URL: "https://mcp.zoominfo.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}},
+	mcpBuiltinRemoteCatalogOnce.Do(func() {
+		mcpBuiltinRemoteCatalogValue, mcpBuiltinRemoteCatalogErr = parseMCPBuiltinRemoteCatalog(mcpBuiltinRemoteCatalogYAML)
+	})
+	if mcpBuiltinRemoteCatalogErr != nil {
+		panic(mcpBuiltinRemoteCatalogErr)
 	}
+	return cloneMCPRemoteCatalog(mcpBuiltinRemoteCatalogValue)
+}
+
+func parseMCPBuiltinRemoteCatalog(data []byte) (map[string]mcpRemoteCatalogDefinition, error) {
+	var file struct {
+		Servers map[string]mcpRemoteCatalogDefinition `yaml:"servers"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&file); err != nil {
+		return nil, fmt.Errorf("parse built-in MCP remote catalog: %w", err)
+	}
+	if len(file.Servers) == 0 {
+		return nil, fmt.Errorf("built-in MCP remote catalog has no servers")
+	}
+	catalog := make(map[string]mcpRemoteCatalogDefinition, len(file.Servers))
+	for name, definition := range file.Servers {
+		clean, err := cleanMCPRemoteName(name)
+		if err != nil {
+			return nil, fmt.Errorf("invalid built-in MCP remote catalog name %q: %w", name, err)
+		}
+		if clean != name {
+			return nil, fmt.Errorf("invalid built-in MCP remote catalog name %q: must be normalized as %q", name, clean)
+		}
+		definition.Server = normalizeMCPRemoteServer(definition.Server)
+		definition.DisplayName = strings.TrimSpace(definition.DisplayName)
+		if definition.DisplayName == "" {
+			return nil, fmt.Errorf("built-in MCP remote catalog server %q is missing display_name", name)
+		}
+		if err := validateMCPRemoteServer(definition.Server); err != nil {
+			return nil, fmt.Errorf("invalid built-in MCP remote catalog server %q: %w", name, err)
+		}
+		catalog[name] = definition
+	}
+	return catalog, nil
+}
+
+func cloneMCPRemoteCatalog(src map[string]mcpRemoteCatalogDefinition) map[string]mcpRemoteCatalogDefinition {
+	dst := make(map[string]mcpRemoteCatalogDefinition, len(src))
+	for name, definition := range src {
+		definition.Server.Args = slices.Clone(definition.Server.Args)
+		definition.Server.DefaultArguments = maps.Clone(definition.Server.DefaultArguments)
+		definition.DefaultArgumentHints = slices.Clone(definition.DefaultArgumentHints)
+		dst[name] = definition
+	}
+	return dst
 }
 
 func cleanMCPRemoteName(name string) (string, error) {

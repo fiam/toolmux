@@ -210,25 +210,38 @@ func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]string{
-		"airtable":    "https://mcp.airtable.com/mcp",
-		"asana":       "https://mcp.asana.com/v2/mcp",
-		"excalidraw":  "https://mcp.excalidraw.com/mcp",
-		"figma":       "https://mcp.figma.com/mcp",
-		"gainsight":   "https://mcp.staircase.ai/mcp",
-		"github":      "https://api.githubcopilot.com/mcp/",
-		"granola":     "https://mcp.granola.ai/mcp",
-		"incident-io": "https://mcp.incident.io/mcp",
-		"posthog":     "https://mcp.posthog.com/mcp",
-		"sentry":      "https://mcp.sentry.dev/mcp",
-		"stripe":      "https://mcp.stripe.com",
-		"supabase":    "https://mcp.supabase.com/mcp",
-		"vercel":      "https://mcp.vercel.com",
-		"zoom":        "https://mcp.zoom.us/mcp/zoom/streamable",
-		"zoominfo":    "https://mcp.zoominfo.com/mcp",
+		"airtable":     "https://mcp.airtable.com/mcp",
+		"asana":        "https://mcp.asana.com/v2/mcp",
+		"atlassian":    "https://mcp.atlassian.com/v1/mcp/authv2",
+		"cloudflare":   "https://mcp.cloudflare.com/mcp",
+		"datadog":      "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
+		"excalidraw":   "https://mcp.excalidraw.com/mcp",
+		"figma":        "https://mcp.figma.com/mcp",
+		"gainsight":    "https://mcp.staircase.ai/mcp",
+		"github":       "https://api.githubcopilot.com/mcp/",
+		"grafana":      "https://mcp.grafana.com/mcp",
+		"granola":      "https://mcp.granola.ai/mcp",
+		"incident-io":  "https://mcp.incident.io/mcp",
+		"linear":       "https://mcp.linear.app/mcp",
+		"miro":         "https://mcp.miro.com/",
+		"neon":         "https://mcp.neon.tech/mcp",
+		"notion":       "https://mcp.notion.com/mcp",
+		"pagerduty":    "https://mcp.pagerduty.com/mcp",
+		"pagerduty-eu": "https://mcp.eu.pagerduty.com/mcp",
+		"posthog":      "https://mcp.posthog.com/mcp",
+		"sentry":       "https://mcp.sentry.dev/mcp",
+		"stripe":       "https://mcp.stripe.com",
+		"supabase":     "https://mcp.supabase.com/mcp",
+		"vercel":       "https://mcp.vercel.com",
+		"zoom":         "https://mcp.zoom.us/mcp/zoom/streamable",
+		"zoominfo":     "https://mcp.zoominfo.com/mcp",
 	}
 	servers := mcpBuiltinRemoteServers()
 	if _, ok := servers["incident"]; ok {
 		t.Fatal("expected incident.io catalog key to be incident-io, not incident")
+	}
+	if _, ok := servers["iterate"]; ok {
+		t.Fatal("expected test-only iterate server not to be in the built-in catalog")
 	}
 	for name, url := range want {
 		server, ok := servers[name]
@@ -237,6 +250,12 @@ func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
 		}
 		if server.URL != url || server.Transport != mcpRemoteTransportStreamableHTTP {
 			t.Fatalf("expected %s to use %s over streamable HTTP, got %#v", name, url, server)
+		}
+	}
+	catalog := mcpBuiltinRemoteCatalog()
+	for name, definition := range catalog {
+		if strings.TrimSpace(definition.DisplayName) == "" {
+			t.Fatalf("expected built-in MCP server %q to have a display name", name)
 		}
 	}
 }
@@ -400,9 +419,9 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 
 	output := runRootForRemoteTest(t, env, "catalog")
 	for _, want := range []string{
-		"iterate",
 		"mcp",
 		"available",
+		"linear",
 		"notion",
 	} {
 		if !strings.Contains(output, want) {
@@ -410,8 +429,8 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		}
 	}
 
-	enableOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "iterate", "--global")
-	if !strings.Contains(enableOutput, "enabled global MCP server iterate") {
+	enableOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "linear", "--global")
+	if !strings.Contains(enableOutput, "enabled global MCP server linear") {
 		t.Fatalf("expected enable output, got %q", enableOutput)
 	}
 	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "catalog", "--mcp")
@@ -419,26 +438,29 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
 	}
-	var iterate toolboxCatalogEntry
+	var linear toolboxCatalogEntry
 	for _, entry := range entries {
-		if entry.Name == "iterate" {
-			iterate = entry
+		if entry.Name == "linear" {
+			linear = entry
 		}
 	}
-	if iterate.Type != "mcp" || !iterate.Registered || iterate.Status != "registered" || iterate.Scope != "global" {
-		t.Fatalf("expected registered iterate catalog entry, got %#v", iterate)
+	if linear.Type != "mcp" || !linear.Registered || linear.Status != "registered" || linear.Scope != "global" {
+		t.Fatalf("expected registered linear catalog entry, got %#v", linear)
 	}
-	if len(iterate.RegisteredNames) != 1 || iterate.RegisteredNames[0] != "iterate" {
-		t.Fatalf("expected iterate registered name, got %#v", iterate.RegisteredNames)
+	if linear.DisplayName != "Linear" {
+		t.Fatalf("expected catalog display name, got %#v", linear)
+	}
+	if len(linear.RegisteredNames) != 1 || linear.RegisteredNames[0] != "linear" {
+		t.Fatalf("expected linear registered name, got %#v", linear.RegisteredNames)
 	}
 
-	disableOutput := runRootForRemoteTest(t, env, "catalog", "--disable", "iterate")
-	if !strings.Contains(disableOutput, "disabled MCP server iterate") {
+	disableOutput := runRootForRemoteTest(t, env, "catalog", "--disable", "linear")
+	if !strings.Contains(disableOutput, "disabled MCP server linear") {
 		t.Fatalf("expected disable output, got %q", disableOutput)
 	}
 	output = runRootForRemoteTest(t, env, "catalog", "--mcp")
-	if !strings.Contains(output, "iterate") || !strings.Contains(output, "available") {
-		t.Fatalf("expected iterate to be available after disable, got:\n%s", output)
+	if !strings.Contains(output, "linear") || !strings.Contains(output, "available") {
+		t.Fatalf("expected linear to be available after disable, got:\n%s", output)
 	}
 
 	notionOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "notion", "--global")
@@ -463,7 +485,7 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
 
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "catalog --enable iterate")
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "catalog --enable linear")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected catalog manage policy check, got %q", policyOutput)
 	}
