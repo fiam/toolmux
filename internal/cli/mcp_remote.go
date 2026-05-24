@@ -3959,7 +3959,7 @@ func registerCachedMCPRemoteCommands(root *cobra.Command, opts *options) []mcpRe
 	}
 	var conflicts []mcpRemoteNameConflict
 	for _, entry := range entries {
-		if rootCommandHasName(root, entry.Name) {
+		if rootNativeCommandHasName(root, entry.Name) {
 			conflicts = append(conflicts, mcpRemoteNameConflict{Name: entry.Name})
 			continue
 		}

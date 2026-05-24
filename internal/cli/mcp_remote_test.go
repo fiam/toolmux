@@ -1542,6 +1542,24 @@ func TestMCPRemoteServerStartupConflictPrintsRenameCommand(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteServerNotionDoesNotConflictWithoutNativeCommand(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	writeRemoteTestConfig(t, env, map[string]mcpRemoteServer{
+		"notion": {URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP},
+	})
+
+	output := runRootForRemoteTest(t, env, "--help")
+	if !strings.Contains(output, "notion") {
+		t.Fatalf("expected imported notion command in help, got %q", output)
+	}
+
+	cmd := rootForRemoteTest(env)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected imported notion server not to conflict with native commands: %v", err)
+	}
+}
+
 type mcpRemoteTestEnv struct {
 	Home     string
 	Config   string
