@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"path"
 	"strings"
@@ -70,6 +72,27 @@ func (c Client) getURL(ctx context.Context, rawURL string, values url.Values, ou
 	return doGoogle(req, c.HTTPClient, out)
 }
 
+func (c Client) getBytes(ctx context.Context, suffix string, values url.Values) ([]byte, error) {
+	reqURL, err := url.Parse(apiURL(c.BaseURL, suffix))
+	if err != nil {
+		return nil, err
+	}
+	query := reqURL.Query()
+	for key, vals := range values {
+		for _, value := range vals {
+			query.Add(key, value)
+		}
+	}
+	reqURL.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	c.authorize(req)
+	req.Header.Set("Accept", "*/*")
+	return doGoogleBytes(req, c.HTTPClient)
+}
+
 func (c Client) postJSON(ctx context.Context, suffix string, body any, out any) error {
 	return c.postJSONQuery(ctx, suffix, nil, body, out)
 }
@@ -107,6 +130,50 @@ func (c Client) postJSONURL(ctx context.Context, rawURL string, values url.Value
 	return doGoogle(req, c.HTTPClient, out)
 }
 
+func (c Client) postMultipartQuery(ctx context.Context, suffix string, values url.Values, metadata any, mediaType string, media []byte, out any) error {
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	metadataHeader := textproto.MIMEHeader{}
+	metadataHeader.Set("Content-Type", "application/json; charset=UTF-8")
+	metadataPart, err := writer.CreatePart(metadataHeader)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(metadataPart).Encode(metadata); err != nil {
+		return err
+	}
+	mediaHeader := textproto.MIMEHeader{}
+	mediaHeader.Set("Content-Type", firstNonEmpty(mediaType, "application/octet-stream"))
+	mediaPart, err := writer.CreatePart(mediaHeader)
+	if err != nil {
+		return err
+	}
+	if _, err := mediaPart.Write(media); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	reqURL, err := url.Parse(apiURL(c.BaseURL, suffix))
+	if err != nil {
+		return err
+	}
+	query := reqURL.Query()
+	for key, vals := range values {
+		for _, value := range vals {
+			query.Add(key, value)
+		}
+	}
+	reqURL.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), &requestBody)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "multipart/related; boundary="+writer.Boundary())
+	c.authorize(req)
+	return doGoogle(req, c.HTTPClient, out)
+}
+
 func (c Client) authorize(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	if token := strings.TrimSpace(c.AccessToken); token != "" {
@@ -137,6 +204,25 @@ func doGoogle(req *http.Request, client *http.Client, out any) error {
 		return err
 	}
 	return nil
+}
+
+func doGoogleBytes(req *http.Request, client *http.Client) ([]byte, error) {
+	resp, err := httpClient(client).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, defaultResponseLimit))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("google API rate limited request; retry after %s", resp.Header.Get("Retry-After"))
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("google API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return body, nil
 }
 
 func apiURL(baseURL, suffix string) string {

@@ -213,13 +213,21 @@ toolmux add google --name google-personal
 
 ```bash
 toolmux google docs get 1abc...
+toolmux google docs find-structure 1abc... --kind heading
+toolmux google docs export 1abc... --format markdown
 toolmux google docs append 1abc... --text "Status update\n"
 toolmux google docs replace-all-text 1abc... --text "old" --replace-text "new"
+toolmux google docs style-ranges 1abc... --paragraph-style-type HEADING_2 \
+  --foreground-color "#336699"
+toolmux google docs insert-table 1abc... --rows 3 --columns 2
+toolmux google docs insert-image 1abc... --upload-file ./diagram.png \
+  --mime-type image/png --make-public
 toolmux google docs batch-update 1abc... --json @requests.json
 
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google drive files copy 1abc... --name "Working copy"
+toolmux google drive files upload ./diagram.png --mime-type image/png --make-public
 toolmux google drive selected remove 1abc...
 
 toolmux google drive pick
@@ -245,10 +253,12 @@ the user explicitly opened/shared with the Toolmux Google app. Drive-wide
 discovery requires broader Drive scopes that Toolmux does not request.
 Google Docs body reads and edits have the same per-file boundary: select or
 open the document for Toolmux first, then use `toolmux google docs get`,
-`append`, `replace-all-text`, or `batch-update` with the document ID or Docs
-URL. `batch-update` accepts a full Docs API batchUpdate object, a requests
-array, or `@path`; use `--required-revision-id` when an edit should only apply
-to a known revision.
+`find-structure`, `export`, `append`, `replace-all-text`, `style-ranges`,
+`insert-table`, `insert-image`, or `batch-update` with the document ID or Docs
+URL. `find-structure` returns Google Docs UTF-16 indexes for targeted edits.
+`batch-update` accepts a full Docs API batchUpdate object, a requests array, or
+`@path`; use `--required-revision-id` when an edit should only apply to a known
+revision.
 
 `toolmux google drive selected add` and `toolmux google drive pick` create a
 short-lived Picker session in `toolmuxd`, open Google Picker in the browser,
@@ -257,7 +267,10 @@ and poll the broker until Google returns selected file IDs.
 reference, while `toolmux google drive pick` returns Picker output without
 saving it. `toolmux google drive files copy` accepts a raw file ID or a
 Docs/Drive URL and copies an accessible file into My Drive, defaulting the
-destination parent to `root`. With `drive.file`, shared source files must be
+destination parent to `root`. `toolmux google drive files upload` uploads a
+local file with Drive `files.create`; use `--make-public` only when the file
+must be readable by anyone with the link, such as when using a Drive-hosted
+image with Docs `insert-image`. With `drive.file`, shared source files must be
 selected through Picker before Toolmux can copy them. Removing a saved file
 removes it from Toolmux's local list; users can revoke app grants from their
 Google account when they need Google to forget that per-file app access.

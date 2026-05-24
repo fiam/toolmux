@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,19 +22,24 @@ import (
 type fakeGoogleUpstream struct {
 	Server *httptest.Server
 
-	mu                sync.Mutex
-	codes             map[string][]string
-	pickerCodes       map[string]bool
-	codeChallenges    map[string]string
-	codeCounter       int
-	lastAuthScopes    []string
-	lastPickerMIME    string
-	refreshCalled     bool
-	lastDriveAPIToken string
-	lastBatchBody     map[string]any
-	lastCopySourceID  string
-	lastCopyBody      map[string]any
-	lastCopyParentID  string
+	mu                   sync.Mutex
+	codes                map[string][]string
+	pickerCodes          map[string]bool
+	codeChallenges       map[string]string
+	codeCounter          int
+	lastAuthScopes       []string
+	lastPickerMIME       string
+	refreshCalled        bool
+	lastDriveAPIToken    string
+	lastBatchBody        map[string]any
+	lastCopySourceID     string
+	lastCopyBody         map[string]any
+	lastCopyParentID     string
+	lastUploadMetadata   map[string]any
+	lastUploadMIME       string
+	lastUploadContent    string
+	lastPermissionFileID string
+	lastPermissionBody   map[string]any
 }
 
 func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
@@ -57,8 +65,14 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 			upstream.listFiles(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1":
 			upstream.getFile(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1/export":
+			upstream.exportFile(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/doc-1/copy":
 			upstream.copyFile(t, w, r)
+		case r.Method == http.MethodPost && r.URL.Path == "/upload/drive/v3/files":
+			upstream.uploadFile(t, w, r)
+		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/image-1/permissions":
+			upstream.createPermission(t, w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -216,6 +230,10 @@ func (s *fakeGoogleUpstream) getDocument(t *testing.T, w http.ResponseWriter, r 
 				"startIndex": 1,
 				"endIndex":   13,
 				"paragraph": map[string]any{
+					"paragraphStyle": map[string]any{
+						"namedStyleType": "HEADING_2",
+						"headingId":      "heading-1",
+					},
 					"elements": []map[string]any{{
 						"startIndex": 1,
 						"endIndex":   13,
@@ -319,6 +337,96 @@ func (s *fakeGoogleUpstream) copyFile(t *testing.T, w http.ResponseWriter, r *ht
 	})
 }
 
+func (s *fakeGoogleUpstream) exportFile(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	if got := r.URL.Query().Get("mimeType"); got != "text/markdown" {
+		http.Error(w, "bad export MIME", http.StatusBadRequest)
+		t.Errorf("expected markdown export MIME, got %q", got)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown")
+	_, _ = w.Write([]byte("# Shared plan\n\nHello world\n"))
+}
+
+func (s *fakeGoogleUpstream) uploadFile(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/related" {
+		http.Error(w, "bad multipart", http.StatusBadRequest)
+		t.Errorf("expected multipart/related upload, got %q: %v", r.Header.Get("Content-Type"), err)
+		return
+	}
+	reader := multipart.NewReader(r.Body, params["boundary"])
+	metadataPart, err := reader.NextPart()
+	if err != nil {
+		http.Error(w, "missing metadata", http.StatusBadRequest)
+		t.Errorf("read metadata part: %v", err)
+		return
+	}
+	var metadata map[string]any
+	if err := json.NewDecoder(metadataPart).Decode(&metadata); err != nil {
+		http.Error(w, "bad metadata", http.StatusBadRequest)
+		t.Errorf("decode upload metadata: %v", err)
+		return
+	}
+	mediaPart, err := reader.NextPart()
+	if err != nil {
+		http.Error(w, "missing media", http.StatusBadRequest)
+		t.Errorf("read media part: %v", err)
+		return
+	}
+	content, err := io.ReadAll(mediaPart)
+	if err != nil {
+		http.Error(w, "bad media", http.StatusBadRequest)
+		t.Errorf("read media content: %v", err)
+		return
+	}
+	uploadMIME := mediaPart.Header.Get("Content-Type")
+	s.mu.Lock()
+	s.lastDriveAPIToken = bearerToken(r)
+	s.lastUploadMetadata = metadata
+	s.lastUploadMIME = uploadMIME
+	s.lastUploadContent = string(content)
+	s.mu.Unlock()
+	name, _ := metadata["name"].(string)
+	writeGoogleJSON(w, map[string]any{
+		"id":             "image-1",
+		"name":           firstNonEmptyTest(name, "diagram.png"),
+		"mimeType":       uploadMIME,
+		"webViewLink":    "https://drive.google.com/file/d/image-1/view",
+		"webContentLink": "https://drive.google.com/uc?id=image-1&export=download",
+		"modifiedTime":   "2026-05-24T10:15:00Z",
+	})
+}
+
+func (s *fakeGoogleUpstream) createPermission(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		t.Errorf("decode permission body: %v", err)
+		return
+	}
+	s.mu.Lock()
+	s.lastPermissionFileID = "image-1"
+	s.lastPermissionBody = body
+	s.mu.Unlock()
+	writeGoogleJSON(w, map[string]any{
+		"id":   "anyoneWithLink",
+		"type": body["type"],
+		"role": body["role"],
+	})
+}
+
 func (s *fakeGoogleUpstream) authorizeAPI(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
 	t.Helper()
 	switch bearerToken(r) {
@@ -404,6 +512,95 @@ func (s *fakeGoogleUpstream) assertDocsReplaceAllText(t *testing.T, wantText, wa
 	}
 }
 
+func (s *fakeGoogleUpstream) assertDocsStyleText(t *testing.T, wantStart, wantEnd int, wantColor string) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	updateTextStyle, ok := request["updateTextStyle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected updateTextStyle request, got %#v", request)
+	}
+	assertRange(t, updateTextStyle["range"], wantStart, wantEnd)
+	if fields, _ := updateTextStyle["fields"].(string); fields != "foregroundColor" {
+		t.Fatalf("expected foregroundColor fields, got %#v", fields)
+	}
+	textStyle, ok := updateTextStyle["textStyle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected textStyle object, got %#v", updateTextStyle)
+	}
+	assertOptionalColor(t, textStyle["foregroundColor"], wantColor)
+}
+
+func (s *fakeGoogleUpstream) assertDocsInsertTable(t *testing.T, wantRows, wantColumns, wantIndex int) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	insertTable, ok := request["insertTable"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected insertTable request, got %#v", request)
+	}
+	if gotRows, _ := insertTable["rows"].(float64); int(gotRows) != wantRows {
+		t.Fatalf("expected rows %d, got %#v in %#v", wantRows, insertTable["rows"], insertTable)
+	}
+	if gotColumns, _ := insertTable["columns"].(float64); int(gotColumns) != wantColumns {
+		t.Fatalf("expected columns %d, got %#v in %#v", wantColumns, insertTable["columns"], insertTable)
+	}
+	location, ok := insertTable["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected table location, got %#v", insertTable)
+	}
+	if gotIndex, _ := location["index"].(float64); int(gotIndex) != wantIndex {
+		t.Fatalf("expected table index %d, got %#v in %#v", wantIndex, location["index"], location)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsInsertImage(t *testing.T, wantURI string, wantIndex int) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	insertImage, ok := request["insertInlineImage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected insertInlineImage request, got %#v", request)
+	}
+	if gotURI, _ := insertImage["uri"].(string); gotURI != wantURI {
+		t.Fatalf("expected image URI %q, got %q in %#v", wantURI, gotURI, insertImage)
+	}
+	location, ok := insertImage["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected image location, got %#v", insertImage)
+	}
+	if gotIndex, _ := location["index"].(float64); int(gotIndex) != wantIndex {
+		t.Fatalf("expected image index %d, got %#v in %#v", wantIndex, location["index"], location)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDriveUpload(t *testing.T, wantName, wantMIME, wantContent string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gotName, _ := s.lastUploadMetadata["name"].(string); gotName != wantName {
+		t.Fatalf("expected upload name %q, got %q in %#v", wantName, gotName, s.lastUploadMetadata)
+	}
+	if s.lastUploadMIME != wantMIME {
+		t.Fatalf("expected upload MIME %q, got %q", wantMIME, s.lastUploadMIME)
+	}
+	if s.lastUploadContent != wantContent {
+		t.Fatalf("expected upload content %q, got %q", wantContent, s.lastUploadContent)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertAnyoneReaderPermission(t *testing.T, wantFileID string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastPermissionFileID != wantFileID {
+		t.Fatalf("expected permission file %q, got %q", wantFileID, s.lastPermissionFileID)
+	}
+	if gotType, _ := s.lastPermissionBody["type"].(string); gotType != "anyone" {
+		t.Fatalf("expected anyone permission, got %#v", s.lastPermissionBody)
+	}
+	if gotRole, _ := s.lastPermissionBody["role"].(string); gotRole != "reader" {
+		t.Fatalf("expected reader permission, got %#v", s.lastPermissionBody)
+	}
+}
+
 func (s *fakeGoogleUpstream) lastDocsBatchBody(t *testing.T) map[string]any {
 	t.Helper()
 	s.mu.Lock()
@@ -425,6 +622,41 @@ func firstDocsBatchRequest(t *testing.T, body map[string]any) map[string]any {
 		t.Fatalf("expected Docs batchUpdate request object, got %#v", requests[0])
 	}
 	return request
+}
+
+func assertRange(t *testing.T, raw any, wantStart, wantEnd int) {
+	t.Helper()
+	value, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("expected range object, got %#v", raw)
+	}
+	if gotStart, _ := value["startIndex"].(float64); int(gotStart) != wantStart {
+		t.Fatalf("expected start %d, got %#v in %#v", wantStart, value["startIndex"], value)
+	}
+	if gotEnd, _ := value["endIndex"].(float64); int(gotEnd) != wantEnd {
+		t.Fatalf("expected end %d, got %#v in %#v", wantEnd, value["endIndex"], value)
+	}
+}
+
+func assertOptionalColor(t *testing.T, raw any, want string) {
+	t.Helper()
+	color, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("expected color object, got %#v", raw)
+	}
+	wrapped, ok := color["color"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected optional color wrapper, got %#v", color)
+	}
+	rgb, ok := wrapped["rgbColor"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected rgb color, got %#v", wrapped)
+	}
+	if want == "#336699" {
+		if rgb["red"] != float64(0x33)/255 || rgb["green"] != float64(0x66)/255 || rgb["blue"] != float64(0x99)/255 {
+			t.Fatalf("unexpected rgb color for %s: %#v", want, rgb)
+		}
+	}
 }
 
 func (s *fakeGoogleUpstream) assertRefreshAndDriveToken(t *testing.T, wantToken string) {
@@ -497,4 +729,13 @@ func sameScopes(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func firstNonEmptyTest(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

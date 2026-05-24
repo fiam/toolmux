@@ -331,8 +331,10 @@ need Google to forget the app-level grant.
 
 ### Google Docs
 
-`toolmux google docs get`, `append`, `replace-all-text`, and `batch-update`
-call the Google Docs API at `docs.googleapis.com`. They still use the same
+`toolmux google docs get`, `find-structure`, `export`, `append`,
+`replace-all-text`, `style-ranges`, `insert-table`, `insert-image`, and
+`batch-update` call the Google Docs API at `docs.googleapis.com` or Drive
+export where the operation is backed by Drive. They still use the same
 `drive.file` grant and the same selected/opened-file boundary as Drive tools:
 the document must be created by Toolmux or explicitly opened for the Toolmux
 Google app, usually through `toolmux google drive selected add`.
@@ -345,6 +347,14 @@ Use `--required-revision-id` on write commands when an edit should only apply
 to a known document revision. Use `--dry-run` on write commands to inspect the
 Docs `batchUpdate` request without applying it.
 
+Docs inline images require a public image URL. The
+`toolmux google drive files upload` command with `--make-public` uploads an
+image to Drive and creates an anyone-reader permission. The
+`toolmux google docs insert-image` command can also use `--upload-file` with
+`--make-public` before inserting the resulting Drive public image URI. Use
+`--make-public` only for images that are acceptable to expose to anyone with
+the link.
+
 ### Manual smoke test
 
 After configuring the CLI:
@@ -353,8 +363,19 @@ After configuring the CLI:
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google docs get <document-id-or-url>
+toolmux google docs find-structure <document-id-or-url> --kind heading
+toolmux google docs export <document-id-or-url> --format markdown
 toolmux google docs append <document-id-or-url> \
   --text "Toolmux smoke test\n" \
+  --dry-run
+toolmux google docs insert-image <document-id-or-url> \
+  --upload-file ./diagram.png \
+  --mime-type image/png \
+  --make-public \
+  --dry-run
+toolmux google drive files upload ./diagram.png \
+  --mime-type image/png \
+  --make-public \
   --dry-run
 toolmux google drive files copy <file-id-or-url>
 toolmux google drive pick

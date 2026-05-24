@@ -211,9 +211,10 @@ unless product requirements explicitly justify broader access. Cover brokered
 OAuth through `toolmuxd`,
 toolmuxd token exchange, local missing-scope failures before Google API calls,
 refresh-token preservation, and representative Drive and Docs API commands. Cover
-`toolmux google docs get/append/replace-all-text/batch-update`,
-`toolmux google drive selected add/list/remove`,
-`toolmux google drive files copy`, `toolmux google drive pick`, and
+the Docs commands `get`, `find-structure`, `export`, `append`,
+`replace-all-text`, `style-ranges`, `insert-table`, `insert-image`, and
+`batch-update`; `toolmux google drive selected add/list/remove`,
+`toolmux google drive files copy/upload`, `toolmux google drive pick`, and
 `toolmux google drive available` through fake brokered Picker flows without
 using live Google. The brokered Picker flow must use Google's
 `trigger_onepick=true` flow, request only `drive.file`, and keep hosted Google

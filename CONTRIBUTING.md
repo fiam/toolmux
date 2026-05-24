@@ -352,10 +352,11 @@ shared Google REST/OAuth helpers live under
 through `toolmuxd`, the default non-sensitive `drive.file` scope for both
 Drive and Docs API commands, local scope checks before API calls,
 refresh-token preservation, and representative Drive and Docs API commands
-against fake upstream servers. Google tests must cover
-`toolmux google docs get/append/replace-all-text/batch-update`,
-`toolmux google drive selected add/list/remove`,
-`toolmux google drive files copy`, `toolmux google drive pick`, and
+against fake upstream servers. Google tests must cover the Docs commands
+`get`, `find-structure`, `export`, `append`, `replace-all-text`,
+`style-ranges`, `insert-table`, `insert-image`, and `batch-update`;
+`toolmux google drive selected add/list/remove`;
+`toolmux google drive files copy/upload`; `toolmux google drive pick`; and
 `toolmux google drive available` through fake brokered Picker flows without
 using live Google. Brokered Picker tests must assert `trigger_onepick=true`, a
 single `drive.file` scope, returned `picked_file_ids`, token exchange in

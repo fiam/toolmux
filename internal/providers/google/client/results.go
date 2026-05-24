@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/base64"
 	"strconv"
 
 	"github.com/fiam/toolmux/internal/actions"
@@ -29,6 +30,39 @@ func (result driveFileResult) Table(output.Options) output.Table {
 			{"URL", result.WebViewLink},
 		},
 	}
+}
+
+type driveUploadDryRun struct {
+	Path       string `json:"path" yaml:"path"`
+	Name       string `json:"name" yaml:"name"`
+	MIMEType   string `json:"mime_type" yaml:"mime_type"`
+	ParentID   string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
+	Size       int    `json:"size" yaml:"size"`
+	MakePublic bool   `json:"make_public" yaml:"make_public"`
+}
+
+type driveUploadResult struct {
+	File       googleapi.DriveFile        `json:"file" yaml:"file"`
+	Size       int                        `json:"size" yaml:"size"`
+	Permission *googleapi.DrivePermission `json:"permission,omitempty" yaml:"permission,omitempty"`
+	PublicURI  string                     `json:"public_uri,omitempty" yaml:"public_uri,omitempty"`
+}
+
+func (result driveUploadResult) Table(output.Options) output.Table {
+	rows := [][]string{
+		{"File ID", result.File.ID},
+		{"Name", result.File.Name},
+		{"MIME type", result.File.MIMEType},
+		{"Size", strconv.Itoa(result.Size)},
+		{"URL", result.File.WebViewLink},
+	}
+	if result.PublicURI != "" {
+		rows = append(rows, []string{"Public image URI", result.PublicURI})
+	}
+	if result.Permission != nil {
+		rows = append(rows, []string{"Permission", result.Permission.Type + ":" + result.Permission.Role})
+	}
+	return output.Table{Headers: []string{"Field", "Value"}, Rows: rows}
 }
 
 type driveFilesResult googleapi.DriveFilesResponse
@@ -96,10 +130,116 @@ func (result docsBatchUpdateResult) Table(output.Options) output.Table {
 	}
 }
 
+type docsStructureResult struct {
+	DocumentID string               `json:"document_id" yaml:"document_id"`
+	Title      string               `json:"title" yaml:"title"`
+	RevisionID string               `json:"revision_id,omitempty" yaml:"revision_id,omitempty"`
+	Matches    []docsStructureMatch `json:"matches" yaml:"matches"`
+}
+
+type docsStructureMatch struct {
+	Kind           string `json:"kind" yaml:"kind"`
+	StartIndex     int    `json:"start_index" yaml:"start_index"`
+	EndIndex       int    `json:"end_index" yaml:"end_index"`
+	NamedStyleType string `json:"named_style_type,omitempty" yaml:"named_style_type,omitempty"`
+	HeadingID      string `json:"heading_id,omitempty" yaml:"heading_id,omitempty"`
+	Rows           int    `json:"rows,omitempty" yaml:"rows,omitempty"`
+	Columns        int    `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Text           string `json:"text,omitempty" yaml:"text,omitempty"`
+}
+
+func (result docsStructureResult) Table(output.Options) output.Table {
+	rows := make([][]string, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		rows = append(rows, []string{
+			match.Kind,
+			strconv.Itoa(match.StartIndex),
+			strconv.Itoa(match.EndIndex),
+			firstNonEmpty(match.NamedStyleType, "-"),
+			compactPlainText(match.Text),
+		})
+	}
+	return output.Table{
+		Headers: []string{"Kind", "Start", "End", "Style", "Text"},
+		Rows:    rows,
+		Empty:   "no matching structure",
+	}
+}
+
+type docsExportResult struct {
+	DocumentID string `json:"document_id" yaml:"document_id"`
+	Format     string `json:"format" yaml:"format"`
+	MIMEType   string `json:"mime_type" yaml:"mime_type"`
+	Encoding   string `json:"encoding" yaml:"encoding"`
+	Size       int    `json:"size" yaml:"size"`
+	Content    string `json:"content" yaml:"content"`
+}
+
+func newDocsExportResult(documentID, format, mimeType string, content []byte) docsExportResult {
+	encoding := "base64"
+	value := base64.StdEncoding.EncodeToString(content)
+	if isTextExportMIME(mimeType) {
+		encoding = "none"
+		value = string(content)
+	}
+	return docsExportResult{
+		DocumentID: documentID,
+		Format:     format,
+		MIMEType:   mimeType,
+		Encoding:   encoding,
+		Size:       len(content),
+		Content:    value,
+	}
+}
+
+func (result docsExportResult) Table(output.Options) output.Table {
+	return output.Table{
+		Headers: []string{"Field", "Value"},
+		Rows: [][]string{
+			{"Document ID", result.DocumentID},
+			{"Format", result.Format},
+			{"MIME type", result.MIMEType},
+			{"Encoding", result.Encoding},
+			{"Size", strconv.Itoa(result.Size)},
+			{"Content", compactPlainText(result.Content)},
+		},
+	}
+}
+
+type docsInsertImageResult struct {
+	DocumentID      string                     `json:"document_id" yaml:"document_id"`
+	ImageURI        string                     `json:"image_uri" yaml:"image_uri"`
+	UploadedFile    *googleapi.DriveFile       `json:"uploaded_file,omitempty" yaml:"uploaded_file,omitempty"`
+	Permission      *googleapi.DrivePermission `json:"permission,omitempty" yaml:"permission,omitempty"`
+	WriteControl    googleapi.WriteControl     `json:"write_control,omitzero" yaml:"write_control,omitempty"`
+	AppliedRequests int                        `json:"applied_requests" yaml:"applied_requests"`
+}
+
+func (result docsInsertImageResult) Table(output.Options) output.Table {
+	rows := [][]string{
+		{"Document ID", result.DocumentID},
+		{"Image URI", result.ImageURI},
+		{"Applied requests", strconv.Itoa(result.AppliedRequests)},
+		{"Required revision", result.WriteControl.RequiredRevisionID},
+		{"Target revision", result.WriteControl.TargetRevisionID},
+	}
+	if result.UploadedFile != nil {
+		rows = append(rows, []string{"Uploaded file", result.UploadedFile.ID})
+	}
+	if result.Permission != nil {
+		rows = append(rows, []string{"Permission", result.Permission.Type + ":" + result.Permission.Role})
+	}
+	return output.Table{Headers: []string{"Field", "Value"}, Rows: rows}
+}
+
 var _ actions.TableRenderable = driveFileResult{}
 var _ actions.TableRenderable = driveFilesResult{}
+var _ actions.TableRenderable = driveUploadResult{}
 var _ actions.TableRenderable = docsDocumentResult{}
 var _ actions.TableRenderable = docsBatchUpdateResult{}
+var _ actions.TableRenderable = docsStructureResult{}
+var _ actions.TableRenderable = docsExportResult{}
+var _ actions.TableRenderable = docsInsertImageResult{}
 var _ actions.TableRenderable = googlePickerResult{}
 var _ actions.TableRenderable = googleConfiguredFilesResult{}
 var _ actions.TextRenderable = authResult{}

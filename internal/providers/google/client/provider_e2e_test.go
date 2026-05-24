@@ -2,6 +2,8 @@ package client_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,12 +57,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "12"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "18"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "12"} {
+	for _, want := range []string{"google", "internal", "connected", "18"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -135,6 +137,59 @@ func TestGoogleDocsCommandsReadAndUpdateAccessibleDocument(t *testing.T) {
 	out = toolmuxtest.Run(t, deps, "google", "docs", "batch-update", "doc-1", "--json", `[{"insertText":{"location":{"index":1},"text":"Start "}}]`)
 	toolmuxtest.AssertContains(t, out, "1")
 	upstream.assertDocsInsertText(t, "Start ", 1)
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "find-structure", "doc-1", "--kind", "text", "--text", "world")
+	toolmuxtest.AssertContains(t, out, "text")
+	toolmuxtest.AssertContains(t, out, "7")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "export", "doc-1", "--format", "markdown")
+	toolmuxtest.AssertContains(t, out, "# Shared plan")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "style-ranges", "doc-1", "--paragraph-style-type", "HEADING_2", "--foreground-color", "#336699")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	upstream.assertDocsStyleText(t, 1, 13, "#336699")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-table", "doc-1", "--rows", "2", "--columns", "3", "--index", "12")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	upstream.assertDocsInsertTable(t, 2, 3, 12)
+
+	imageURI := "https://example.com/diagram.png"
+	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--uri", imageURI, "--index", "2", "--width-pt", "50")
+	toolmuxtest.AssertContains(t, out, imageURI)
+	upstream.assertDocsInsertImage(t, imageURI, 2)
+}
+
+func TestGoogleDriveUploadAndDocsInsertUploadedImage(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	store := credentials.NewMemoryStore()
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
+	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
+		AccessToken:  "ya29.drive",
+		RefreshToken: "refresh-google",
+		TokenType:    "Bearer",
+		Scopes:       []string{googleapi.ScopeDriveFile},
+		Extra:        map[string]string{"auth_type": "oauth_broker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deps := googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
+	imagePath := filepath.Join(t.TempDir(), "diagram.png")
+	if err := os.WriteFile(imagePath, []byte("fake png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := toolmuxtest.Run(t, deps, "google", "drive", "files", "upload", imagePath, "--mime-type", "image/png", "--make-public")
+	toolmuxtest.AssertContains(t, out, "image-1")
+	toolmuxtest.AssertContains(t, out, "https://drive.google.com/uc?export=view&id=image-1")
+	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")
+	upstream.assertAnyoneReaderPermission(t, "image-1")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--upload-file", imagePath, "--mime-type", "image/png", "--make-public", "--index", "2")
+	toolmuxtest.AssertContains(t, out, "image-1")
+	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")
+	upstream.assertAnyoneReaderPermission(t, "image-1")
+	upstream.assertDocsInsertImage(t, "https://drive.google.com/uc?export=view&id=image-1", 2)
 }
 
 func TestGoogleDriveReportsMissingScopeAfterDocsSensitiveOverride(t *testing.T) {
@@ -250,12 +305,18 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"google.docs.get",
+		"google.docs.find_structure",
+		"google.docs.export",
 		"google.docs.append",
 		"google.docs.replace_all_text",
+		"google.docs.style_ranges",
+		"google.docs.insert_table",
+		"google.docs.insert_image",
 		"google.docs.batch_update",
 		"google.drive.selected.add",
 		"google.drive.selected.list",
 		"google.drive.files.copy",
+		"google.drive.files.upload",
 		"google.drive.selected.remove",
 		"google.drive.available",
 	} {
