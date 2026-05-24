@@ -13,9 +13,10 @@ import (
 )
 
 type toolmuxConfigFile struct {
-	Version   int            `json:"version" yaml:"version"`
-	MCP       mcpConfig      `json:"mcp,omitzero" yaml:"mcp,omitempty"`
-	Workflows workflowConfig `json:"workflows,omitzero" yaml:"workflows,omitempty"`
+	Version   int                      `json:"version" yaml:"version"`
+	Toolboxes map[string]toolboxConfig `json:"toolboxes,omitempty" yaml:"toolboxes,omitempty"`
+	MCP       mcpConfig                `json:"mcp,omitzero" yaml:"mcp,omitempty"`
+	Workflows workflowConfig           `json:"workflows,omitzero" yaml:"workflows,omitempty"`
 }
 
 type mcpConfig struct {
@@ -23,6 +24,23 @@ type mcpConfig struct {
 	Profiles       map[string]mcpProfileConfig `json:"profiles,omitempty" yaml:"profiles,omitempty"`
 	Servers        map[string]mcpRemoteServer  `json:"servers,omitempty" yaml:"servers,omitempty"`
 }
+
+type toolboxConfig struct {
+	Type             string         `json:"type" yaml:"type"`
+	Provider         string         `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Catalog          string         `json:"catalog,omitempty" yaml:"catalog,omitempty"`
+	URL              string         `json:"url,omitempty" yaml:"url,omitempty"`
+	Command          string         `json:"command,omitempty" yaml:"command,omitempty"`
+	Args             []string       `json:"args,omitempty" yaml:"args,omitempty"`
+	Transport        string         `json:"transport,omitempty" yaml:"transport,omitempty"`
+	AuthRequired     *bool          `json:"auth_required,omitempty" yaml:"auth_required,omitempty"`
+	DefaultArguments map[string]any `json:"default_arguments,omitempty" yaml:"default_arguments,omitempty"`
+}
+
+const (
+	toolboxTypeInternal = "internal"
+	toolboxTypeMCP      = "mcp"
+)
 
 type mcpProfileConfig struct {
 	Tools            []string `json:"tools,omitempty" yaml:"tools,omitempty"`
@@ -380,6 +398,10 @@ func readToolmuxConfigFile(path string) (toolmuxConfigFile, error) {
 	if config.MCP.Servers == nil {
 		config.MCP.Servers = map[string]mcpRemoteServer{}
 	}
+	if config.Toolboxes == nil {
+		config.Toolboxes = map[string]toolboxConfig{}
+	}
+	normalizeToolboxConfig(&config)
 	return config, nil
 }
 
@@ -404,6 +426,7 @@ func writeToolmuxConfigFile(path string, config toolmuxConfigFile) error {
 	if config.MCP.Servers == nil {
 		config.MCP.Servers = map[string]mcpRemoteServer{}
 	}
+	normalizeToolboxConfig(&config)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}

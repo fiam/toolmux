@@ -79,8 +79,12 @@ func TestMCPRemoteToolVerbosePrintsHTTPTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.MCP.Servers["linear"].AuthRequired == nil || !*config.MCP.Servers["linear"].AuthRequired {
-		t.Fatalf("expected bearer auth set to record auth_required true, got %#v", config.MCP.Servers["linear"])
+	server, ok := configMCPRemoteServer(config, "linear")
+	if !ok {
+		t.Fatal("expected linear server config")
+	}
+	if server.AuthRequired == nil || !*server.AuthRequired {
+		t.Fatalf("expected bearer auth set to record auth_required true, got %#v", server)
 	}
 	runRootForRemoteTest(t, env, "mcp", "sync", "linear")
 

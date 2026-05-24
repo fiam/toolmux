@@ -313,6 +313,14 @@ func mergeToolmuxConfig(base, overlay toolmuxConfigFile) toolmuxConfigFile {
 	if overlay.MCP.DefaultProfile != "" {
 		merged.MCP.DefaultProfile = overlay.MCP.DefaultProfile
 	}
+	if len(overlay.Toolboxes) > 0 {
+		if merged.Toolboxes == nil {
+			merged.Toolboxes = map[string]toolboxConfig{}
+		}
+		for name, toolbox := range overlay.Toolboxes {
+			merged.Toolboxes[name] = cloneToolboxConfig(toolbox)
+		}
+	}
 	if len(overlay.MCP.Profiles) > 0 {
 		if merged.MCP.Profiles == nil {
 			merged.MCP.Profiles = map[string]mcpProfileConfig{}
@@ -345,6 +353,12 @@ func mergeToolmuxConfig(base, overlay toolmuxConfigFile) toolmuxConfigFile {
 
 func cloneToolmuxConfig(config toolmuxConfigFile) toolmuxConfigFile {
 	clone := toolmuxConfigFile{Version: config.Version}
+	if len(config.Toolboxes) > 0 {
+		clone.Toolboxes = make(map[string]toolboxConfig, len(config.Toolboxes))
+		for name, toolbox := range config.Toolboxes {
+			clone.Toolboxes[name] = cloneToolboxConfig(toolbox)
+		}
+	}
 	clone.MCP.DefaultProfile = config.MCP.DefaultProfile
 	if len(config.MCP.Profiles) > 0 {
 		clone.MCP.Profiles = make(map[string]mcpProfileConfig, len(config.MCP.Profiles))
@@ -364,6 +378,25 @@ func cloneToolmuxConfig(config toolmuxConfigFile) toolmuxConfigFile {
 		for name, agent := range config.Workflows.Agents {
 			clone.Workflows.Agents[name] = cloneWorkflowAgentConfig(agent)
 		}
+	}
+	return clone
+}
+
+func cloneToolboxConfig(toolbox toolboxConfig) toolboxConfig {
+	clone := toolboxConfig{
+		Type:             toolbox.Type,
+		Provider:         toolbox.Provider,
+		Catalog:          toolbox.Catalog,
+		URL:              toolbox.URL,
+		Command:          toolbox.Command,
+		Args:             append([]string(nil), toolbox.Args...),
+		Transport:        toolbox.Transport,
+		AuthRequired:     toolbox.AuthRequired,
+		DefaultArguments: maps.Clone(toolbox.DefaultArguments),
+	}
+	if toolbox.AuthRequired != nil {
+		authRequired := *toolbox.AuthRequired
+		clone.AuthRequired = &authRequired
 	}
 	return clone
 }

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,15 +36,25 @@ func googleBrokerDeps(t testing.TB, store credentials.Store, upstream *fakeGoogl
 		},
 		HTTPClient: upstream.Server.Client(),
 	})
-	deps := googleDeps(store, toolmuxd.Client(), upstream.Server.URL)
+	deps := googleDeps(t, store, toolmuxd.Client(), upstream.Server.URL)
 	deps.ToolmuxdURL = toolmuxd.URL
 	return deps
 }
 
-func googleDeps(store credentials.Store, client *http.Client, upstreamURL string) cli.Dependencies {
+func googleDeps(t testing.TB, store credentials.Store, client *http.Client, upstreamURL string) cli.Dependencies {
+	t.Helper()
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, ".toolmux"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	config := []byte("version: 1\ntoolboxes:\n  google:\n    type: internal\n    provider: google\n")
+	if err := os.WriteFile(filepath.Join(workDir, ".toolmux", "config.yaml"), config, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return cli.Dependencies{
 		Credentials: store,
 		HTTPClient:  client,
+		WorkDir:     workDir,
 		ProviderURL: map[string]string{
 			"google": upstreamURL,
 		},

@@ -11,13 +11,13 @@ import (
 )
 
 func saveSelectedGoogleFiles(exec actions.Context, inv actions.Invocation, selected []googlePickerFile) error {
-	ref := googleCredentialRef(exec, account(inv))
+	ref := googleCredentialRef(exec, exec.AccountName())
 	tokens, found, err := loadGoogleTokens(exec, ref)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("google account %q is not authorized; run `toolmux add %s --account %s`", account(inv), exec.Provider, account(inv))
+		return fmt.Errorf("google toolbox %q is not authorized; run `toolmux add google --name %s`", exec.Provider, exec.AccountName())
 	}
 	files := mergeConfiguredGoogleFiles(configuredGoogleFiles(tokens), selected)
 	return storeConfiguredGoogleFiles(exec, ref, tokens, files)

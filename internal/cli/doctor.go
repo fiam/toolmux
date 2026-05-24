@@ -96,7 +96,7 @@ func credentialStoreDiagnostic(ctx context.Context, store credentials.Store) pro
 }
 
 func mcpRemoteDoctorDiagnostics(ctx context.Context, opts *options, store credentials.Store) []providerDiagnostic {
-	entries, err := effectiveMCPRemoteServerEntries("")
+	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return []providerDiagnostic{{
 			Check:       "mcp-config",

@@ -17,7 +17,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 		Short:   "List registered remote MCP servers",
 		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := effectiveMCPRemoteServerEntries("")
+			entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 			if err != nil {
 				return err
 			}
@@ -81,7 +81,7 @@ func mcpRemoteShowCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
 			if err != nil {
 				return err
 			}

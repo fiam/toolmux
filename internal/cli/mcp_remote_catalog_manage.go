@@ -106,7 +106,7 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 		return nil
 	}
 	builtins := mcpBuiltinRemoteServers()
-	registeredEntries, err := effectiveMCPRemoteServerEntries("")
+	registeredEntries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return err
 	}
@@ -124,9 +124,6 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if config.MCP.Servers == nil {
-			config.MCP.Servers = map[string]mcpRemoteServer{}
-		}
 		changed := false
 		for _, spec := range enableSpecs {
 			server, ok := builtins[spec.CatalogName]
@@ -143,7 +140,10 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 				continue
 			}
 			server = normalizeMCPRemoteServer(server)
-			config.MCP.Servers[spec.RegisteredName] = server
+			setConfigMCPRemoteServer(&config, spec.RegisteredName, server)
+			toolbox := config.Toolboxes[spec.RegisteredName]
+			toolbox.Catalog = spec.CatalogName
+			config.Toolboxes[spec.RegisteredName] = toolbox
 			registered[spec.RegisteredName] = true
 			changed = true
 			enabled = append(enabled, mcpRemoteServerEntry{
@@ -276,17 +276,22 @@ func removeMCPRemoteCatalogServers(names []string, cacheDir string) ([]string, e
 		changed := false
 		for requestedName := range remove {
 			if builtin, ok := builtins[requestedName]; ok {
-				for registeredName, server := range source.config.MCP.Servers {
+				remoteNames := mcpRemoteServerNamesInConfig(source.config)
+				for _, registeredName := range remoteNames {
+					server, ok := configMCPRemoteServer(source.config, registeredName)
+					if !ok {
+						continue
+					}
 					if registeredName == requestedName || sameMCPRemoteServer(server, builtin) {
-						delete(source.config.MCP.Servers, registeredName)
+						deleteConfigMCPRemoteServer(&source.config, registeredName)
 						changed = true
 						removed[registeredName] = true
 					}
 				}
 				continue
 			}
-			if _, ok := source.config.MCP.Servers[requestedName]; ok {
-				delete(source.config.MCP.Servers, requestedName)
+			if _, ok := configMCPRemoteServer(source.config, requestedName); ok {
+				deleteConfigMCPRemoteServer(&source.config, requestedName)
 				changed = true
 				removed[requestedName] = true
 			}
@@ -312,4 +317,21 @@ func removeMCPRemoteCatalogServers(names []string, cacheDir string) ([]string, e
 	}
 	sort.Strings(ordered)
 	return ordered, nil
+}
+
+func mcpRemoteServerNamesInConfig(config toolmuxConfigFile) []string {
+	seen := map[string]bool{}
+	names := []string{}
+	for name := range config.MCP.Servers {
+		seen[name] = true
+		names = append(names, name)
+	}
+	for name, toolbox := range config.Toolboxes {
+		if toolbox.Type != toolboxTypeMCP || seen[name] {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

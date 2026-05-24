@@ -13,6 +13,7 @@ import (
 )
 
 func handleAdd(exec actions.Context, inv actions.Invocation) (any, error) {
+	accountName := exec.AccountName()
 	mode, err := slackAddMode(inv)
 	if err != nil {
 		return nil, err
@@ -22,22 +23,22 @@ func handleAdd(exec actions.Context, inv actions.Invocation) (any, error) {
 		if _, err := handleBrowserAuth(exec, inv); err != nil {
 			return nil, err
 		}
-		return authResult{Message: "added Slack toolbox using browser session auth for account " + account(inv)}, nil
+		return authResult{Message: "added Slack toolbox using browser session auth for toolbox " + accountName}, nil
 	case "token-cookie":
 		if _, err := handleAuthSet(exec, inv); err != nil {
 			return nil, err
 		}
-		return authResult{Message: "added Slack toolbox using token-cookie auth for account " + account(inv)}, nil
+		return authResult{Message: "added Slack toolbox using token-cookie auth for toolbox " + accountName}, nil
 	case "oauth":
 		if _, err := handleAuthLogin(exec, inv); err != nil {
 			return nil, err
 		}
-		return authResult{Message: "added Slack toolbox using user OAuth app auth for account " + account(inv)}, nil
+		return authResult{Message: "added Slack toolbox using user OAuth app auth for toolbox " + accountName}, nil
 	case "broker":
 		if _, err := handleBrokerLogin(exec, inv); err != nil {
 			return nil, err
 		}
-		return authResult{Message: "added Slack toolbox using brokered OAuth for account " + account(inv)}, nil
+		return authResult{Message: "added Slack toolbox using brokered OAuth for toolbox " + accountName}, nil
 	default:
 		return nil, fmt.Errorf("unsupported slack auth mode %q", mode)
 	}
@@ -81,10 +82,12 @@ func hasAnySecretFlag(inv actions.Invocation, name string) bool {
 }
 
 func handleRemove(exec actions.Context, inv actions.Invocation) (any, error) {
-	if err := exec.Credentials.DeleteOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv))); err != nil {
+	_ = inv
+	accountName := exec.AccountName()
+	if err := exec.Credentials.DeleteOAuthTokens(exec.Context, slackCredentialRef(exec, accountName)); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "removed Slack toolbox auth for account " + account(inv)}, nil
+	return authResult{Message: "removed Slack toolbox auth for toolbox " + accountName}, nil
 }
 
 func handleAuthSet(exec actions.Context, inv actions.Invocation) (any, error) {
@@ -123,10 +126,11 @@ func handleAuthSet(exec actions.Context, inv actions.Invocation) (any, error) {
 		return nil, err
 	}
 	validateProgress.Done("Slack auth verified")
-	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
+	accountName := exec.AccountName()
+	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, accountName), tokens); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "stored Slack token for account " + account(inv)}, nil
+	return authResult{Message: "stored Slack token for toolbox " + accountName}, nil
 }
 
 func handleBrowserAuth(exec actions.Context, inv actions.Invocation) (any, error) {
@@ -187,10 +191,11 @@ func handleBrowserAuth(exec actions.Context, inv actions.Invocation) (any, error
 		return nil, err
 	}
 	validateProgress.Done("Slack auth verified")
-	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
+	accountName := exec.AccountName()
+	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, accountName), tokens); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "stored Slack browser session for account " + account(inv)}, nil
+	return authResult{Message: "stored Slack browser session for toolbox " + accountName}, nil
 }
 
 func slackAuthEngine(value string) (slackauth.Engine, error) {
@@ -425,10 +430,11 @@ func handleAuthLogin(exec actions.Context, inv actions.Invocation) (any, error) 
 		return nil, err
 	}
 	validateProgress.Done("Slack auth verified")
-	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
+	accountName := exec.AccountName()
+	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, accountName), tokens); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "stored Slack OAuth token for account " + account(inv)}, nil
+	return authResult{Message: "stored Slack OAuth token for toolbox " + accountName}, nil
 }
 
 func handleBrokerLogin(exec actions.Context, inv actions.Invocation) (any, error) {
@@ -464,10 +470,11 @@ func handleBrokerLogin(exec actions.Context, inv actions.Invocation) (any, error
 		return nil, err
 	}
 	validateProgress.Done("Slack auth verified")
-	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, account(inv)), tokens); err != nil {
+	accountName := exec.AccountName()
+	if err := exec.Credentials.SaveOAuthTokens(exec.Context, slackCredentialRef(exec, accountName), tokens); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "stored brokered Slack OAuth token for account " + account(inv)}, nil
+	return authResult{Message: "stored brokered Slack OAuth token for toolbox " + accountName}, nil
 }
 
 func handleAuthTest(exec actions.Context, inv actions.Invocation) (any, error) {

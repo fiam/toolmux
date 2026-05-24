@@ -15,7 +15,10 @@ import (
 	"github.com/fiam/toolmux/internal/version"
 )
 
-const nativeProviderAnnotation = "toolmux.native.provider"
+const (
+	nativeProviderAnnotation = "toolmux.native.provider"
+	nativeToolboxAnnotation  = "toolmux.native.toolbox"
+)
 
 type options struct {
 	output             string
@@ -124,7 +127,6 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(workflowCommand(opts))
 	registerActionCommands(root, opts)
 	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
-	configureNativeActionHelp(root, opts)
 
 	return root
 }

@@ -25,7 +25,7 @@ func runGooglePicker(exec actions.Context, inv actions.Invocation, mimeType stri
 		return googlePickerResult{}, fmt.Errorf("browser opener is not configured")
 	}
 	mimeType = strings.TrimSpace(mimeType)
-	ref := googleCredentialRef(exec, account(inv))
+	ref := googleCredentialRef(exec, exec.AccountName())
 	existing, found, err := loadGoogleTokens(exec, ref)
 	if err != nil {
 		return googlePickerResult{}, err
@@ -206,7 +206,7 @@ func hydrateBrokeredGooglePickerFiles(exec actions.Context, tokens credentials.O
 }
 
 func saveGooglePickerTokens(exec actions.Context, inv actions.Invocation, existing, picker credentials.OAuthTokens) error {
-	ref := googleCredentialRef(exec, account(inv))
+	ref := googleCredentialRef(exec, exec.AccountName())
 	merged := mergeGooglePickerTokens(existing, picker)
 	merged.Extra = mergeExtra(merged.Extra, map[string]string{
 		"auth_type":  authTypeBroker,

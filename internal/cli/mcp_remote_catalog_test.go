@@ -206,8 +206,12 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.MCP.Servers["linear"].AuthRequired == nil || *config.MCP.Servers["linear"].AuthRequired {
-		t.Fatalf("expected no-auth server to record auth_required false, got %#v", config.MCP.Servers["linear"])
+	server, ok := configMCPRemoteServer(config, "linear")
+	if !ok {
+		t.Fatal("expected linear server config")
+	}
+	if server.AuthRequired == nil || *server.AuthRequired {
+		t.Fatalf("expected no-auth server to record auth_required false, got %#v", server)
 	}
 
 	listOutput := runRootForRemoteTest(t, env, "--color", "always", "mcp", "ls")

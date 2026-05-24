@@ -44,7 +44,7 @@ func mcpRemoteCallToolResultHasPayload(result mcpCallToolResult) bool {
 }
 
 func registerCachedMCPRemoteCommands(root *cobra.Command, opts *options) []mcpRemoteNameConflict {
-	entries, err := effectiveMCPRemoteServerEntries("")
+	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return nil
 	}

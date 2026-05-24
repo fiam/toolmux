@@ -12,7 +12,8 @@ import (
 )
 
 func slackClient(exec actions.Context, inv actions.Invocation) (slackapi.Client, error) {
-	tokens, err := loadSlackTokens(exec, account(inv))
+	_ = inv
+	tokens, err := loadSlackTokens(exec, exec.AccountName())
 	if err != nil {
 		return slackapi.Client{}, err
 	}

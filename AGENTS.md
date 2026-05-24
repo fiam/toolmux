@@ -205,9 +205,10 @@ Do not use live Slack workspaces as the default correctness signal.
 
 Google native-provider tests must exercise the preferred unified `google`
 namespace and the `google drive` command group against fake upstreams while
-sharing one local `google` OAuth credential bundle. Keep Google auth on
-Google's non-sensitive `drive.file` scope unless product requirements
-explicitly justify broader access. Cover brokered OAuth through `toolmuxd`,
+using one local Google OAuth credential bundle per registered toolbox name.
+Keep Google auth on Google's non-sensitive `drive.file` scope unless product
+requirements explicitly justify broader access. Cover brokered OAuth through
+`toolmuxd`,
 toolmuxd token exchange, local missing-scope failures before Google API calls,
 refresh-token preservation, and representative Drive API commands. Cover
 `toolmux google drive selected add/list/remove`,
@@ -246,7 +247,7 @@ must write only valid JSON-RPC messages to stdout; diagnostics belong on
 stderr. Native MCP tools must be generated from provider-owned `actions.Spec`
 metadata and must run the same policy and `--read-only` checks before provider
 credentials are read. Native provider tools should be listed only when that
-provider has stored auth for the active Toolmux profile. Do not add separate
+toolbox is registered in the merged Toolmux config. Do not add separate
 MCP-only provider command trees for native providers.
 
 `toolmux mcp configure` manages supported agent CLIs: Codex, Claude Code, and
@@ -265,10 +266,13 @@ MCP tool profiles are non-secret configuration under the general Toolmux config
 `mcp` key. Global config lives at `~/.toolmux/config.yaml`; project config
 lives in `.toolmux/config.yaml`. Inspect, initialize, and edit both with
 `toolmux config`; manage profile entries through `toolmux mcp profile`.
-Project config overrides global config for matching profile names and default
-profile selection, similar to Git config layering. The root `toolmux config`
-command is a CLI-only management surface and must never be listed as an MCP
-tool.
+Project config overrides global config for matching toolbox names, profile
+names, and default profile selection, similar to Git config layering. Native
+and remote toolbox registrations live under the top-level `toolboxes` key. The
+registered toolbox name is both the command namespace and the credential
+account identity, so native and remote providers can be registered multiple
+times with `--name`. The root `toolmux config` command is a CLI-only
+management surface and must never be listed as an MCP tool.
 Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
 regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
 and tests in sync when changing selection behavior.
@@ -289,12 +293,12 @@ with compact values such as `internal:slack`, `catalog:linear`, or a remote MCP
 URL, and missing requirements should be added automatically during
 `workflow init` and `workflow run` unless `--no-setup` is passed.
 
-Imported MCP servers are also managed under the general Toolmux `mcp`
-config key through `toolmux mcp`. Server definitions and cached
+Imported MCP servers are managed as `toolboxes` entries through `toolmux add`,
+`toolmux remove`, and `toolmux mcp`. Server definitions and cached
 `tools/list` metadata are non-secret; bearer tokens, OAuth tokens, refresh
-tokens, dynamic client secrets, manually supplied client secrets, and auth codes
-must live only in the credential store or transient process memory. Remote tool
-commands are generated from
+tokens, dynamic client secrets, manually supplied client secrets, and auth
+codes must live only in the credential store or transient process memory.
+Remote tool commands are generated from
 cached remote metadata under the registered server name, and they must run
 policy and `--read-only` checks before stored auth is read or remote HTTP calls
 are made. Remote server default arguments are non-secret config, must apply
@@ -313,21 +317,24 @@ Root MCP management commands such as `mcp ls`, `mcp show`, `mcp sync`,
 do not need policy metadata because they are not tools.
 Command-backed MCP servers use the `stdio` transport and are added with
 `toolmux add <command> [args...]` when the input is not a URL, catalog entry,
-or native toolbox. Use `--name` to override the derived namespace, `--stdio` or
-`--transport stdio` only to disambiguate a command name that matches a catalog
-or native toolbox, and `--` before command-owned flags. Stdio command
+or native toolbox. Use `--name` to choose the registered namespace/account,
+`--stdio` or `--transport stdio` only to disambiguate a command name that
+matches a catalog or native toolbox, and `--` before command-owned flags.
+Stdio command
 definitions are non-secret config, inherit the Toolmux process environment, do
-not use Toolmux-managed MCP OAuth or bearer tokens. Treat stdio tool calls as
-both remote-write and local-write for policy because the configured command can
-touch local
-files, caches, containers, browsers, or network services.
+not use Toolmux-managed MCP OAuth or bearer tokens, and must run policy before
+the configured process is started. Treat stdio tool calls as both remote-write
+and local-write for policy because the configured command can touch local files,
+caches, containers, browsers, or network services.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
 client registration when advertised; keep `--client-id` available for servers
-without registration. Top-level `toolmux add` registers remote MCP toolboxes
-from a built-in catalog name or MCP URL and syncs tools by default. When the
-first sync returns an auth-required response and no auth is stored, it must
-start MCP OAuth, store auth, retry sync, and only then write the server config.
+without registration. Top-level `toolmux add` registers native toolboxes,
+remote MCP toolboxes from a built-in catalog name or MCP URL, and syncs remote
+tools by default. `--name` is the only user-facing account selector. When the
+first remote sync returns an auth-required response and no auth is stored, it
+must start MCP OAuth, store auth, retry sync, and only then write the server
+config.
 Failed or cancelled OAuth must not leave a registered server behind. Keep
 `--no-sync` available for registration without auth or sync. Custom URL adds
 must use `toolmux add <url>` with `--name` when the derived name is not desired

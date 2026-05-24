@@ -10,7 +10,7 @@ import (
 )
 
 func handleGoogleTopAdd(exec actions.Context, inv actions.Invocation) (any, error) {
-	return handleGoogleAdd(exec, inv, googleProviderID, "Google", defaultDriveScopes)
+	return handleGoogleAdd(exec, inv, exec.Provider, "Google", defaultDriveScopes)
 }
 
 func handleGoogleAdd(exec actions.Context, inv actions.Invocation, toolbox, displayName string, defaultScopes []string) (any, error) {
@@ -21,20 +21,21 @@ func handleGoogleAdd(exec actions.Context, inv actions.Invocation, toolbox, disp
 	if err := requireGoogleDriveFileScopes(requestedScopes); err != nil {
 		return nil, err
 	}
-	ref := googleCredentialRef(exec, account(inv))
+	accountName := exec.AccountName()
+	ref := googleCredentialRef(exec, accountName)
 	existing, found, err := loadGoogleTokens(exec, ref)
 	if err != nil {
 		return nil, err
 	}
 	missing := oauthbroker.MissingScopes(existing.Scopes, requestedScopes)
 	if found && len(missing) == 0 {
-		return authResult{Message: googleAddMessage(displayName + " already has the requested Google OAuth scopes for account " + account(inv))}, nil
+		return authResult{Message: googleAddMessage(toolbox, displayName+" already has the requested Google OAuth scopes for toolbox "+accountName)}, nil
 	}
 	if exec.OpenBrowser == nil {
 		return nil, fmt.Errorf("browser opener is not configured")
 	}
 	sessionProgress := exec.StartProgress("Creating Google broker OAuth session")
-	session, err := createBrokerSession(exec, account(inv), requestedScopes)
+	session, err := createBrokerSession(exec, accountName, requestedScopes)
 	if err != nil {
 		sessionProgress.Warn("Google broker OAuth session failed")
 		return nil, err
@@ -59,11 +60,11 @@ func handleGoogleAdd(exec actions.Context, inv actions.Invocation, toolbox, disp
 	if err := exec.Credentials.SaveOAuthTokens(exec.Context, ref, tokens); err != nil {
 		return nil, err
 	}
-	return authResult{Message: googleAddMessage("added " + toolbox + " using Google brokered OAuth for account " + account(inv))}, nil
+	return authResult{Message: googleAddMessage(toolbox, "added "+toolbox+" using Google brokered OAuth")}, nil
 }
 
-func googleAddMessage(prefix string) string {
-	return prefix + "\nWith the default drive.file scope, existing Drive files are not accessible until the user selects them for Toolmux. Run `toolmux google drive selected add` to open Google Picker and save selected file IDs locally."
+func googleAddMessage(toolbox, prefix string) string {
+	return prefix + "\nWith the default drive.file scope, existing Drive files are not accessible until the user selects them for Toolmux. Run `toolmux " + toolbox + " drive selected add` to open Google Picker and save selected file IDs locally."
 }
 
 func requireBrokerMode(inv actions.Invocation, displayName string) error {
@@ -92,8 +93,9 @@ func requireGoogleDriveFileScopes(scopes []string) error {
 }
 
 func handleGoogleRemove(exec actions.Context, inv actions.Invocation) (any, error) {
-	if err := exec.Credentials.DeleteOAuthTokens(exec.Context, googleCredentialRef(exec, account(inv))); err != nil {
+	accountName := exec.AccountName()
+	if err := exec.Credentials.DeleteOAuthTokens(exec.Context, googleCredentialRef(exec, accountName)); err != nil {
 		return nil, err
 	}
-	return authResult{Message: "removed shared Google OAuth auth for account " + account(inv)}, nil
+	return authResult{Message: "removed shared Google OAuth auth for toolbox " + accountName}, nil
 }

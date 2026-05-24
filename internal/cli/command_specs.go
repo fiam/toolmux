@@ -42,7 +42,7 @@ func writeCatalog(cmd *cobra.Command, opts *options) error {
 }
 
 func allPolicyCommandSpecs(opts *options) []policy.CommandSpec {
-	specs := providers.CommandSpecs()
+	specs := nativePolicyCommandSpecs(opts)
 	specs = append(specs, cachedMCPRemoteCommandSpecs(opts)...)
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
@@ -76,7 +76,7 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 	inv := policy.Invocation{
 		Spec:       spec,
 		Profile:    opts.profile,
-		Account:    "default",
+		Account:    spec.Provider,
 		OutputMode: opts.output,
 		Args:       map[string]any{"argv": args},
 	}
@@ -88,7 +88,7 @@ func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool
 	if spec, ok := mcpRemoteSpecForCommandParts(opts, parts); ok {
 		return spec, true
 	}
-	for _, spec := range providers.CommandSpecs() {
+	for _, spec := range nativePolicyCommandSpecs(opts) {
 		if len(parts) >= len(spec.Path) && equalStrings(parts[:len(spec.Path)], spec.Path) {
 			return spec, true
 		}
@@ -96,14 +96,26 @@ func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool
 	return policy.CommandSpec{}, false
 }
 
-func actionExecutionContext(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) actions.Context {
+func nativePolicyCommandSpecs(opts *options) []policy.CommandSpec {
+	entries, err := effectiveNativeToolboxEntries(opts.workDir)
+	if err != nil {
+		return nil
+	}
+	var specs []policy.CommandSpec
+	for _, entry := range entries {
+		specs = append(specs, nativeToolboxActionSpecs(entry)...)
+	}
+	return specs
+}
+
+func actionExecutionContext(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider, account string) actions.Context {
 	return actions.Context{
 		Context:     ctx,
 		Credentials: store,
 		HTTPClient:  opts.httpClient,
 		Profile:     opts.profile,
-		Account:     "default",
-		Provider:    provider.ID,
+		Account:     account,
+		Provider:    account,
 		ProviderURL: opts.providerURL[provider.ID],
 		ProviderAPI: opts.providerAPI[provider.ID],
 		ToolmuxdURL: opts.toolmuxdURL,

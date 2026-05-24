@@ -85,7 +85,7 @@ func mcpRemoteAuthLoginCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
 			if err != nil {
 				return err
 			}

@@ -25,16 +25,17 @@ func googleClient(exec actions.Context, inv actions.Invocation, requiredScopes [
 }
 
 func googleTokens(exec actions.Context, inv actions.Invocation, requiredScopes []string) (credentials.OAuthTokens, error) {
-	ref := googleCredentialRef(exec, account(inv))
+	accountName := exec.AccountName()
+	ref := googleCredentialRef(exec, accountName)
 	tokens, found, err := loadGoogleTokens(exec, ref)
 	if err != nil {
 		return credentials.OAuthTokens{}, err
 	}
 	if !found {
-		return credentials.OAuthTokens{}, fmt.Errorf("google account %q is not authorized; run `toolmux add %s --account %s`", account(inv), exec.Provider, account(inv))
+		return credentials.OAuthTokens{}, fmt.Errorf("google toolbox %q is not authorized; run `toolmux add google --name %s`", exec.Provider, accountName)
 	}
 	if missing := oauthbroker.MissingScopes(tokens.Scopes, requiredScopes); len(missing) > 0 {
-		return credentials.OAuthTokens{}, fmt.Errorf("%s requires missing Google OAuth scope(s): %s; run `toolmux add %s --account %s`", exec.Provider, strings.Join(missing, ", "), exec.Provider, account(inv))
+		return credentials.OAuthTokens{}, fmt.Errorf("%s requires missing Google OAuth scope(s): %s; run `toolmux add google --name %s`", exec.Provider, strings.Join(missing, ", "), accountName)
 	}
 	if googleTokenNeedsRefresh(tokens, time.Now().UTC()) {
 		authType := firstNonEmpty(tokens.Extra["auth_type"], authTypeBroker)

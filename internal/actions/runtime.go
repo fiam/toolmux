@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/fiam/toolmux/internal/credentials"
@@ -53,6 +54,13 @@ type Context struct {
 	SelectString  func(context.Context, SelectStringRequest) (string, bool, error)
 	SelectInteger func(context.Context, SelectIntegerRequest) (int, bool, error)
 	Progress      ProgressReporter
+}
+
+func (ctx Context) AccountName() string {
+	if value := strings.TrimSpace(ctx.Account); value != "" {
+		return value
+	}
+	return ctx.Provider
 }
 
 type SelectStringRequest struct {

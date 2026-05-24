@@ -61,7 +61,7 @@ func parseSchemaToolArgs(args []string) (string, string, error) {
 }
 
 func lookupMCPRemoteToolForSchema(ctx context.Context, cmd *cobra.Command, opts *options, serverName, toolName string) (mcpRemoteToolRef, bool, error) {
-	entry, ok, err := lookupMCPRemoteServer(serverName, "")
+	entry, ok, err := lookupMCPRemoteServer(serverName, opts.workDir)
 	if err != nil {
 		return mcpRemoteToolRef{}, false, err
 	}

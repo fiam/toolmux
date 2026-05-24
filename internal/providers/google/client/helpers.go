@@ -18,13 +18,6 @@ func timeout(inv actions.Invocation) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func account(inv actions.Invocation) string {
-	if value := strings.TrimSpace(inv.String("account")); value != "" {
-		return value
-	}
-	return defaultAccount
-}
-
 func requiredString(inv actions.Invocation, name string) (string, error) {
 	value := strings.TrimSpace(inv.String(name))
 	if value == "" {

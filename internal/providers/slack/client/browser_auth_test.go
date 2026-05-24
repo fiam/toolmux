@@ -65,11 +65,11 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 		Credentials: store,
 		HTTPClient:  upstream.Client(),
 		Profile:     "default",
+		Account:     providerID,
 		Provider:    providerID,
 		ProviderURL: upstream.URL + "/api",
 		Progress:    progress,
 	}, actions.Invocation{Flags: map[string]any{
-		"account":         defaultAccount,
 		"auth":            "",
 		"from-browser":    "",
 		"workspace":       "https://acme.slack.com/",
@@ -99,7 +99,7 @@ func TestSlackAddWorkspaceUsesBrowserAuth(t *testing.T) { //nolint:paralleltest 
 	tokens, err := store.LoadOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  providerID,
-		AccountID: defaultAccount,
+		AccountID: providerID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -126,9 +126,9 @@ func TestSlackBrowserAuthRequiresWorkspace(t *testing.T) {
 		Context:     context.Background(),
 		Credentials: credentials.NewMemoryStore(),
 		Profile:     "default",
+		Account:     providerID,
 		Provider:    providerID,
 	}, actions.Invocation{Flags: map[string]any{
-		"account":         defaultAccount,
 		"auth":            "",
 		"from-browser":    "",
 		"workspace":       "",

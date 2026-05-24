@@ -39,40 +39,29 @@ func statusCommand(opts *options) *cobra.Command {
 		Short: "Show toolbox status",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			remoteArgs, nativeProviders := partitionNativeStatusArgs(args)
-			var selected []mcpRemoteServerEntry
-			if len(args) == 0 || len(remoteArgs) > 0 {
-				var err error
-				selected, err = selectedMCPRemoteEntries(remoteArgs)
-				if err != nil {
-					return err
-				}
+			selectedRemote, selectedNative, err := selectedToolboxEntries(opts, args)
+			if err != nil {
+				return err
 			}
-			includeDisconnectedNative := len(args) > 0
-			if len(args) == 0 {
-				nativeProviders = nativeStatusProviders()
-			}
-			statuses := make([]toolboxStatusItem, 0, len(selected)+len(nativeProviders))
-			if len(selected) > 0 || len(nativeProviders) > 0 {
+			statuses := make([]toolboxStatusItem, 0, len(selectedRemote)+len(selectedNative))
+			if len(selectedRemote) > 0 || len(selectedNative) > 0 {
 				store, err := opts.credentials()
 				if err != nil {
 					return err
 				}
-				for _, entry := range selected {
+				for _, entry := range selectedRemote {
 					status, err := readMCPRemoteToolboxStatus(commandContext(cmd), opts, store, entry)
 					if err != nil {
 						return err
 					}
 					statuses = append(statuses, status)
 				}
-				for _, provider := range nativeProviders {
-					status, err := readNativeToolboxStatus(commandContext(cmd), opts, store, provider)
+				for _, entry := range selectedNative {
+					status, err := readNativeToolboxStatus(commandContext(cmd), opts, store, entry)
 					if err != nil {
 						return err
 					}
-					if includeDisconnectedNative || nativeToolboxStatusRegistered(status) {
-						statuses = append(statuses, status)
-					}
+					statuses = append(statuses, status)
 				}
 			}
 			return writeValue(cmd, opts, statuses, func(w io.Writer) {
@@ -110,105 +99,71 @@ func nativeStatusProviders() []providers.Provider {
 	})
 }
 
-func nativeToolboxStatusRegistered(status toolboxStatusItem) bool {
-	return status.Status != "disconnected" || status.Auth != "none"
-}
-
-func registeredNativeProviders(ctx context.Context, opts *options) []providers.Provider {
-	store, err := opts.credentials()
+func selectedToolboxEntries(opts *options, args []string) ([]mcpRemoteServerEntry, []nativeToolboxEntry, error) {
+	remoteEntries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
-	all := nativeStatusProviders()
-	registered := make([]providers.Provider, 0, len(all))
-	for _, provider := range all {
-		ok, err := store.HasOAuthTokens(ctx, credentials.ConnectionRef{
-			Profile:   opts.profile,
-			Provider:  providers.CredentialProviderID(provider),
-			AccountID: "default",
-		})
-		if err == nil && ok {
-			registered = append(registered, provider)
-		}
-	}
-	return registered
-}
-
-func registeredNativeProviderSet(ctx context.Context, opts *options) map[string]bool {
-	registered := registeredNativeProviders(ctx, opts)
-	set := make(map[string]bool, len(registered))
-	for _, provider := range registered {
-		set[provider.ID] = true
-	}
-	return set
-}
-
-func partitionNativeStatusArgs(args []string) ([]string, []providers.Provider) {
-	if len(args) == 0 {
-		return nil, nil
-	}
-	remoteArgs := make([]string, 0, len(args))
-	nativeProviders := make([]providers.Provider, 0, len(args))
-	seenNative := map[string]bool{}
-	for _, arg := range args {
-		provider, ok := providers.Lookup(arg)
-		if ok && (provider.AddHandler != nil || provider.RemoveHandler != nil) {
-			if !seenNative[provider.ID] {
-				nativeProviders = append(nativeProviders, provider)
-				seenNative[provider.ID] = true
-			}
-			continue
-		}
-		remoteArgs = append(remoteArgs, arg)
-	}
-	return remoteArgs, nativeProviders
-}
-
-func selectedMCPRemoteEntries(args []string) ([]mcpRemoteServerEntry, error) {
-	entries, err := effectiveMCPRemoteServerEntries("")
+	nativeEntries, err := effectiveNativeToolboxEntries(opts.workDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(args) == 0 {
-		return entries, nil
+		return remoteEntries, nativeEntries, nil
 	}
-	selected := make([]mcpRemoteServerEntry, 0, len(args))
+	selectedRemote := make([]mcpRemoteServerEntry, 0, len(args))
+	selectedNative := make([]nativeToolboxEntry, 0, len(args))
 	seen := make(map[string]bool, len(args))
 	for _, arg := range args {
 		name, err := cleanMCPRemoteName(arg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if seen[name] {
 			continue
 		}
-		entry, ok := findMCPRemoteServerEntry(entries, name)
-		if !ok {
-			return nil, fmt.Errorf("toolbox %q is not registered", name)
+		if entry, ok := findMCPRemoteServerEntry(remoteEntries, name); ok {
+			selectedRemote = append(selectedRemote, entry)
+			seen[name] = true
+			continue
 		}
-		seen[name] = true
-		selected = append(selected, entry)
+		if entry, ok := findNativeToolboxEntry(nativeEntries, name); ok {
+			selectedNative = append(selectedNative, entry)
+			seen[name] = true
+			continue
+		}
+		return nil, nil, fmt.Errorf("toolbox %q is not registered", name)
 	}
-	return selected, nil
+	return selectedRemote, selectedNative, nil
 }
 
-func readNativeToolboxStatus(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) (toolboxStatusItem, error) {
-	item := toolboxStatusItem{
-		Name:      provider.ID,
-		Kind:      "native",
-		Status:    "disconnected",
-		Auth:      "none",
-		Scope:     "profile",
-		Scopes:    []string{opts.profile},
-		URL:       providerBaseURL(opts, provider),
-		Transport: "native",
+func findNativeToolboxEntry(entries []nativeToolboxEntry, name string) (nativeToolboxEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
+		}
 	}
-	tools := len(providers.ActionSpecs(provider))
+	return nativeToolboxEntry{}, false
+}
+
+func readNativeToolboxStatus(ctx context.Context, opts *options, store credentials.Store, entry nativeToolboxEntry) (toolboxStatusItem, error) {
+	item := toolboxStatusItem{
+		Name:      entry.Name,
+		Kind:      "native",
+		Status:    "needs_auth",
+		Auth:      "missing",
+		Scope:     entry.Scope,
+		Scopes:    entry.Scopes,
+		URL:       providerBaseURL(opts, entry.Provider),
+		Transport: "native",
+		Path:      entry.Path,
+	}
+	tools := len(nativeToolboxActionSpecs(entry))
 	item.Tools = &tools
 	tokens, err := store.LoadOAuthTokens(ctx, credentials.ConnectionRef{
 		Profile:   opts.profile,
-		Provider:  providers.CredentialProviderID(provider),
-		AccountID: "default",
+		Provider:  providers.CredentialProviderID(entry.Provider),
+		AccountID: entry.Name,
 	})
 	if err != nil {
 		if errors.Is(err, credentials.ErrNotFound) {
@@ -218,7 +173,7 @@ func readNativeToolboxStatus(ctx context.Context, opts *options, store credentia
 	}
 	item.Status = "connected"
 	item.Auth = nativeAuthLabel(tokens)
-	if missing := oauthbroker.MissingScopes(tokens.Scopes, provider.ConnectionScopes); len(missing) > 0 {
+	if missing := oauthbroker.MissingScopes(tokens.Scopes, entry.Provider.ConnectionScopes); len(missing) > 0 {
 		item.Status = "needs_auth"
 		item.Auth = "missing-scopes"
 	}

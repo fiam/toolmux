@@ -12,7 +12,6 @@ import (
 const (
 	sharedProviderID  = "google"
 	googleProviderID  = "google"
-	defaultAccount    = "default"
 	authTypeBroker    = "oauth_broker"
 	oauthRefreshSkew  = time.Minute
 	fileCacheExtraKey = "configured_files"
@@ -101,10 +100,6 @@ func GoogleDescriptor() providers.Provider {
 	}
 }
 
-func accountFlag() actions.Option {
-	return actions.StringFlag("account", defaultAccount, "Toolmux Google account name")
-}
-
 func pickerTimeoutFlag() actions.Option {
 	return actions.IntFlag("timeout-seconds", 120, "seconds to wait for Google Picker selection")
 }
@@ -119,7 +114,6 @@ func googleDriveToolWithEffects(localID, segment, short string, verb actions.Ver
 		actions.Description(driveToolDescription(segment, short)),
 		actions.RBAC(actions.ResourceName("file"), verb, remote, local),
 		actions.Scopes(defaultDriveScopes...),
-		accountFlag(),
 	}
 	base = append(base, opts...)
 	return actions.Command(actions.LocalName(localID), segment, base...)

@@ -93,7 +93,10 @@ Global config is `~/.toolmux/config.yaml`; project config is
 `.toolmux/config.yaml`. Inspect, initialize, and edit both with
 `toolmux config`; manage profile entries with `toolmux mcp profile`.
 Project config overrides global config for matching profile names and default
-profile selection.
+profile selection. Native and remote toolbox registrations live under the
+top-level `toolboxes` key. The registered toolbox name is both the command
+namespace and the credential account identity, so providers can be registered
+multiple times with `--name`.
 
 Workflow definitions are non-secret YAML. Global workflows live under
 `~/.toolmux/workflows`; project workflows live under `.toolmux/workflows`.
@@ -109,13 +112,13 @@ non-interactive sessions should fail. The no-agent form of
 `toolmux workflow config set default-agent` should also support an interactive
 selector.
 
-Imported MCP servers are also stored under the general Toolmux `mcp`
-config key, with non-secret server definitions in config and cached tool
-metadata in the user cache directory. Use top-level `toolmux add` to register
-remote MCP toolboxes from a catalog name or URL, or command-backed stdio
-toolboxes with `toolmux add <command> [args...]`; use `--name` to override
-the derived namespace, `--stdio` only to disambiguate a command name that
-matches a catalog or native toolbox, and `--` before command-owned flags; use
+Imported MCP servers are stored as `toolboxes` entries, with non-secret server
+definitions in config and cached tool metadata in the user cache directory.
+Use top-level `toolmux add` to register native toolboxes, remote MCP toolboxes
+from a catalog name or URL, or command-backed stdio toolboxes with
+`toolmux add <command> [args...]`; use `--name` to choose the registered
+namespace/account, `--stdio` only to disambiguate a command name that matches a
+catalog or native toolbox, and `--` before command-owned flags; use
 `toolmux mcp sync`,
 `toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
 `toolmux list`, and `toolmux mcp defaults` for MCP-specific server
@@ -125,7 +128,7 @@ arguments override configured defaults. MCP config write commands default to
 the global config; require `--project` for project-local writes. Server config
 should record `auth_required` after sync or auth setup when the requirement is
 known. Native toolbox help and MCP `tools/list` output should include only
-native providers with stored auth for the active Toolmux profile. Stdio MCP
+native providers registered in the merged Toolmux config. Stdio MCP
 toolboxes do not use Toolmux-managed MCP OAuth or bearer-token
 auth; configure auth through the command environment or command arguments. Use
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
@@ -327,7 +330,8 @@ Slack is the first native provider command set. Its client facet lives under
 `internal/providers/slack/slackapi`, and the toolmuxd broker facet lives under
 `internal/providers/slack/broker`. Slack tests must cover browser extraction
 flag routing, direct token+cookie auth, user-owned OAuth, brokered OAuth, token
-refresh, `toolmux add slack` flags, add-time `auth.test` validation failures,
+refresh, `toolmux add slack` flags, `--name`-based account identity, add-time
+`auth.test` validation failures,
 workspace URL enrichment, `toolmux remove slack`, and representative Web API
 commands against fake upstream servers. Slack tools that use undocumented
 web-session endpoints must be read-only, prefixed with `experimental_`,
@@ -340,8 +344,9 @@ For Slack broker testing, configure fake or local upstream endpoints through
 overrides, and `SLACK_SCOPES`.
 
 Google uses the native command namespace `google`, with a `drive` command
-group. Google stores one local OAuth bundle under the `google` credential
-provider. Its client facet lives under `internal/providers/google/client`, and
+group. Google stores one local OAuth bundle per registered toolbox name under
+the `google` credential provider. Its client facet lives under
+`internal/providers/google/client`, and
 shared Google REST/OAuth helpers live under
 `internal/providers/google/googleapi`. Google tests must cover brokered OAuth
 through `toolmuxd`, the default non-sensitive `drive.file`

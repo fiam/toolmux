@@ -66,13 +66,13 @@ func handleDriveSelectedRemove(exec actions.Context, inv actions.Invocation) (an
 	if fileID == "" {
 		return nil, fmt.Errorf("file ID is required")
 	}
-	ref := googleCredentialRef(exec, account(inv))
+	ref := googleCredentialRef(exec, exec.AccountName())
 	tokens, found, err := loadGoogleTokens(exec, ref)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("google account %q is not authorized; run `toolmux add %s --account %s`", account(inv), exec.Provider, account(inv))
+		return nil, fmt.Errorf("google toolbox %q is not authorized; run `toolmux add google --name %s`", exec.Provider, exec.AccountName())
 	}
 	files, removed := removeConfiguredGoogleFile(configuredGoogleFiles(tokens), fileID)
 	if !removed {

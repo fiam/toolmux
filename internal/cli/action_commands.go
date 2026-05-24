@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -13,68 +12,46 @@ import (
 )
 
 func registerActionCommands(root *cobra.Command, opts *options) {
-	for _, provider := range providers.All() {
-		if len(provider.Tree.Children) == 0 {
+	entries, err := effectiveNativeToolboxEntries(opts.workDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if len(entry.Provider.Tree.Children) == 0 {
 			continue
 		}
-		registerActionNode(root, opts, actions.ProviderName(provider.ID), provider.Tree, nil)
+		registerActionNode(root, opts, entry, nativeToolboxTree(entry), nil)
 	}
 }
 
-func registerActionNode(parent *cobra.Command, opts *options, provider actions.ProviderName, node actions.Spec, parentPath []string) {
-	resolved := actions.Resolve(provider, node, parentPath)
+func registerActionNode(parent *cobra.Command, opts *options, entry nativeToolboxEntry, node actions.Spec, parentPath []string) {
+	resolved := actions.Resolve(actions.ProviderName(entry.Name), node, parentPath)
 	if len(node.Children) > 0 {
 		group := actionGroupCommand(resolved)
-		annotateNativeActionCommand(group, provider)
+		annotateNativeActionCommand(group, entry)
 		parent.AddCommand(group)
 		for _, child := range node.Children {
-			registerActionNode(group, opts, provider, child, resolved.Path)
+			registerActionNode(group, opts, entry, child, resolved.Path)
 		}
 		return
 	}
 	if resolved.ID == "" {
 		return
 	}
-	cmd := actionCommand(opts, resolved)
-	annotateNativeActionCommand(cmd, provider)
+	cmd := actionCommand(opts, resolved, entry.Provider, nativeToolboxHandlerID(entry, resolved), entry.Name)
+	annotateNativeActionCommand(cmd, entry)
 	parent.AddCommand(cmd)
 }
 
-func annotateNativeActionCommand(cmd *cobra.Command, provider actions.ProviderName) {
+func annotateNativeActionCommand(cmd *cobra.Command, entry nativeToolboxEntry) {
 	if cmd.Annotations == nil {
 		cmd.Annotations = map[string]string{}
 	}
-	cmd.Annotations[nativeProviderAnnotation] = string(provider)
+	cmd.Annotations[nativeProviderAnnotation] = entry.Provider.ID
+	cmd.Annotations[nativeToolboxAnnotation] = entry.Name
 }
 
-func configureNativeActionHelp(root *cobra.Command, opts *options) {
-	defaultHelp := root.HelpFunc()
-	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		updateNativeActionCommandVisibility(commandContext(cmd), root, opts)
-		defaultHelp(cmd, args)
-	})
-	defaultUsage := root.UsageFunc()
-	root.SetUsageFunc(func(cmd *cobra.Command) error {
-		updateNativeActionCommandVisibility(commandContext(cmd), root, opts)
-		return defaultUsage(cmd)
-	})
-}
-
-func updateNativeActionCommandVisibility(ctx context.Context, root *cobra.Command, opts *options) {
-	if root == nil {
-		return
-	}
-	registered := registeredNativeProviderSet(ctx, opts)
-	for _, command := range root.Commands() {
-		providerID := command.Annotations[nativeProviderAnnotation]
-		if providerID == "" {
-			continue
-		}
-		command.Hidden = !registered[providerID]
-	}
-}
-
-func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
+func actionCommand(opts *options, spec policy.CommandSpec, provider providers.Provider, handlerID, account string) *cobra.Command {
 	use := spec.Use
 	if use == "" {
 		use = spec.Path[len(spec.Path)-1]
@@ -93,17 +70,13 @@ func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {
 			if err := authorize(cmd, opts, spec, args); err != nil {
 				return err
 			}
-			provider, ok := providers.Lookup(spec.Provider)
-			if !ok {
-				return fmt.Errorf("unknown provider %q for %s", spec.Provider, spec.ID)
-			}
-			handler, ok := providers.ActionHandler(provider, spec.ID)
+			handler, ok := providers.ActionHandler(provider, handlerID)
 			if ok {
 				store, err := opts.credentials()
 				if err != nil {
 					return err
 				}
-				execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
+				execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider, account)
 				execCtx.Interactive = interactiveCommand(cmd, opts)
 				if execCtx.OpenBrowser == nil && execCtx.Interactive {
 					execCtx.OpenBrowser = openURL

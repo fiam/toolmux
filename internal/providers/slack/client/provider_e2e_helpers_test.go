@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,10 +15,20 @@ import (
 	_ "github.com/fiam/toolmux/internal/providers/brokers/all"
 )
 
-func slackDeps(store credentials.Store, client *http.Client, upstreamURL string) cli.Dependencies {
+func slackDeps(t testing.TB, store credentials.Store, client *http.Client, upstreamURL string) cli.Dependencies {
+	t.Helper()
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, ".toolmux"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	config := []byte("version: 1\ntoolboxes:\n  slack:\n    type: internal\n    provider: slack\n")
+	if err := os.WriteFile(filepath.Join(workDir, ".toolmux", "config.yaml"), config, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return cli.Dependencies{
 		Credentials: store,
 		HTTPClient:  client,
+		WorkDir:     workDir,
 		ProviderURL: map[string]string{
 			"slack": upstreamURL + "/api",
 		},

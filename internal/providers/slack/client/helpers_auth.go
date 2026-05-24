@@ -49,14 +49,6 @@ func normalizeSlackCookieHeader(value string) string {
 	return "d=" + value
 }
 
-func account(inv actions.Invocation) string {
-	value := strings.TrimSpace(inv.String("account"))
-	if value == "" {
-		return defaultAccount
-	}
-	return value
-}
-
 func timeout(inv actions.Invocation) time.Duration {
 	seconds := inv.Int("timeout-seconds")
 	if seconds <= 0 {

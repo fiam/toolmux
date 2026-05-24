@@ -43,7 +43,7 @@ func createBrokerSession(exec actions.Context, inv actions.Invocation) (brokerSe
 	body := map[string]any{
 		"provider": providerID,
 		"profile":  exec.Profile,
-		"account":  account(inv),
+		"account":  exec.AccountName(),
 		"scopes":   scopes,
 	}
 	data, err := json.Marshal(body)

@@ -122,8 +122,15 @@ func validateMCPRemoteTransport(transport string) error {
 }
 
 func ensureMCPRemoteNameAvailable(root *cobra.Command, name string) error {
-	if root != nil && rootCommandHasName(root, name) {
+	if err := ensureToolboxNameAvailable(root, name); err != nil {
 		return fmt.Errorf("MCP server name %q conflicts with an existing Toolmux command; choose a different name", name)
+	}
+	return nil
+}
+
+func ensureToolboxNameAvailable(root *cobra.Command, name string) error {
+	if root != nil && rootCommandHasName(root, name) {
+		return fmt.Errorf("toolbox name %q conflicts with an existing Toolmux command; choose a different name", name)
 	}
 	return nil
 }
@@ -159,9 +166,13 @@ func rootNativeCommandHasName(root *cobra.Command, name string) bool {
 }
 
 func effectiveMCPRemoteServerEntries(startDir string) ([]mcpRemoteServerEntry, error) {
-	globalPath, err := globalToolmuxConfigPath()
-	if err != nil {
-		return nil, err
+	globalPath := ""
+	if startDir == "" {
+		var err error
+		globalPath, err = globalToolmuxConfigPath()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return effectiveMCPRemoteServerEntriesFromPaths(startDir, globalPath)
 }
@@ -173,13 +184,21 @@ func effectiveMCPRemoteServerEntriesFromPaths(startDir, globalPath string) ([]mc
 	}
 	byName := map[string]mcpRemoteServerEntry{}
 	for _, source := range sources {
-		names := make([]string, 0, len(source.config.MCP.Servers))
+		names := make([]string, 0, len(source.config.MCP.Servers)+len(source.config.Toolboxes))
 		for name := range source.config.MCP.Servers {
 			names = append(names, name)
 		}
+		for name, toolbox := range source.config.Toolboxes {
+			if toolbox.Type == toolboxTypeMCP && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
 		sort.Strings(names)
 		for _, name := range names {
-			server := normalizeMCPRemoteServer(source.config.MCP.Servers[name])
+			server, ok := configMCPRemoteServer(source.config, name)
+			if !ok {
+				continue
+			}
 			existing, exists := byName[name]
 			scopes := []string{source.Scope}
 			if exists {
@@ -232,12 +251,12 @@ func writeMCPRemoteAuthRequired(entry mcpRemoteServerEntry, required bool) error
 	if err != nil {
 		return err
 	}
-	server, exists := config.MCP.Servers[entry.Name]
+	server, exists := configMCPRemoteServer(config, entry.Name)
 	if !exists {
 		return fmt.Errorf("MCP server %q is not registered in %s", entry.Name, entry.Path)
 	}
 	server.AuthRequired = new(required)
-	config.MCP.Servers[entry.Name] = server
+	setConfigMCPRemoteServer(&config, entry.Name, server)
 	return writeToolmuxConfigFile(entry.Path, config)
 }
 

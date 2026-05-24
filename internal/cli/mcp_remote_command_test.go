@@ -62,7 +62,10 @@ func TestMCPStdioServerAddAndExposeTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := config.MCP.Servers["localmcp"]
+	server, ok := configMCPRemoteServer(config, "localmcp")
+	if !ok {
+		t.Fatal("expected localmcp server config")
+	}
 	if server.Transport != mcpRemoteTransportStdio || server.Command != os.Args[0] || len(server.Args) == 0 {
 		t.Fatalf("expected stdio command config, got %#v", server)
 	}
@@ -176,7 +179,11 @@ func TestToolboxAddURLDerivesNameAndSupportsCustomName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := config.MCP.Servers["linear"].URL; got != "https://mcp.linear.app/mcp" {
+	server, ok := configMCPRemoteServer(config, "linear")
+	if !ok {
+		t.Fatal("expected linear server config")
+	}
+	if got := server.URL; got != "https://mcp.linear.app/mcp" {
 		t.Fatalf("expected exact URL to be stored, got %q", got)
 	}
 
@@ -206,7 +213,11 @@ func TestToolboxAddCatalogNameStoresResolvedURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := config.MCP.Servers["linear-work"].URL; got != mcpBuiltinRemoteServers()["linear"].URL {
+	server, ok := configMCPRemoteServer(config, "linear-work")
+	if !ok {
+		t.Fatal("expected linear-work server config")
+	}
+	if got := server.URL; got != mcpBuiltinRemoteServers()["linear"].URL {
 		t.Fatalf("expected catalog add to store resolved URL, got %q", got)
 	}
 }
@@ -222,7 +233,10 @@ func TestToolboxAddInfersStdioCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := config.MCP.Servers["bar"]
+	server, ok := configMCPRemoteServer(config, "bar")
+	if !ok {
+		t.Fatal("expected bar server config")
+	}
 	if server.Transport != mcpRemoteTransportStdio || server.Command != "npx" {
 		t.Fatalf("expected inferred stdio command config, got %#v", server)
 	}
@@ -236,7 +250,7 @@ func TestToolboxAddStdioDisambiguatesCatalogName(t *testing.T) {
 
 	_, err := runRootForRemoteTestError(t, env, "add", "linear", "foo", "--no-sync", "--global")
 	if err == nil || !strings.Contains(err.Error(), "pass --stdio") {
-		t.Fatalf("expected catalog command ambiguity error, got %v", err)
+		t.Fatalf("expected toolbox command ambiguity error, got %v", err)
 	}
 
 	addOutput := runRootForRemoteTest(t, env, "add", "--stdio", "linear", "foo", "--name", "linearcmd", "--no-sync", "--global")
@@ -247,7 +261,10 @@ func TestToolboxAddStdioDisambiguatesCatalogName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := config.MCP.Servers["linearcmd"]
+	server, ok := configMCPRemoteServer(config, "linearcmd")
+	if !ok {
+		t.Fatal("expected linearcmd server config")
+	}
 	if server.Transport != mcpRemoteTransportStdio || server.Command != "linear" {
 		t.Fatalf("expected stdio command config, got %#v", server)
 	}

@@ -32,7 +32,7 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "added google using Google brokered OAuth")
 	upstream.assertAuthorization(t, []string{googleapi.ScopeDriveFile})
 
-	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "default"}
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
 	tokens, err := store.LoadOAuthTokens(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -108,8 +108,8 @@ func TestGoogleDriveReportsMissingScopeAfterDocsSensitiveOverride(t *testing.T) 
 	t.Parallel()
 	upstream := newFakeGoogleUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := googleDeps(store, upstream.Server.Client(), upstream.Server.URL)
-	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "default"}
+	deps := googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
 	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
 		AccessToken:  "ya29.docs",
 		RefreshToken: "refresh-google",
@@ -144,7 +144,7 @@ func TestGoogleDrivePickUsesBrokeredPickerByDefault(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Shared plan")
 	upstream.assertPickerMIME(t, "")
 
-	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "default"}
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
 	tokens, err := store.LoadOAuthTokens(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestGoogleDriveFilesCopyCopiesAccessibleFile(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeGoogleUpstream(t)
 	store := credentials.NewMemoryStore()
-	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "default"}
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
 	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
 		AccessToken:  "ya29.drive",
 		RefreshToken: "refresh-google",
@@ -197,7 +197,7 @@ func TestGoogleDriveFilesCopyCopiesAccessibleFile(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	deps := googleDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 
 	out := toolmuxtest.Run(t, deps, "google", "drive", "files", "copy", "https://docs.google.com/document/d/doc-1/edit", "--name", "Copied plan")
 	toolmuxtest.AssertContains(t, out, "doc-copy")

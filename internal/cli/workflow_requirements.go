@@ -56,16 +56,19 @@ func ensureWorkflowRequirement(cmd *cobra.Command, opts *options, store credenti
 		if !ok {
 			return fmt.Errorf("workflow requires unknown internal toolbox %q", name)
 		}
-		ref := credentials.ConnectionRef{Profile: opts.profile, Provider: provider.ID, AccountID: "default"}
-		if _, err := store.LoadOAuthTokens(commandContext(cmd), ref); err == nil {
+		if _, ok, err := lookupNativeToolboxEntry(name, opts.workDir); err != nil {
+			return err
+		} else if ok {
 			return nil
-		} else if !errors.Is(err, credentials.ErrNotFound) {
+		}
+		ref := credentials.ConnectionRef{Profile: opts.profile, Provider: providers.CredentialProviderID(provider), AccountID: name}
+		if _, err := store.LoadOAuthTokens(commandContext(cmd), ref); err != nil && !errors.Is(err, credentials.ErrNotFound) {
 			return err
 		}
 		if provider.AddHandler == nil {
 			return fmt.Errorf("workflow requires %s; run `toolmux add %s` first", value, name)
 		}
-		if handled, err := addNativeToolbox(cmd, opts, name, nativeToolboxAddOptions{}, []string{name}); err != nil {
+		if handled, err := addNativeToolbox(cmd, opts, name, nativeToolboxAddOptions{Name: name}, []string{name}); err != nil {
 			return fmt.Errorf("workflow requires %s: automatic toolbox add failed: %w", value, err)
 		} else if !handled {
 			return fmt.Errorf("workflow requires %s; run `toolmux add %s` first", value, name)

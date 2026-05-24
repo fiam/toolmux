@@ -44,7 +44,7 @@ func mcpRemoteDefaultsListCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,7 @@ func mcpRemoteDefaultsSetCommand(opts *options) *cobra.Command {
 				target.Server.DefaultArguments = map[string]any{}
 			}
 			target.Server.DefaultArguments[key] = value
-			target.Config.MCP.Servers[name] = target.Server
+			setConfigMCPRemoteServer(&target.Config, name, target.Server)
 			if err := writeToolmuxConfigFile(target.Path, target.Config); err != nil {
 				return err
 			}
@@ -135,7 +135,7 @@ func mcpRemoteDefaultsRemoveCommand(opts *options) *cobra.Command {
 			if len(target.Server.DefaultArguments) == 0 {
 				target.Server.DefaultArguments = nil
 			}
-			target.Config.MCP.Servers[name] = target.Server
+			setConfigMCPRemoteServer(&target.Config, name, target.Server)
 			if err := writeToolmuxConfigFile(target.Path, target.Config); err != nil {
 				return err
 			}
@@ -163,10 +163,7 @@ func mcpRemoteDefaultArgumentsWriteTargetForScope(name string, scope mcpProfileS
 	if err != nil && (!createFromEffective || !errors.Is(err, os.ErrNotExist)) {
 		return mcpRemoteDefaultArgumentsWriteTarget{}, err
 	}
-	if config.MCP.Servers == nil {
-		config.MCP.Servers = map[string]mcpRemoteServer{}
-	}
-	server, exists := config.MCP.Servers[name]
+	server, exists := configMCPRemoteServer(config, name)
 	if !exists {
 		if !createFromEffective {
 			return mcpRemoteDefaultArgumentsWriteTarget{}, fmt.Errorf("MCP server %q is not registered in %s", name, configPath)

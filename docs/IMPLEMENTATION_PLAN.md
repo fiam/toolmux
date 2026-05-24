@@ -506,11 +506,12 @@ Deliverables:
 1. toolmuxd session API.
 2. toolmuxd provider secret config via environment variables.
 3. Short-lived, single-use, in-memory token handoff.
-4. Remote MCP registration, auth, sync, catalog, and cached command execution.
-5. Catalog entries for remote MCP providers:
+4. Remote MCP registration, auth, sync, toolbox listing, and cached command
+   execution.
+5. Built-in remote MCP entries:
 
 ```bash
-toolmux catalog --enable notion
+toolmux add notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
 toolmux notion

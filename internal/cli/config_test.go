@@ -77,11 +77,11 @@ func TestConfigShowMergesGlobalAndProject(t *testing.T) {
 	if _, ok := merged.MCP.Profiles["project-only"]; !ok {
 		t.Fatalf("expected project profile, got %#v", merged.MCP.Profiles)
 	}
-	if _, ok := merged.MCP.Servers["linear"]; !ok {
-		t.Fatalf("expected global server, got %#v", merged.MCP.Servers)
+	if toolbox, ok := merged.Toolboxes["linear"]; !ok || toolbox.Type != toolboxTypeMCP {
+		t.Fatalf("expected global toolbox, got %#v", merged.Toolboxes)
 	}
-	if _, ok := merged.MCP.Servers["notion"]; !ok {
-		t.Fatalf("expected project server, got %#v", merged.MCP.Servers)
+	if toolbox, ok := merged.Toolboxes["notion"]; !ok || toolbox.Type != toolboxTypeMCP {
+		t.Fatalf("expected project toolbox, got %#v", merged.Toolboxes)
 	}
 	if merged.Workflows.DefaultAgent != "project-agent" {
 		t.Fatalf("expected project workflow default, got %#v", merged.Workflows.DefaultAgent)

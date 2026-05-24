@@ -19,7 +19,7 @@ func mcpRemoteCatalogDisplayName(name, displayName string) string {
 }
 
 func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCatalogEntry, error) {
-	registered, err := effectiveMCPRemoteServerEntries("")
+	registered, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return nil, err
 	}

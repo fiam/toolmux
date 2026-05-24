@@ -174,8 +174,13 @@ func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
 
 func (server mcpServer) mcpSpecs(ctx context.Context) []actions.Spec {
 	var specs []actions.Spec
-	for _, provider := range registeredNativeProviders(ctx, server.opts) {
-		specs = append(specs, providers.ActionSpecs(provider)...)
+	_ = ctx
+	entries, err := effectiveNativeToolboxEntries(server.opts.workDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		specs = append(specs, nativeToolboxActionSpecs(entry)...)
 	}
 	specs = slices.DeleteFunc(specs, func(spec actions.Spec) bool {
 		return !server.selector.matches(spec)
@@ -317,11 +322,14 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if err := authorize(server.cmd, server.opts, spec, arguments.args); err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	provider, ok := providers.Lookup(spec.Provider)
-	if !ok {
-		return mcpCallToolResult{}, mcpError{Code: -32602, Message: "unknown provider " + spec.Provider + " for " + spec.ID}
+	entry, ok, err := lookupNativeToolboxEntry(spec.Provider, server.opts.workDir)
+	if err != nil {
+		return mcpErrorToolResult(err), nil
 	}
-	handler, ok := providers.ActionHandler(provider, spec.ID)
+	if !ok {
+		return mcpCallToolResult{}, mcpError{Code: -32602, Message: "unknown toolbox " + spec.Provider + " for " + spec.ID}
+	}
+	handler, ok := providers.ActionHandler(entry.Provider, nativeToolboxHandlerID(entry, spec))
 	if !ok {
 		return mcpErrorToolResult(fmt.Errorf("%s is not implemented", spec.ID)), nil
 	}
@@ -329,7 +337,7 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	execCtx := actionExecutionContext(ctx, server.opts, store, provider)
+	execCtx := actionExecutionContext(ctx, server.opts, store, entry.Provider, entry.Name)
 	execCtx.Interactive = false
 	if execCtx.OpenBrowser == nil && spec.Action == string(actions.VerbOpen) {
 		execCtx.OpenBrowser = openURL

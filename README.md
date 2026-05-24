@@ -5,9 +5,9 @@
 # Toolmux
 
 Toolmux connects services to your local agents and gives you the same tools as
-a normal CLI. Add Slack, Google, or a remote MCP server once, configure your
-agent once, then ask the agent to use those tools without copying tokens into
-prompts.
+a normal CLI. Register Slack, Google, or a remote MCP server once, configure
+your agent once, then ask the agent to use those tools without copying tokens
+into prompts.
 
 Toolmux is built around four ideas:
 
@@ -121,9 +121,16 @@ channel.
 
 ## Slack
 
-Slack is a native Toolmux toolbox under `toolmux slack`.
-Native toolbox commands and MCP tools are shown only after that toolbox has
-auth stored for the active Toolmux profile.
+Slack is a native Toolmux toolbox under the registered toolbox name, usually
+`toolmux slack`. Native toolbox commands and MCP tools are shown when the
+toolbox is registered in config. The registered name is also the credential
+account identity, so multiple Slack workspaces can be added with distinct
+names:
+
+```bash
+toolmux add slack --name slack-work --auth broker
+toolmux add slack --name slack-personal --auth broker
+```
 
 Common setup options:
 
@@ -191,11 +198,17 @@ Run `toolmux slack --help` for the command list and per-tool flags.
 Google is a native Toolmux toolbox focused on Google Drive.
 
 Google uses brokered OAuth through `toolmuxd` and stores one local Google OAuth
-bundle in the OS credential store. The default and only supported scope is the
+bundle per registered toolbox name in the OS credential store. The default and
+only supported scope is the
 non-sensitive `drive.file` scope, which lets Toolmux create files and access
 files the user explicitly opens for the app.
-Native Google commands and MCP tools are shown only after Google auth exists
-for the active Toolmux profile.
+Native Google commands and MCP tools are shown when the toolbox is registered
+in config. The registered name is also the credential account identity:
+
+```bash
+toolmux add google --name google-work
+toolmux add google --name google-personal
+```
 
 ```bash
 toolmux google drive selected add
@@ -471,7 +484,10 @@ Project config lives in:
 .toolmux/config.yaml
 ```
 
-MCP server definitions and cached tool metadata are non-secret config.
+Registered toolbox definitions, MCP server details, and cached tool metadata
+are non-secret config. Native and remote toolboxes are stored under the
+top-level `toolboxes` key; the map key is the registered command namespace and
+the credential account identity.
 Provider tokens, OAuth tokens, refresh tokens, bearer tokens, auth codes,
 client secrets, and Slack token-cookie credentials are stored only in the OS
 credential store or transient process memory.

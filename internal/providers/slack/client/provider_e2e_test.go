@@ -22,7 +22,7 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 
 	out := toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 	toolmuxtest.AssertContains(t, out, "added Slack toolbox using token-cookie auth")
@@ -30,7 +30,7 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 	tokens, err := store.LoadOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "slack",
-		AccountID: "default",
+		AccountID: "slack",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,10 +68,10 @@ func TestSlackDirectTokenCookieE2E(t *testing.T) {
 
 func TestSlackAppearsInInternalCatalog(t *testing.T) {
 	t.Parallel()
-	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
+	deps := slackDeps(t, credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
 
 	out := toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"slack", "internal", "disconnected"} {
+	for _, want := range []string{"slack", "internal", "needs_auth"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "linear") {
@@ -83,7 +83,7 @@ func TestSlackAuthTestReturnsCurrentUser(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 
 	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "auth_test")
@@ -95,7 +95,7 @@ func TestSlackHistoryAndRepliesSupportTimeBounds(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 
 	out := toolmuxtest.Run(t, deps,
@@ -141,7 +141,7 @@ func TestSlackAddFailsWhenAuthTestFails(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 
 	result := toolmuxtest.RunResult(t, deps, "add", "slack", "--token", "bad-token", "--cookie", "xoxd")
 	if result.Err == nil {
@@ -153,7 +153,7 @@ func TestSlackAddFailsWhenAuthTestFails(t *testing.T) {
 	_, err := store.LoadOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "slack",
-		AccountID: "default",
+		AccountID: "slack",
 	})
 	if !errors.Is(err, credentials.ErrNotFound) {
 		t.Fatalf("expected invalid Slack auth not to be stored, got %v", err)
@@ -164,11 +164,11 @@ func TestSlackCommandEnrichesLegacyAuthWithTeamURL(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	ref := credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "slack",
-		AccountID: "default",
+		AccountID: "slack",
 	}
 	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
 		AccessToken: "xoxc-direct",
@@ -197,7 +197,7 @@ func TestSlackUserOAuthE2ERefreshesAndSearches(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	deps.OpenBrowser = followURL(upstream.Server.Client())
 
 	out := toolmuxtest.Run(t, deps,
@@ -235,7 +235,7 @@ func TestSlackBrokerOAuthE2ERefreshesAndListsConversations(t *testing.T) {
 		},
 		HTTPClient: upstream.Server.Client(),
 	})
-	deps := slackDeps(store, toolmuxd.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, toolmuxd.Client(), upstream.Server.URL)
 	deps.ToolmuxdURL = toolmuxd.URL
 	deps.OpenBrowser = followURL(toolmuxd.Client())
 
@@ -252,7 +252,7 @@ func TestSlackBrokerOAuthE2ERefreshesAndListsConversations(t *testing.T) {
 func TestSlackSendDryRunDoesNotReadCredentials(t *testing.T) {
 	t.Parallel()
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, http.DefaultClient, "https://slack.example.test")
+	deps := slackDeps(t, store, http.DefaultClient, "https://slack.example.test")
 
 	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "conversations_add_message", "--channel_id", "C123", "--text", "hello", "--dry-run")
 	toolmuxtest.AssertContains(t, out, `"dry_run": true`)
@@ -263,7 +263,7 @@ func TestSlackConversationsOpenReturnsDMChannel(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 
 	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "conversations_open", "--user_id", "U123")
@@ -273,7 +273,7 @@ func TestSlackConversationsOpenReturnsDMChannel(t *testing.T) {
 
 func TestSlackAuthSetupSubcommandsAreNotExposed(t *testing.T) {
 	t.Parallel()
-	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
+	deps := slackDeps(t, credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
 
 	out := toolmuxtest.Run(t, deps, "slack", "--help")
 	for _, command := range []string{"auth_login", "auth_set", "broker_login"} {
@@ -324,11 +324,11 @@ func TestSlackSearchMessagesExposedOverMCPServe(t *testing.T) {
 	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "slack",
-		AccountID: "default",
+		AccountID: "slack",
 	}, credentials.OAuthTokens{AccessToken: "xoxb-test"}); err != nil {
 		t.Fatal(err)
 	}
-	deps := slackDeps(store, http.DefaultClient, "https://slack.example.test")
+	deps := slackDeps(t, store, http.DefaultClient, "https://slack.example.test")
 
 	out := runToolmuxWithInput(t, deps,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
@@ -343,13 +343,13 @@ func TestSlackCredentialRefUsesDefaultProfile(t *testing.T) {
 	t.Parallel()
 	upstream := newFakeSlackUpstream(t)
 	store := credentials.NewMemoryStore()
-	deps := slackDeps(store, upstream.Server.Client(), upstream.Server.URL)
+	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 
 	_, err := store.LoadOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "slack",
-		AccountID: "default",
+		AccountID: "slack",
 	})
 	if err != nil {
 		t.Fatal(err)

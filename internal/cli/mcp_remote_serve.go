@@ -51,7 +51,7 @@ func cachedMCPRemoteCommandSpecs(opts *options) []policy.CommandSpec {
 	if opts == nil {
 		return nil
 	}
-	refs := mcpRemoteToolRefs(opts.mcpCacheDir)
+	refs := mcpRemoteToolRefs(opts)
 	specs := make([]policy.CommandSpec, 0, len(refs))
 	for _, ref := range refs {
 		specs = append(specs, mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool))
@@ -66,7 +66,7 @@ func mcpRemoteSpecForCommandParts(opts *options, parts []string) (policy.Command
 	if opts == nil || len(parts) < 2 {
 		return policy.CommandSpec{}, false
 	}
-	for _, ref := range mcpRemoteToolRefs(opts.mcpCacheDir) {
+	for _, ref := range mcpRemoteToolRefs(opts) {
 		if ref.Entry.Name == parts[0] && ref.Tool.Name == parts[1] {
 			return mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool), true
 		}
@@ -128,14 +128,17 @@ func (server mcpServer) remoteMCPToolRefs(ctx context.Context) []mcpRemoteToolRe
 	return mcpRemoteToolRefsWithRefresh(ctx, server.cmd, server.opts)
 }
 
-func mcpRemoteToolRefs(cacheDir string) []mcpRemoteToolRef {
-	entries, err := effectiveMCPRemoteServerEntries("")
+func mcpRemoteToolRefs(opts *options) []mcpRemoteToolRef {
+	if opts == nil {
+		return nil
+	}
+	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return nil
 	}
 	var refs []mcpRemoteToolRef
 	for _, entry := range entries {
-		cache, ok, err := readMCPRemoteCacheIfExists(cacheDir, entry.Name)
+		cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
 		if err != nil || !ok {
 			continue
 		}
@@ -147,7 +150,7 @@ func mcpRemoteToolRefs(cacheDir string) []mcpRemoteToolRef {
 }
 
 func mcpRemoteToolRefsWithRefresh(ctx context.Context, cmd *cobra.Command, opts *options) []mcpRemoteToolRef {
-	entries, err := effectiveMCPRemoteServerEntries("")
+	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return nil
 	}
@@ -267,7 +270,7 @@ func mcpRemoteCredentialRef(opts *options, name string) credentials.ConnectionRe
 		Profile:   opts.profile,
 		Provider:  mcpRemoteCredentialProvider,
 		Service:   name,
-		AccountID: "default",
+		AccountID: name,
 	}
 }
 

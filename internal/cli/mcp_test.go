@@ -76,10 +76,19 @@ func TestMCPToolsListShowsOnlyRegisteredNativeTools(t *testing.T) {
 	t.Parallel()
 
 	store := credentials.NewMemoryStore()
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"google": {Type: toolboxTypeInternal, Provider: "google"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "google",
-		AccountID: "default",
+		AccountID: "google",
 	}, credentials.OAuthTokens{
 		AccessToken: "google-access",
 		TokenType:   "Bearer",
@@ -88,7 +97,7 @@ func TestMCPToolsListShowsOnlyRegisteredNativeTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store, WorkDir: workDir})
 	out := &bytes.Buffer{}
 	cmd.SetIn(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"))
 	cmd.SetOut(out)

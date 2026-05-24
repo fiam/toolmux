@@ -11,6 +11,7 @@ import (
 
 	"github.com/fiam/toolmux/internal/credentials"
 	"github.com/fiam/toolmux/internal/output"
+	"github.com/fiam/toolmux/internal/providers"
 )
 
 func mcpRemoteCatalogDefinitionForServer(serverName string, server mcpRemoteServer) (string, mcpRemoteCatalogDefinition, bool) {
@@ -82,7 +83,7 @@ func toolboxCatalogEntries(ctx context.Context, root *cobra.Command, opts *optio
 	}
 	entries := []toolboxCatalogEntry{}
 	if includeMCP {
-		registeredEntries, err := effectiveMCPRemoteServerEntries("")
+		registeredEntries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 		if err != nil {
 			return nil, err
 		}
@@ -151,24 +152,61 @@ func toolboxCatalogIncludes(filters toolboxCatalogFilters) (bool, bool) {
 
 func internalCatalogEntries(ctx context.Context, opts *options, store credentials.Store) ([]toolboxCatalogEntry, error) {
 	providerList := nativeStatusProviders()
+	registeredEntries, err := effectiveNativeToolboxEntries(opts.workDir)
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]toolboxCatalogEntry, 0, len(providerList))
 	for _, provider := range providerList {
-		status, err := readNativeToolboxStatus(ctx, opts, store, provider)
-		if err != nil {
-			return nil, err
+		matches := nativeToolboxEntriesForProvider(registeredEntries, provider.ID)
+		status := toolboxStatusItem{
+			Name:      provider.ID,
+			Status:    "available",
+			URL:       providerBaseURL(opts, provider),
+			Transport: "native",
 		}
+		if len(matches) > 0 {
+			status, err = readNativeToolboxStatus(ctx, opts, store, matches[0])
+			if err != nil {
+				return nil, err
+			}
+		}
+		registeredNames := make([]string, 0, len(matches))
+		scopes := []string{}
+		for _, match := range matches {
+			registeredNames = append(registeredNames, match.Name)
+			for _, scope := range match.Scopes {
+				scopes = appendScope(scopes, scope)
+			}
+		}
+		sort.Strings(registeredNames)
+		sort.Strings(scopes)
+		tools := len(providers.ActionSpecs(provider))
 		entries = append(entries, toolboxCatalogEntry{
-			Name:       provider.ID,
-			Type:       "internal",
-			Status:     status.Status,
-			Registered: nativeToolboxStatusRegistered(status),
-			Command:    provider.ID,
-			Tools:      status.Tools,
-			URL:        status.URL,
-			Transport:  status.Transport,
+			Name:            provider.ID,
+			Type:            "internal",
+			Status:          status.Status,
+			Registered:      len(matches) > 0,
+			RegisteredNames: registeredNames,
+			Command:         output.JoinList(registeredNames),
+			Scope:           status.Scope,
+			Scopes:          scopes,
+			Tools:           &tools,
+			URL:             status.URL,
+			Transport:       status.Transport,
 		})
 	}
 	return entries, nil
+}
+
+func nativeToolboxEntriesForProvider(entries []nativeToolboxEntry, providerID string) []nativeToolboxEntry {
+	matches := []nativeToolboxEntry{}
+	for _, entry := range entries {
+		if entry.Provider.ID == providerID {
+			matches = append(matches, entry)
+		}
+	}
+	return matches
 }
 
 func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, entries []toolboxCatalogEntry) {

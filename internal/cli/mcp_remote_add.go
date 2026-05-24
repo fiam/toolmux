@@ -39,6 +39,8 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 				NoSync:      noSync,
 				VerboseHTTP: verboseHTTP,
 			}
+			native.Scope = scope
+			native.Name = nameFlag
 			if !add.ExplicitStdio() && len(commandArgs) == 0 {
 				if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
 					return err
@@ -72,7 +74,8 @@ func (add mcpRemoteToolboxAddOptions) ExplicitStdio() bool {
 }
 
 type nativeToolboxAddOptions struct {
-	Account         string
+	Scope           mcpProfileScopeOptions
+	Name            string
 	Auth            string
 	Token           string
 	TokenEnv        string
@@ -96,7 +99,6 @@ type nativeToolboxAddOptions struct {
 }
 
 func addNativeToolboxAddFlags(cmd *cobra.Command, opts *nativeToolboxAddOptions) {
-	cmd.Flags().StringVar(&opts.Account, "account", "default", "native provider account name")
 	cmd.Flags().StringVar(&opts.Auth, "auth", "", "native provider auth mode: broker, browser, oauth, token, or token-cookie")
 	cmd.Flags().StringVar(&opts.Token, "token", "", "provider access token to store")
 	cmd.Flags().StringVar(&opts.TokenEnv, "token-env", "", "environment variable containing the provider access token")
@@ -124,11 +126,38 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 	if !ok || provider.AddHandler == nil {
 		return false, nil
 	}
+	name := provider.ID
+	if strings.TrimSpace(native.Name) != "" {
+		var err error
+		name, err = cleanMCPRemoteName(native.Name)
+		if err != nil {
+			return true, err
+		}
+	}
+	alreadyRegistered := false
+	if existing, exists, err := lookupNativeToolboxEntry(name, opts.workDir); err != nil {
+		return true, err
+	} else if exists {
+		if existing.Provider.ID != provider.ID {
+			return true, fmt.Errorf("toolbox %q is already registered for provider %s", name, existing.Provider.ID)
+		}
+		alreadyRegistered = true
+	}
+	if _, exists, err := lookupMCPRemoteServer(name, opts.workDir); err != nil {
+		return true, err
+	} else if exists {
+		return true, fmt.Errorf("toolbox %q is already registered", name)
+	}
+	if !alreadyRegistered {
+		if err := ensureToolboxNameAvailable(cmd.Root(), name); err != nil {
+			return true, err
+		}
+	}
 	store, err := opts.credentials()
 	if err != nil {
 		return true, err
 	}
-	execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
+	execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider, name)
 	execCtx.Interactive = interactiveCommand(cmd, opts)
 	if execCtx.OpenBrowser == nil && execCtx.Interactive {
 		execCtx.OpenBrowser = openURL
@@ -143,6 +172,22 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 	})
 	if err != nil {
 		return true, err
+	}
+	if !alreadyRegistered {
+		configPath, scopeName, err := toolmuxConfigWritePath(native.Scope, opts.workDir)
+		if err != nil {
+			return true, err
+		}
+		config, err := readToolmuxConfigFile(configPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return true, err
+		}
+		config.Version = 1
+		setConfigNativeToolbox(&config, name, provider)
+		if err := writeToolmuxConfigFile(configPath, config); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "registered %s toolbox %s in %s\n", scopeName, name, configPath)
 	}
 	return true, writeActionResult(cmd, opts, execCtx, result)
 }
@@ -160,13 +205,13 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if config.MCP.Servers == nil {
-		config.MCP.Servers = map[string]mcpRemoteServer{}
-	}
-	if _, exists := config.MCP.Servers[name]; exists {
+	if _, exists := configMCPRemoteServer(config, name); exists {
 		return fmt.Errorf("MCP server %q is already registered in %s", name, configPath)
 	}
-	if _, exists, err := lookupMCPRemoteServer(name, ""); err != nil {
+	if toolbox, exists := config.Toolboxes[name]; exists && toolbox.Type != toolboxTypeMCP {
+		return fmt.Errorf("toolbox %q is already registered in %s", name, configPath)
+	}
+	if _, exists, err := lookupMCPRemoteServer(name, opts.workDir); err != nil {
 		return err
 	} else if exists {
 		return fmt.Errorf("MCP server %q is already registered; use `toolmux mcp rename %s <new-name>` first", name, name)
@@ -183,7 +228,7 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 	}
 	register := func() error {
 		config.Version = 1
-		config.MCP.Servers[name] = server
+		setConfigMCPRemoteServer(&config, name, server)
 		if err := writeToolmuxConfigFile(configPath, config); err != nil {
 			return err
 		}
@@ -216,7 +261,6 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 
 func nativeToolboxAddFlagValues(opts nativeToolboxAddOptions) map[string]any {
 	return map[string]any{
-		"account":           opts.Account,
 		"auth":              opts.Auth,
 		"token":             opts.Token,
 		"token-env":         opts.TokenEnv,

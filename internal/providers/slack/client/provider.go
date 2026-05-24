@@ -11,7 +11,6 @@ import (
 
 const (
 	providerID       = "slack"
-	defaultAccount   = "default"
 	authTypeDirect   = "token_cookie"
 	authTypeUser     = "oauth_user"
 	authTypeBroker   = "oauth_broker"
@@ -216,16 +215,11 @@ func Descriptor() providers.Provider {
 	}
 }
 
-func accountFlag() actions.Option {
-	return actions.StringFlag("account", defaultAccount, "Toolmux Slack account name")
-}
-
 func slackTool(name, short, resource string, verb actions.Verb, remote actions.Effect, opts ...actions.Option) actions.Spec {
 	base := []actions.Option{
 		actions.Short(short),
 		actions.Description(slackToolDescription(name, short)),
 		actions.RBAC(actions.ResourceName(resource), verb, remote),
-		accountFlag(),
 	}
 	base = append(base, opts...)
 	return actions.Command(actions.LocalName(name), name, base...)

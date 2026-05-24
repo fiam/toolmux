@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,11 +92,20 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 func TestRootHelpShowsOnlyRegisteredNativeCommands(t *testing.T) {
 	t.Parallel()
 
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"google": {Type: toolboxTypeInternal, Provider: "google"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	store := credentials.NewMemoryStore()
 	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
 		Profile:   "default",
 		Provider:  "google",
-		AccountID: "default",
+		AccountID: "google",
 	}, credentials.OAuthTokens{
 		AccessToken: "google-access",
 		TokenType:   "Bearer",
@@ -103,7 +113,7 @@ func TestRootHelpShowsOnlyRegisteredNativeCommands(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store, WorkDir: workDir})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -208,8 +218,18 @@ func TestOpenBrowserCommandDefaults(t *testing.T) {
 
 func TestReadOnlyModeBlocksMutatingToolCommand(t *testing.T) {
 	t.Parallel()
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"slack": {Type: toolboxTypeInternal, Provider: "slack"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommandWithDeps(Dependencies{
 		Credentials: credentials.NewMemoryStore(),
+		WorkDir:     workDir,
 	})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)

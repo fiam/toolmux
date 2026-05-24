@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fiam/toolmux/internal/actions"
-	"github.com/fiam/toolmux/internal/providers"
 )
 
 func mcpRemoteSyncCommand(opts *options) *cobra.Command {
@@ -21,7 +20,7 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
 			if err != nil {
 				return err
 			}
@@ -62,7 +61,7 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 			if oldName == newName {
 				return fmt.Errorf("old and new MCP server names are both %q", oldName)
 			}
-			entry, ok, err := lookupMCPRemoteServer(oldName, "")
+			entry, ok, err := lookupMCPRemoteServer(oldName, opts.workDir)
 			if err != nil {
 				return err
 			}
@@ -82,18 +81,17 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			server, exists := config.MCP.Servers[oldName]
+			server, exists := configMCPRemoteServer(config, oldName)
 			if !exists {
 				return fmt.Errorf("MCP server %q is not registered in %s", oldName, configPath)
 			}
-			if _, exists := config.MCP.Servers[newName]; exists {
+			if _, exists := configMCPRemoteServer(config, newName); exists {
 				return fmt.Errorf("MCP server %q is already registered in %s", newName, configPath)
 			}
 			if err := ensureMCPRemoteNameAvailable(cmd.Root(), newName); err != nil {
 				return err
 			}
-			config.MCP.Servers[newName] = server
-			delete(config.MCP.Servers, oldName)
+			renameConfigMCPRemoteServer(&config, oldName, newName, server)
 			if err := writeToolmuxConfigFile(configPath, config); err != nil {
 				return err
 			}
@@ -108,14 +106,13 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 
 func toolboxRemoveCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
-	var nativeAccount string
 	cmd := &cobra.Command{
 		Use:     "remove <toolbox> [toolbox...]",
 		Aliases: []string{"rm"},
 		Short:   "Remove a toolbox",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if handled, err := removeNativeToolboxes(cmd, opts, args, nativeAccount); handled || err != nil {
+			if handled, err := removeNativeToolboxes(cmd, opts, args, scope); handled || err != nil {
 				return err
 			}
 			names, err := cleanMCPRemoteNames(args)
@@ -133,7 +130,7 @@ func toolboxRemoveCommand(opts *options) *cobra.Command {
 			ctx := commandContext(cmd)
 			for _, removal := range removals {
 				for _, name := range removal.Names {
-					delete(removal.Config.MCP.Servers, name)
+					deleteConfigMCPRemoteServer(&removal.Config, name)
 				}
 				if err := writeToolmuxConfigFile(removal.Path, removal.Config); err != nil {
 					return err
@@ -151,38 +148,54 @@ func toolboxRemoveCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&nativeAccount, "account", "default", "native provider account name")
 	addMCPProfileScopeFlags(cmd, &scope)
 	return cmd
 }
 
-func removeNativeToolboxes(cmd *cobra.Command, opts *options, args []string, account string) (bool, error) {
-	var native []providers.Provider
+func removeNativeToolboxes(cmd *cobra.Command, opts *options, args []string, scope mcpProfileScopeOptions) (bool, error) {
+	entries := make([]nativeToolboxEntry, 0, len(args))
 	for _, arg := range args {
-		provider, ok := providers.Lookup(arg)
-		if !ok || provider.RemoveHandler == nil {
+		name, err := cleanMCPRemoteName(arg)
+		if err != nil {
+			return true, err
+		}
+		entry, ok, err := lookupNativeToolboxEntry(name, opts.workDir)
+		if err != nil {
+			return true, err
+		}
+		if !ok {
 			continue
 		}
-		native = append(native, provider)
+		entries = append(entries, entry)
 	}
-	if len(native) == 0 {
+	if len(entries) == 0 {
 		return false, nil
 	}
-	if len(native) != len(args) {
+	if len(entries) != len(args) {
 		return true, fmt.Errorf("cannot remove native and remote toolboxes in one command")
 	}
 	store, err := opts.credentials()
 	if err != nil {
 		return true, err
 	}
-	for i, provider := range native {
-		execCtx := actionExecutionContext(commandContext(cmd), opts, store, provider)
-		result, err := provider.RemoveHandler(execCtx, actions.Invocation{
-			Spec: toolboxRemoveSpec(),
-			Args: []string{args[i]},
-			Flags: map[string]any{
-				"account": account,
-			},
+	plans, err := planNativeToolboxRemovals(entries, scope)
+	if err != nil {
+		return true, err
+	}
+	for _, plan := range plans {
+		for _, name := range plan.Names {
+			delete(plan.Config.Toolboxes, name)
+		}
+		if err := writeToolmuxConfigFile(plan.Path, plan.Config); err != nil {
+			return true, err
+		}
+	}
+	for _, entry := range entries {
+		execCtx := actionExecutionContext(commandContext(cmd), opts, store, entry.Provider, entry.Name)
+		result, err := entry.Provider.RemoveHandler(execCtx, actions.Invocation{
+			Spec:  toolboxRemoveSpec(),
+			Args:  []string{entry.Name},
+			Flags: map[string]any{},
 		})
 		if err != nil {
 			return true, err
@@ -190,8 +203,53 @@ func removeNativeToolboxes(cmd *cobra.Command, opts *options, args []string, acc
 		if err := writeActionResult(cmd, opts, execCtx, result); err != nil {
 			return true, err
 		}
+		fmt.Fprintf(cmd.OutOrStdout(), "removed toolbox %s from %s\n", entry.Name, entry.Path)
 	}
 	return true, nil
+}
+
+type nativeToolboxRemovalPlan struct {
+	Path   string
+	Config toolmuxConfigFile
+	Names  []string
+}
+
+func planNativeToolboxRemovals(entries []nativeToolboxEntry, scope mcpProfileScopeOptions) ([]nativeToolboxRemovalPlan, error) {
+	if scope.Global || scope.Project {
+		configPath, _, err := mcpProfileWritePath(scope)
+		if err != nil {
+			return nil, err
+		}
+		config, err := readToolmuxConfigFile(configPath)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			toolbox, exists := config.Toolboxes[entry.Name]
+			if !exists || toolbox.Type != toolboxTypeInternal {
+				return nil, fmt.Errorf("toolbox %q is not registered in %s", entry.Name, configPath)
+			}
+			names = append(names, entry.Name)
+		}
+		return []nativeToolboxRemovalPlan{{Path: configPath, Config: config, Names: names}}, nil
+	}
+	plansByPath := map[string]int{}
+	var plans []nativeToolboxRemovalPlan
+	for _, entry := range entries {
+		index, exists := plansByPath[entry.Path]
+		if !exists {
+			config, err := readToolmuxConfigFile(entry.Path)
+			if err != nil {
+				return nil, err
+			}
+			plans = append(plans, nativeToolboxRemovalPlan{Path: entry.Path, Config: config})
+			index = len(plans) - 1
+			plansByPath[entry.Path] = index
+		}
+		plans[index].Names = append(plans[index].Names, entry.Name)
+	}
+	return plans, nil
 }
 
 type mcpRemoteRemovalPlan struct {
@@ -228,7 +286,7 @@ func planMCPRemoteRemovals(names []string, scope mcpProfileScopeOptions) ([]mcpR
 			return nil, err
 		}
 		for _, name := range names {
-			if _, exists := config.MCP.Servers[name]; !exists {
+			if _, exists := configMCPRemoteServer(config, name); !exists {
 				return nil, fmt.Errorf("MCP server %q is not registered in %s", name, configPath)
 			}
 		}
@@ -263,7 +321,7 @@ func planMCPRemoteRemovals(names []string, scope mcpProfileScopeOptions) ([]mcpR
 			plansByPath[entry.Path] = index
 		}
 		plan := &plans[index]
-		if _, exists := plan.Config.MCP.Servers[name]; !exists {
+		if _, exists := configMCPRemoteServer(plan.Config, name); !exists {
 			return nil, fmt.Errorf("MCP server %q is not registered in %s", name, entry.Path)
 		}
 		plan.Names = append(plan.Names, name)
@@ -296,7 +354,7 @@ func mcpRemoteAuthSetCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, ok, err := lookupMCPRemoteServer(name, "")
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
 			if err != nil {
 				return err
 			}
@@ -364,7 +422,7 @@ func mcpRemoteAuthStatusCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, ok, err := lookupMCPRemoteServer(name, ""); err != nil {
+			if _, ok, err := lookupMCPRemoteServer(name, opts.workDir); err != nil {
 				return err
 			} else if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)

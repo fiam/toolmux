@@ -40,8 +40,12 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.MCP.Servers["linear"].AuthRequired == nil || !*config.MCP.Servers["linear"].AuthRequired {
-		t.Fatalf("expected OAuth server to record auth_required true, got %#v", config.MCP.Servers["linear"])
+	server, ok := configMCPRemoteServer(config, "linear")
+	if !ok {
+		t.Fatal("expected linear server config")
+	}
+	if server.AuthRequired == nil || !*server.AuthRequired {
+		t.Fatalf("expected OAuth server to record auth_required true, got %#v", server)
 	}
 
 	output := runRootForRemoteTest(t, env, "linear", "create_issue", "--title", "OAuth")
