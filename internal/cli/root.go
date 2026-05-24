@@ -35,6 +35,8 @@ import (
 	"github.com/fiam/toolmux/internal/version"
 )
 
+const nativeProviderAnnotation = "toolmux.native.provider"
+
 type options struct {
 	output             string
 	color              string
@@ -141,6 +143,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(workflowCommand(opts))
 	registerActionCommands(root, opts)
 	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
+	configureNativeActionHelp(root, opts)
 
 	return root
 }
@@ -264,6 +267,35 @@ func nativeStatusProviders() []providers.Provider {
 
 func nativeToolboxStatusRegistered(status toolboxStatusItem) bool {
 	return status.Status != "disconnected" || status.Auth != "none"
+}
+
+func registeredNativeProviders(ctx context.Context, opts *options) []providers.Provider {
+	store, err := opts.credentials()
+	if err != nil {
+		return nil
+	}
+	all := nativeStatusProviders()
+	registered := make([]providers.Provider, 0, len(all))
+	for _, provider := range all {
+		ok, err := store.HasOAuthTokens(ctx, credentials.ConnectionRef{
+			Profile:   opts.profile,
+			Provider:  providers.CredentialProviderID(provider),
+			AccountID: "default",
+		})
+		if err == nil && ok {
+			registered = append(registered, provider)
+		}
+	}
+	return registered
+}
+
+func registeredNativeProviderSet(ctx context.Context, opts *options) map[string]bool {
+	registered := registeredNativeProviders(ctx, opts)
+	set := make(map[string]bool, len(registered))
+	for _, provider := range registered {
+		set[provider.ID] = true
+	}
+	return set
 }
 
 func partitionNativeStatusArgs(args []string) ([]string, []providers.Provider) {
@@ -725,6 +757,7 @@ func registerActionNode(parent *cobra.Command, opts *options, provider actions.P
 	resolved := actions.Resolve(provider, node, parentPath)
 	if len(node.Children) > 0 {
 		group := actionGroupCommand(resolved)
+		annotateNativeActionCommand(group, provider)
 		parent.AddCommand(group)
 		for _, child := range node.Children {
 			registerActionNode(group, opts, provider, child, resolved.Path)
@@ -734,7 +767,43 @@ func registerActionNode(parent *cobra.Command, opts *options, provider actions.P
 	if resolved.ID == "" {
 		return
 	}
-	parent.AddCommand(actionCommand(opts, resolved))
+	cmd := actionCommand(opts, resolved)
+	annotateNativeActionCommand(cmd, provider)
+	parent.AddCommand(cmd)
+}
+
+func annotateNativeActionCommand(cmd *cobra.Command, provider actions.ProviderName) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[nativeProviderAnnotation] = string(provider)
+}
+
+func configureNativeActionHelp(root *cobra.Command, opts *options) {
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		updateNativeActionCommandVisibility(commandContext(cmd), root, opts)
+		defaultHelp(cmd, args)
+	})
+	defaultUsage := root.UsageFunc()
+	root.SetUsageFunc(func(cmd *cobra.Command) error {
+		updateNativeActionCommandVisibility(commandContext(cmd), root, opts)
+		return defaultUsage(cmd)
+	})
+}
+
+func updateNativeActionCommandVisibility(ctx context.Context, root *cobra.Command, opts *options) {
+	if root == nil {
+		return
+	}
+	registered := registeredNativeProviderSet(ctx, opts)
+	for _, command := range root.Commands() {
+		providerID := command.Annotations[nativeProviderAnnotation]
+		if providerID == "" {
+			continue
+		}
+		command.Hidden = !registered[providerID]
+	}
 }
 
 func actionCommand(opts *options, spec policy.CommandSpec) *cobra.Command {

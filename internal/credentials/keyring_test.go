@@ -98,6 +98,13 @@ func TestKeyringStoreRoundTripOAuthTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	has, err := store.HasOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("expected saved OAuth tokens to be present")
+	}
 	if tokens.AccessToken != "access-1" || tokens.RefreshToken != "refresh-1" {
 		t.Fatalf("token mismatch: %#v", tokens)
 	}
@@ -106,7 +113,17 @@ func TestKeyringStoreRoundTripOAuthTokens(t *testing.T) {
 func TestKeyringStoreLoadMissingReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	store := newKeyringStore(newFakeKeyring(), "toolmux-test", []string{"keychain"})
-	_, err := store.LoadOAuthTokens(context.Background(), ConnectionRef{
+	has, err := store.HasOAuthTokens(context.Background(), ConnectionRef{
+		Provider:  "example",
+		AccountID: "team-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("missing OAuth tokens should not be present")
+	}
+	_, err = store.LoadOAuthTokens(context.Background(), ConnectionRef{
 		Provider:  "example",
 		AccountID: "team-1",
 	})

@@ -36,6 +36,20 @@ func (s *MemoryStore) SaveOAuthTokens(ctx context.Context, ref ConnectionRef, to
 	return nil
 }
 
+func (s *MemoryStore) HasOAuthTokens(ctx context.Context, ref ConnectionRef) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	key, err := oauthTokensKey(ref)
+	if err != nil {
+		return false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.tokens[key]
+	return ok, nil
+}
+
 func (s *MemoryStore) LoadOAuthTokens(ctx context.Context, ref ConnectionRef) (OAuthTokens, error) {
 	if err := ctx.Err(); err != nil {
 		return OAuthTokens{}, err

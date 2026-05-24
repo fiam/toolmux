@@ -122,7 +122,9 @@ to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
 the global config; require `--project` for project-local writes. Server config
 should record `auth_required` after sync or auth setup when the requirement is
-known. Stdio MCP toolboxes do not use Toolmux-managed MCP OAuth or bearer-token
+known. Native toolbox help and MCP `tools/list` output should include only
+native providers with stored auth for the active Toolmux profile. Stdio MCP
+toolboxes do not use Toolmux-managed MCP OAuth or bearer-token
 auth; configure auth through the command environment or command arguments. Use
 `toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
 registration, and `toolmux mcp auth set` for externally issued bearer tokens.

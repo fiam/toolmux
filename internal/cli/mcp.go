@@ -1164,7 +1164,7 @@ func (server mcpServer) initializeResult(params json.RawMessage) map[string]any 
 }
 
 func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
-	specs := server.mcpSpecs()
+	specs := server.mcpSpecs(ctx)
 	tools := make([]any, 0, len(specs))
 	for _, spec := range specs {
 		tools = append(tools, mcpToolFromSpec(spec))
@@ -1175,10 +1175,16 @@ func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
 	}
 }
 
-func (server mcpServer) mcpSpecs() []actions.Spec {
-	specs := providers.CommandSpecs()
+func (server mcpServer) mcpSpecs(ctx context.Context) []actions.Spec {
+	var specs []actions.Spec
+	for _, provider := range registeredNativeProviders(ctx, server.opts) {
+		specs = append(specs, providers.ActionSpecs(provider)...)
+	}
 	specs = slices.DeleteFunc(specs, func(spec actions.Spec) bool {
 		return !server.selector.matches(spec)
+	})
+	sort.Slice(specs, func(i, j int) bool {
+		return specs[i].ID < specs[j].ID
 	})
 	return specs
 }
@@ -1297,7 +1303,7 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if name == "" {
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: "tool name is required"}
 	}
-	spec, ok := server.lookupMCPTool(name)
+	spec, ok := server.lookupMCPTool(ctx, name)
 	if !ok {
 		if ref, ok := server.lookupRemoteMCPTool(ctx, name); ok {
 			return server.callRemoteTool(ctx, ref, params.Arguments)
@@ -1371,8 +1377,8 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	return result, nil
 }
 
-func (server mcpServer) lookupMCPTool(name string) (actions.Spec, bool) {
-	for _, spec := range server.mcpSpecs() {
+func (server mcpServer) lookupMCPTool(ctx context.Context, name string) (actions.Spec, bool) {
+	for _, spec := range server.mcpSpecs(ctx) {
 		if spec.ID == name {
 			return spec, true
 		}

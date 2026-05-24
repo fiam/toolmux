@@ -245,8 +245,9 @@ MCP support is exposed through `toolmux mcp serve` over stdio. The MCP server
 must write only valid JSON-RPC messages to stdout; diagnostics belong on
 stderr. Native MCP tools must be generated from provider-owned `actions.Spec`
 metadata and must run the same policy and `--read-only` checks before provider
-credentials are read. Do not add separate MCP-only provider command trees for
-native providers.
+credentials are read. Native provider tools should be listed only when that
+provider has stored auth for the active Toolmux profile. Do not add separate
+MCP-only provider command trees for native providers.
 
 `toolmux mcp configure` manages supported agent CLIs: Codex, Claude Code, and
 Gemini CLI. With no agent argument it autodetects installed supported CLIs; with

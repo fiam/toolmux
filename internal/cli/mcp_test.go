@@ -72,6 +72,56 @@ func TestMCPToolUsesActionDescription(t *testing.T) {
 	}
 }
 
+func TestMCPToolsListShowsOnlyRegisteredNativeTools(t *testing.T) {
+	t.Parallel()
+
+	store := credentials.NewMemoryStore()
+	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
+		Profile:   "default",
+		Provider:  "google",
+		AccountID: "default",
+	}, credentials.OAuthTokens{
+		AccessToken: "google-access",
+		TokenType:   "Bearer",
+		Scopes:      []string{"https://www.googleapis.com/auth/drive.file"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
+	out := &bytes.Buffer{}
+	cmd.SetIn(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"))
+	cmd.SetOut(out)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"mcp", "serve"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var response mcpTestResponse
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &response); err != nil {
+		t.Fatalf("decode MCP response: %v\n%s", err, out.String())
+	}
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode tools/list result: %v\n%s", err, string(response.Result))
+	}
+	var names []string
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "google.drive.available") {
+		t.Fatalf("expected registered Google tool in MCP tools/list, got %#v", names)
+	}
+	if slices.Contains(names, "slack.auth_test") {
+		t.Fatalf("expected unregistered Slack tool to be hidden from MCP tools/list, got %#v", names)
+	}
+}
+
 func TestMCPConfigureDryRunIncludesMCPToolCallTimeout(t *testing.T) {
 	t.Parallel()
 

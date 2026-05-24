@@ -88,6 +88,32 @@ func (s *KeyringStore) SaveOAuthTokens(ctx context.Context, ref ConnectionRef, t
 	return nil
 }
 
+func (s *KeyringStore) HasOAuthTokens(ctx context.Context, ref ConnectionRef) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	key, err := oauthTokensKey(ref)
+	if err != nil {
+		return false, err
+	}
+	if _, err := s.ring.GetMetadata(key); err == nil {
+		return true, nil
+	} else if errors.Is(err, keyring.ErrKeyNotFound) {
+		return false, nil
+	} else if !errors.Is(err, keyring.ErrMetadataNeedsCredentials) && !errors.Is(err, keyring.ErrMetadataNotSupported) {
+		return false, fmt.Errorf("check OAuth tokens: %w", mapKeyringError(err))
+	}
+
+	_, err = s.LoadOAuthTokens(ctx, ref)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
 func (s *KeyringStore) LoadOAuthTokens(ctx context.Context, ref ConnectionRef) (OAuthTokens, error) {
 	if err := ctx.Err(); err != nil {
 		return OAuthTokens{}, err

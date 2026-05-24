@@ -42,6 +42,7 @@ type OAuthTokens struct {
 
 type Store interface {
 	SaveOAuthTokens(ctx context.Context, ref ConnectionRef, tokens OAuthTokens) error
+	HasOAuthTokens(ctx context.Context, ref ConnectionRef) (bool, error)
 	LoadOAuthTokens(ctx context.Context, ref ConnectionRef) (OAuthTokens, error)
 	DeleteOAuthTokens(ctx context.Context, ref ConnectionRef) error
 	Doctor(ctx context.Context) Diagnostics

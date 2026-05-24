@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -63,7 +64,9 @@ func TestColorAlwaysColorsTableOutput(t *testing.T) {
 
 func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	t.Parallel()
-	cmd := NewRootCommand()
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -80,9 +83,44 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	}
 }
 
+func TestRootHelpShowsOnlyRegisteredNativeCommands(t *testing.T) {
+	t.Parallel()
+
+	store := credentials.NewMemoryStore()
+	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
+		Profile:   "default",
+		Provider:  "google",
+		AccountID: "default",
+	}, credentials.OAuthTokens{
+		AccessToken: "google-access",
+		TokenType:   "Bearer",
+		Scopes:      []string{"https://www.googleapis.com/auth/drive.file"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "google") {
+		t.Fatalf("expected registered google command in help, got %q", rendered)
+	}
+	if strings.Contains(rendered, "slack") {
+		t.Fatalf("expected unregistered slack command to be hidden from help, got %q", rendered)
+	}
+}
+
 func TestRootHelpShowsMCPToolCallTimeout(t *testing.T) {
 	t.Parallel()
-	cmd := NewRootCommand()
+	cmd := NewRootCommandWithDeps(Dependencies{
+		Credentials: credentials.NewMemoryStore(),
+	})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)

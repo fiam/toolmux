@@ -30,6 +30,13 @@ func TestMemoryStoreRoundTripOAuthTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	has, err := store.HasOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("expected saved OAuth tokens to be present")
+	}
 	if got.AccessToken != tokens.AccessToken || got.RefreshToken != tokens.RefreshToken {
 		t.Fatalf("token mismatch: %#v", got)
 	}
@@ -51,7 +58,17 @@ func TestMemoryStoreRoundTripOAuthTokens(t *testing.T) {
 func TestMemoryStoreMissingReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore()
-	_, err := store.LoadOAuthTokens(context.Background(), ConnectionRef{
+	has, err := store.HasOAuthTokens(context.Background(), ConnectionRef{
+		Provider:  "notion",
+		AccountID: "workspace-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("missing OAuth tokens should not be present")
+	}
+	_, err = store.LoadOAuthTokens(context.Background(), ConnectionRef{
 		Provider:  "notion",
 		AccountID: "workspace-1",
 	})

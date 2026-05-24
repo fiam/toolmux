@@ -121,6 +121,8 @@ channel.
 ## Slack
 
 Slack is a native Toolmux toolbox under `toolmux slack`.
+Native toolbox commands and MCP tools are shown only after that toolbox has
+auth stored for the active Toolmux profile.
 
 Common setup options:
 
@@ -191,6 +193,8 @@ Google uses brokered OAuth through `toolmuxd` and stores one local Google OAuth
 bundle in the OS credential store. The default and only supported scope is the
 non-sensitive `drive.file` scope, which lets Toolmux create files and access
 files the user explicitly opens for the app.
+Native Google commands and MCP tools are shown only after Google auth exists
+for the active Toolmux profile.
 
 ```bash
 toolmux google drive selected add

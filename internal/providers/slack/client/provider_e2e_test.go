@@ -327,7 +327,15 @@ func TestSlackExposesSlackMCPServerToolNames(t *testing.T) {
 
 func TestSlackSearchMessagesExposedOverMCPServe(t *testing.T) {
 	t.Parallel()
-	deps := slackDeps(credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
+	store := credentials.NewMemoryStore()
+	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
+		Profile:   "default",
+		Provider:  "slack",
+		AccountID: "default",
+	}, credentials.OAuthTokens{AccessToken: "xoxb-test"}); err != nil {
+		t.Fatal(err)
+	}
+	deps := slackDeps(store, http.DefaultClient, "https://slack.example.test")
 
 	out := runToolmuxWithInput(t, deps,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
