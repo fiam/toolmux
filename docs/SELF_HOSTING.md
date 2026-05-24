@@ -166,8 +166,8 @@ need and a threat model for it.
 Self-hosters need their own provider OAuth apps:
 
 1. Slack: Slack OAuth app with your callback URL and requested bot scopes.
-2. Google: Google Cloud project with a web OAuth client and the Drive and
-   Picker APIs enabled.
+2. Google: Google Cloud project with a web OAuth client and the Drive, Docs,
+   and Picker APIs enabled.
 
 Remote MCP servers may use their own OAuth flows and do not require a native
 provider app in `toolmuxd` unless Toolmux adds a provider-specific broker for
@@ -175,29 +175,40 @@ that service.
 
 ## Google Setup
 
-Google is a Drive-only native provider. It uses brokered OAuth through
-`toolmuxd`, a Google web OAuth client, Google Picker, and the non-sensitive
-`drive.file` scope. The CLI stores the resulting token locally; `toolmuxd`
-holds provider client configuration and short-lived OAuth/Picker handoff state
-only.
+Google is a Drive and Docs native provider. It uses brokered OAuth through
+`toolmuxd`, a Google web OAuth client, Google Picker, the Google Drive API, the
+Google Docs API, and the non-sensitive `drive.file` scope. The CLI stores the
+resulting token locally; `toolmuxd` holds provider client configuration and
+short-lived OAuth/Picker handoff state only.
 
 ### Cloud project
 
-Create or choose one Google Cloud project for Toolmux. Enable the Google Drive
-and Google Picker APIs in that project:
+Create or choose one Google Cloud project for Toolmux. Enable the Google Drive,
+Google Docs, and Google Picker APIs in that project:
 
 1. Open the Google Cloud console.
 2. Select an existing project or create a new project for Toolmux.
 3. Open APIs & Services > Library.
 4. Search for Google Drive API and click Enable.
-5. Search for Google Picker API and click Enable.
+5. Search for Google Docs API and click Enable.
+6. Search for Google Picker API and click Enable.
 
-You can also enable both APIs with `gcloud`:
+You can also enable all required APIs with `gcloud`:
 
 ```bash
-gcloud services enable drive.googleapis.com picker.googleapis.com \
+gcloud services enable \
+  drive.googleapis.com \
+  docs.googleapis.com \
+  picker.googleapis.com \
   --project=my-google-project
 ```
+
+If a Docs command fails with a link such as
+`https://console.cloud.google.com/apis/api/docs.googleapis.com/metrics?project=...`,
+the Google Docs API is not enabled for the Cloud project that owns the OAuth
+client ID in `GOOGLE_CLIENT_ID`. Select that exact project in the Cloud Console
+and enable `docs.googleapis.com`, or rerun the `gcloud services enable` command
+above with the correct `--project`.
 
 `gcloud` cannot create the regular Google Auth Platform OAuth client that Drive
 Picker requires. `gcloud iam oauth-clients` creates IAM OAuth clients for Google
@@ -224,7 +235,7 @@ https://www.googleapis.com/auth/drive.file
 
 `drive.file` lets Toolmux create files and access files that the user explicitly
 opens or selects for the app. It does not grant blanket Drive access. Toolmux's
-Drive provider intentionally does not request broader Drive or Docs scopes.
+Google provider intentionally does not request broader Drive or Docs scopes.
 
 ### Web OAuth client
 
@@ -275,12 +286,13 @@ export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
 
 ### Verify locally
 
-Build or install the CLI, then select a Drive file:
+Build or install the CLI, then select a Drive file or Docs document:
 
 ```bash
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google drive available
+toolmux google docs get <document-id-or-url>
 ```
 
 `toolmux google drive selected add` is the normal first-run command for file
@@ -306,7 +318,7 @@ The brokered Picker flow is limited to `drive.file` and must not be combined
 with broader scopes.
 
 Picker needs only the same `drive.file` grant used by the default Google
-toolboxes. The selected file ID is usable by Toolmux because the user
+toolbox. The selected file ID is usable by Toolmux because the user
 explicitly opened that file for the app. `toolmux google drive selected add`
 saves selected file IDs locally; `toolmux google drive selected list` shows that
 cache; `toolmux google drive selected remove <file-id>` removes a cached ID.
@@ -317,6 +329,22 @@ Toolmux created or opened them before. Removing a cached ID is a Toolmux-local
 operation; users should revoke app access from their Google account when they
 need Google to forget the app-level grant.
 
+### Google Docs
+
+`toolmux google docs get`, `append`, `replace-all-text`, and `batch-update`
+call the Google Docs API at `docs.googleapis.com`. They still use the same
+`drive.file` grant and the same selected/opened-file boundary as Drive tools:
+the document must be created by Toolmux or explicitly opened for the Toolmux
+Google app, usually through `toolmux google drive selected add`.
+
+Docs tools do not require `https://www.googleapis.com/auth/documents`.
+Self-hosted deployments must still enable the Google Docs API service
+(`docs.googleapis.com`) in the Cloud project that owns the OAuth client.
+
+Use `--required-revision-id` on write commands when an edit should only apply
+to a known document revision. Use `--dry-run` on write commands to inspect the
+Docs `batchUpdate` request without applying it.
+
 ### Manual smoke test
 
 After configuring the CLI:
@@ -324,6 +352,10 @@ After configuring the CLI:
 ```bash
 toolmux google drive selected add
 toolmux google drive selected list
+toolmux google docs get <document-id-or-url>
+toolmux google docs append <document-id-or-url> \
+  --text "Toolmux smoke test\n" \
+  --dry-run
 toolmux google drive files copy <file-id-or-url>
 toolmux google drive pick
 toolmux google drive available

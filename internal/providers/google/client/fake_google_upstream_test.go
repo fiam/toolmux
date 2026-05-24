@@ -49,9 +49,9 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 			upstream.token(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/revoke":
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.URL.Path == "/docs/v1/documents/doc-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc-1":
 			upstream.getDocument(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/docs/v1/documents/doc-1:batchUpdate":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/documents/doc-1:batchUpdate":
 			upstream.batchUpdate(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files":
 			upstream.listFiles(t, w, r)
@@ -353,6 +353,78 @@ func (s *fakeGoogleUpstream) assertCopyRequest(t *testing.T, wantSourceID, wantN
 	if s.lastCopyParentID != wantParentID {
 		t.Fatalf("expected copy parent %q, got %q in %#v", wantParentID, s.lastCopyParentID, s.lastCopyBody)
 	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsInsertText(t *testing.T, wantText string, wantIndex int) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	insertText, ok := request["insertText"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected insertText request, got %#v", request)
+	}
+	if gotText, _ := insertText["text"].(string); gotText != wantText {
+		t.Fatalf("expected inserted text %q, got %q in %#v", wantText, gotText, insertText)
+	}
+	location, ok := insertText["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected insertText location, got %#v", insertText)
+	}
+	if gotIndex, _ := location["index"].(float64); int(gotIndex) != wantIndex {
+		t.Fatalf("expected insert index %d, got %#v in %#v", wantIndex, location["index"], location)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsReplaceAllText(t *testing.T, wantText, wantReplaceText string, wantMatchCase bool, wantRevisionID string) {
+	t.Helper()
+	body := s.lastDocsBatchBody(t)
+	request := firstDocsBatchRequest(t, body)
+	replaceAllText, ok := request["replaceAllText"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected replaceAllText request, got %#v", request)
+	}
+	containsText, ok := replaceAllText["containsText"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected replaceAllText containsText, got %#v", replaceAllText)
+	}
+	if gotText, _ := containsText["text"].(string); gotText != wantText {
+		t.Fatalf("expected match text %q, got %q in %#v", wantText, gotText, containsText)
+	}
+	if gotMatchCase, _ := containsText["matchCase"].(bool); gotMatchCase != wantMatchCase {
+		t.Fatalf("expected matchCase %v, got %#v in %#v", wantMatchCase, containsText["matchCase"], containsText)
+	}
+	if gotReplaceText, _ := replaceAllText["replaceText"].(string); gotReplaceText != wantReplaceText {
+		t.Fatalf("expected replacement text %q, got %q in %#v", wantReplaceText, gotReplaceText, replaceAllText)
+	}
+	writeControl, ok := body["writeControl"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected writeControl, got %#v", body)
+	}
+	if gotRevisionID, _ := writeControl["requiredRevisionId"].(string); gotRevisionID != wantRevisionID {
+		t.Fatalf("expected required revision %q, got %q in %#v", wantRevisionID, gotRevisionID, writeControl)
+	}
+}
+
+func (s *fakeGoogleUpstream) lastDocsBatchBody(t *testing.T) map[string]any {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastBatchBody == nil {
+		t.Fatal("expected Docs batchUpdate request")
+	}
+	return s.lastBatchBody
+}
+
+func firstDocsBatchRequest(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	requests, ok := body["requests"].([]any)
+	if !ok || len(requests) == 0 {
+		t.Fatalf("expected Docs batchUpdate requests, got %#v", body)
+	}
+	request, ok := requests[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected Docs batchUpdate request object, got %#v", requests[0])
+	}
+	return request
 }
 
 func (s *fakeGoogleUpstream) assertRefreshAndDriveToken(t *testing.T, wantToken string) {

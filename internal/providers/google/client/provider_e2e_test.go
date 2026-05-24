@@ -55,12 +55,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "8"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "12"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "8"} {
+	for _, want := range []string{"google", "internal", "connected", "12"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -102,6 +102,39 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	if !hasScopes(tokens.Scopes, googleapi.ScopeDriveFile) || hasScopes(tokens.Scopes, googleapi.ScopeDriveMetadata) {
 		t.Fatalf("expected refresh to preserve stored scopes, got %#v", tokens.Scopes)
 	}
+}
+
+func TestGoogleDocsCommandsReadAndUpdateAccessibleDocument(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	store := credentials.NewMemoryStore()
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
+	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
+		AccessToken:  "ya29.drive",
+		RefreshToken: "refresh-google",
+		TokenType:    "Bearer",
+		Scopes:       []string{googleapi.ScopeDriveFile},
+		Extra:        map[string]string{"auth_type": "oauth_broker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deps := googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
+
+	out := toolmuxtest.Run(t, deps, "google", "docs", "get", "--document-id", "https://docs.google.com/document/d/doc-1/edit")
+	toolmuxtest.AssertContains(t, out, "Hello world")
+	toolmuxtest.AssertContains(t, out, "rev-1")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "append", "doc-1", "--text", "Added by Toolmux\n")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	upstream.assertDocsInsertText(t, "Added by Toolmux\n", 12)
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "replace-all-text", "doc-1", "--text", "Hello", "--replace-text", "Hi", "--match-case", "--required-revision-id", "rev-1")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	upstream.assertDocsReplaceAllText(t, "Hello", "Hi", true, "rev-1")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "batch-update", "doc-1", "--json", `[{"insertText":{"location":{"index":1},"text":"Start "}}]`)
+	toolmuxtest.AssertContains(t, out, "1")
+	upstream.assertDocsInsertText(t, "Start ", 1)
 }
 
 func TestGoogleDriveReportsMissingScopeAfterDocsSensitiveOverride(t *testing.T) {
@@ -216,6 +249,10 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 		seen[spec.ID] = true
 	}
 	for _, want := range []string{
+		"google.docs.get",
+		"google.docs.append",
+		"google.docs.replace_all_text",
+		"google.docs.batch_update",
 		"google.drive.selected.add",
 		"google.drive.selected.list",
 		"google.drive.files.copy",

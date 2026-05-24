@@ -204,13 +204,14 @@ OAuth through `toolmuxd`, token refresh, and representative Web API commands.
 Do not use live Slack workspaces as the default correctness signal.
 
 Google native-provider tests must exercise the preferred unified `google`
-namespace and the `google drive` command group against fake upstreams while
-using one local Google OAuth credential bundle per registered toolbox name.
-Keep Google auth on Google's non-sensitive `drive.file` scope unless product
-requirements explicitly justify broader access. Cover brokered OAuth through
-`toolmuxd`,
+namespace and the `google drive` and `google docs` command groups against fake
+upstreams while using one local Google OAuth credential bundle per registered
+toolbox name. Keep Google auth on Google's non-sensitive `drive.file` scope
+unless product requirements explicitly justify broader access. Cover brokered
+OAuth through `toolmuxd`,
 toolmuxd token exchange, local missing-scope failures before Google API calls,
-refresh-token preservation, and representative Drive API commands. Cover
+refresh-token preservation, and representative Drive and Docs API commands. Cover
+`toolmux google docs get/append/replace-all-text/batch-update`,
 `toolmux google drive selected add/list/remove`,
 `toolmux google drive files copy`, `toolmux google drive pick`, and
 `toolmux google drive available` through fake brokered Picker flows without

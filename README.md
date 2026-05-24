@@ -195,13 +195,14 @@ Run `toolmux slack --help` for the command list and per-tool flags.
 
 ## Google
 
-Google is a native Toolmux toolbox focused on Google Drive.
+Google is a native Toolmux toolbox focused on Google Drive and Google Docs.
 
 Google uses brokered OAuth through `toolmuxd` and stores one local Google OAuth
 bundle per registered toolbox name in the OS credential store. The default and
 only supported scope is the
 non-sensitive `drive.file` scope, which lets Toolmux create files and access
-files the user explicitly opens for the app.
+files the user explicitly opens for the app. Docs read and write commands use
+the same per-file grant.
 Native Google commands and MCP tools are shown when the toolbox is registered
 in config. The registered name is also the credential account identity:
 
@@ -211,6 +212,11 @@ toolmux add google --name google-personal
 ```
 
 ```bash
+toolmux google docs get 1abc...
+toolmux google docs append 1abc... --text "Status update\n"
+toolmux google docs replace-all-text 1abc... --text "old" --replace-text "new"
+toolmux google docs batch-update 1abc... --json @requests.json
+
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google drive files copy 1abc... --name "Working copy"
@@ -237,6 +243,12 @@ https://www.googleapis.com/auth/drive.file
 With `drive.file`, Drive search is limited to files created by Toolmux or files
 the user explicitly opened/shared with the Toolmux Google app. Drive-wide
 discovery requires broader Drive scopes that Toolmux does not request.
+Google Docs body reads and edits have the same per-file boundary: select or
+open the document for Toolmux first, then use `toolmux google docs get`,
+`append`, `replace-all-text`, or `batch-update` with the document ID or Docs
+URL. `batch-update` accepts a full Docs API batchUpdate object, a requests
+array, or `@path`; use `--required-revision-id` when an edit should only apply
+to a known revision.
 
 `toolmux google drive selected add` and `toolmux google drive pick` create a
 short-lived Picker session in `toolmuxd`, open Google Picker in the browser,

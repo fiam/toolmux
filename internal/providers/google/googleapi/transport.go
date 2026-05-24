@@ -43,7 +43,15 @@ func postOAuthToken(ctx context.Context, client *http.Client, options OAuthOptio
 }
 
 func (c Client) get(ctx context.Context, suffix string, values url.Values, out any) error {
-	reqURL, err := url.Parse(apiURL(c.BaseURL, suffix))
+	return c.getURL(ctx, apiURL(c.BaseURL, suffix), values, out)
+}
+
+func (c Client) getDocs(ctx context.Context, suffix string, values url.Values, out any) error {
+	return c.getURL(ctx, docsAPIURL(c, suffix), values, out)
+}
+
+func (c Client) getURL(ctx context.Context, rawURL string, values url.Values, out any) error {
+	reqURL, err := url.Parse(rawURL)
 	if err != nil {
 		return err
 	}
@@ -66,12 +74,20 @@ func (c Client) postJSON(ctx context.Context, suffix string, body any, out any) 
 	return c.postJSONQuery(ctx, suffix, nil, body, out)
 }
 
+func (c Client) postDocsJSON(ctx context.Context, suffix string, body any, out any) error {
+	return c.postJSONURL(ctx, docsAPIURL(c, suffix), nil, body, out)
+}
+
 func (c Client) postJSONQuery(ctx context.Context, suffix string, values url.Values, body any, out any) error {
+	return c.postJSONURL(ctx, apiURL(c.BaseURL, suffix), values, body, out)
+}
+
+func (c Client) postJSONURL(ctx context.Context, rawURL string, values url.Values, body any, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	reqURL, err := url.Parse(apiURL(c.BaseURL, suffix))
+	reqURL, err := url.Parse(rawURL)
 	if err != nil {
 		return err
 	}
@@ -134,6 +150,17 @@ func apiURL(baseURL, suffix string) string {
 	}
 	parsed.Path = path.Join(parsed.Path, strings.TrimLeft(suffix, "/"))
 	return parsed.String()
+}
+
+func docsAPIURL(client Client, suffix string) string {
+	baseURL := strings.TrimSpace(client.DocsBaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(client.BaseURL)
+		if baseURL == "" || strings.TrimRight(baseURL, "/") == strings.TrimRight(DefaultAPIBaseURL, "/") {
+			baseURL = DefaultDocsAPIBaseURL
+		}
+	}
+	return apiURL(baseURL, suffix)
 }
 
 func httpClient(client *http.Client) *http.Client {
