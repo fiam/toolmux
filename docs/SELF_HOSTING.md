@@ -1,6 +1,6 @@
 # Self-Hosting toolmuxd
 
-Last updated: 2026-05-09
+Last updated: 2026-05-24
 
 `toolmuxd` is the open-source Toolmux server daemon. It exists so OAuth
 providers that require confidential client secrets can still support a
@@ -166,7 +166,192 @@ need and a threat model for it.
 Self-hosters need their own provider OAuth apps:
 
 1. Slack: Slack OAuth app with your callback URL and requested bot scopes.
+2. Google: Google Cloud project with a web OAuth client and the Drive and
+   Picker APIs enabled.
 
 Remote MCP servers may use their own OAuth flows and do not require a native
 provider app in `toolmuxd` unless Toolmux adds a provider-specific broker for
 that service.
+
+## Google Setup
+
+Google is a Drive-only native provider. It uses brokered OAuth through
+`toolmuxd`, a Google web OAuth client, Google Picker, and the non-sensitive
+`drive.file` scope. The CLI stores the resulting token locally; `toolmuxd`
+holds provider client configuration and short-lived OAuth/Picker handoff state
+only.
+
+### Cloud project
+
+Create or choose one Google Cloud project for Toolmux. Enable the Google Drive
+and Google Picker APIs in that project:
+
+1. Open the Google Cloud console.
+2. Select an existing project or create a new project for Toolmux.
+3. Open APIs & Services > Library.
+4. Search for Google Drive API and click Enable.
+5. Search for Google Picker API and click Enable.
+
+You can also enable both APIs with `gcloud`:
+
+```bash
+gcloud services enable drive.googleapis.com picker.googleapis.com \
+  --project=my-google-project
+```
+
+`gcloud` cannot create the regular Google Auth Platform OAuth client that Drive
+Picker requires. `gcloud iam oauth-clients` creates IAM OAuth clients for Google
+Cloud access, and `gcloud iap oauth-clients` creates clients locked to
+Identity-Aware Proxy.
+
+### OAuth consent
+
+Configure OAuth consent for the same project:
+
+1. Open Google Auth Platform > Branding or APIs & Services > OAuth consent
+   screen.
+2. Enter the app name, user support email, and developer contact email.
+3. Choose Internal for a Google Workspace-only deployment, or External for
+   general Google accounts.
+4. Open Google Auth Platform > Audience and add your Google account as a test
+   user while the app is in testing mode.
+5. Open Google Auth Platform > Data Access or OAuth consent screen > Scopes.
+6. Add this scope:
+
+```text
+https://www.googleapis.com/auth/drive.file
+```
+
+`drive.file` lets Toolmux create files and access files that the user explicitly
+opens or selects for the app. It does not grant blanket Drive access. Toolmux's
+Drive provider intentionally does not request broader Drive or Docs scopes.
+
+### Web OAuth client
+
+Create an OAuth client:
+
+1. Open Google Auth Platform > Clients or APIs & Services > Credentials.
+2. Click Create client or Create credentials > OAuth client ID.
+3. Choose Web application as the application type.
+4. Name the client, for example `Toolmux Broker`.
+5. Add authorized redirect URIs for the broker:
+
+```text
+https://auth.example.com/oauth/google/callback
+```
+
+Use your actual `toolmuxd` public origin. For the hosted Toolmux broker, use
+the hosted origin instead. For local tunnel testing, use the current tunnel URL.
+The same callback handles both normal brokered OAuth and brokered Google Picker
+callbacks; Toolmux dispatches them by OAuth `state`.
+
+6. Click Create.
+7. Copy the client ID and client secret.
+
+Set these `toolmuxd` environment variables:
+
+```bash
+export TOOLMUX_PUBLIC_URL=https://auth.example.com
+export GOOGLE_CLIENT_ID=...
+export GOOGLE_CLIENT_SECRET=...
+export GOOGLE_SCOPES=https://www.googleapis.com/auth/drive.file
+```
+
+Optional endpoint and redirect overrides for fake upstreams, sovereign
+deployments, or tests:
+
+```bash
+export GOOGLE_AUTH_URL=...
+export GOOGLE_TOKEN_URL=...
+export GOOGLE_REVOKE_URL=...
+export GOOGLE_REDIRECT_URI=https://auth.example.com/oauth/google/callback
+```
+
+Point the CLI at the broker when self-hosting:
+
+```bash
+export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
+```
+
+### Verify locally
+
+Build or install the CLI, then select a Drive file:
+
+```bash
+toolmux google drive selected add
+toolmux google drive selected list
+toolmux google drive available
+```
+
+`toolmux google drive selected add` is the normal first-run command for file
+access. It opens the brokered Google Picker flow, saves selected file IDs
+locally, and stores the OAuth token. Run `toolmux add google` only when you want
+Drive API access before selecting files.
+
+If the app is still in Google testing mode, the signed-in Google account must be
+listed as a test user.
+
+### Drive Picker
+
+`toolmux google drive pick` and `toolmux google drive selected add` open Google
+Picker through a short-lived `toolmuxd` session. Google returns
+`picked_file_ids` to the broker callback, `toolmuxd` exchanges the returned
+authorization code, and the CLI polls until the selected file IDs are ready.
+By default this uses the same `/oauth/google/callback` redirect URI as normal
+Google brokered OAuth. Set `GOOGLE_PICKER_REDIRECT_URI` only if you intentionally
+register a separate Picker callback such as
+`https://auth.example.com/oauth/google/picker/callback`.
+
+The brokered Picker flow is limited to `drive.file` and must not be combined
+with broader scopes.
+
+Picker needs only the same `drive.file` grant used by the default Google
+toolboxes. The selected file ID is usable by Toolmux because the user
+explicitly opened that file for the app. `toolmux google drive selected add`
+saves selected file IDs locally; `toolmux google drive selected list` shows that
+cache; `toolmux google drive selected remove <file-id>` removes a cached ID.
+`toolmux google drive files copy <file-id-or-url>` copies an accessible source
+file into My Drive, defaulting the destination parent to `root`. With
+`drive.file`, shared source files must first be selected through Picker unless
+Toolmux created or opened them before. Removing a cached ID is a Toolmux-local
+operation; users should revoke app access from their Google account when they
+need Google to forget the app-level grant.
+
+### Manual smoke test
+
+After configuring the CLI:
+
+```bash
+toolmux google drive selected add
+toolmux google drive selected list
+toolmux google drive files copy <file-id-or-url>
+toolmux google drive pick
+toolmux google drive available
+```
+
+Add `toolmux add google` only when you want to test Drive API authorization
+before selecting files.
+
+If OAuth fails before reaching Google, check `TOOLMUX_TOOLMUXD_URL`,
+`TOOLMUX_PUBLIC_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, the authorized
+redirect URIs, and the OAuth consent screen test users. Set `TOOLMUX_BROWSER`
+to launch OAuth and Picker pages in a specific browser; on macOS, use an app
+name such as `Google Chrome`.
+
+### Local `.envrc`
+
+`.envrc` is ignored by this repository. With `direnv`, a local self-hosted
+Google setup can look like this:
+
+```bash
+export GOOGLE_CLIENT_ID=...
+export GOOGLE_CLIENT_SECRET=...
+export GOOGLE_SCOPES=https://www.googleapis.com/auth/drive.file
+export TOOLMUX_PUBLIC_URL=https://auth.example.com
+export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
+
+export TOOLMUX_BROWSER="Google Chrome" # optional Picker/OAuth browser override
+```
+
+Run `direnv allow` after editing `.envrc`. Do not commit `.envrc`, OAuth client
+secrets, OAuth codes, or provider tokens.

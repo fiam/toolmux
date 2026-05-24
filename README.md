@@ -5,8 +5,9 @@
 # Toolmux
 
 Toolmux connects services to your local agents and gives you the same tools as
-a normal CLI. Add Slack or a remote MCP server once, configure your agent once,
-then ask the agent to use those tools without copying tokens into prompts.
+a normal CLI. Add Slack, Google, or a remote MCP server once, configure your
+agent once, then ask the agent to use those tools without copying tokens into
+prompts.
 
 Toolmux is built around four ideas:
 
@@ -15,14 +16,15 @@ Toolmux is built around four ideas:
 3. Policy and `--read-only` checks before credentials are loaded.
 4. Workflows that turn repeatable prompts into commands.
 
-Toolmux is early software. Today it is most useful for Slack, remote MCP
-toolboxes, and local agent setup for Codex, Claude Code, and Gemini CLI.
+Toolmux is early software. Today it is most useful for Slack, Google Drive,
+remote MCP toolboxes, and local agent setup for Codex, Claude Code, and Gemini
+CLI.
 
 ## Supported Today
 
 | Area | What is supported |
 | --- | --- |
-| Native toolboxes | Slack |
+| Native toolboxes | Slack, Google Drive |
 | Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux catalog --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
 | Agents | Codex, Claude Code, Gemini CLI |
@@ -180,6 +182,59 @@ read-only Slack web-session fallback for browser-session auth and is explicitly
 prefixed as experimental because it uses an undocumented Slack web app endpoint.
 
 Run `toolmux slack --help` for the command list and per-tool flags.
+
+## Google
+
+Google is a native Toolmux toolbox focused on Google Drive.
+
+Google uses brokered OAuth through `toolmuxd` and stores one local Google OAuth
+bundle in the OS credential store. The default and only supported scope is the
+non-sensitive `drive.file` scope, which lets Toolmux create files and access
+files the user explicitly opens for the app.
+
+```bash
+toolmux google drive selected add
+toolmux google drive selected list
+toolmux google drive files copy 1abc... --name "Working copy"
+toolmux google drive selected remove 1abc...
+
+toolmux google drive pick
+toolmux google drive available
+toolmux google drive search --query "mimeType='application/vnd.google-apps.document'"
+toolmux google drive get --file-id 1abc...
+toolmux status google
+```
+
+For normal file access, start with `toolmux google drive selected add`. It opens
+the brokered Google Picker flow, saves selected file IDs locally, and stores
+the OAuth token. Run `toolmux add google` only when you want Drive API access
+before selecting files.
+
+Default scope:
+
+```text
+https://www.googleapis.com/auth/drive.file
+```
+
+With `drive.file`, Drive search is limited to files created by Toolmux or files
+the user explicitly opened/shared with the Toolmux Google app. Drive-wide
+discovery requires broader Drive scopes that Toolmux does not request.
+
+`toolmux google drive selected add` and `toolmux google drive pick` create a
+short-lived Picker session in `toolmuxd`, open Google Picker in the browser,
+and poll the broker until Google returns selected file IDs.
+`toolmux google drive selected add` saves the selected file IDs locally for later
+reference, while `toolmux google drive pick` returns Picker output without
+saving it. `toolmux google drive files copy` accepts a raw file ID or a
+Docs/Drive URL and copies an accessible file into My Drive, defaulting the
+destination parent to `root`. With `drive.file`, shared source files must be
+selected through Picker before Toolmux can copy them. Removing a saved file
+removes it from Toolmux's local list; users can revoke app grants from their
+Google account when they need Google to forget that per-file app access.
+
+Toolmux uses one Picker path: a short-lived brokered Google Picker session
+through `toolmuxd`. The CLI does not expose a local Picker fallback or a Picker
+API key.
 
 ## MCP Toolboxes
 
@@ -455,6 +510,10 @@ To self-host the broker, point the CLI at your own `toolmuxd`:
 ```bash
 export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
 ```
+
+Google Drive uses the broker by default. For self-hosting, create a Google web
+OAuth client, enable the Drive and Picker APIs, configure the Google variables
+on `toolmuxd`, and point the CLI at that broker with `TOOLMUX_TOOLMUXD_URL`.
 
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 

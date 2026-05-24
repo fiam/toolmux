@@ -15,6 +15,8 @@ type Provider struct {
 	DisplayName        string
 	AuthMode           string
 	Aliases            []string
+	CredentialProvider string
+	ConnectionScopes   []string
 	Tree               actions.Spec
 	Handlers           map[string]actions.Handler
 	AddHandler         actions.Handler
@@ -41,6 +43,7 @@ func Register(provider Provider) {
 	provider.ID = strings.TrimSpace(provider.ID)
 	provider.DisplayName = strings.TrimSpace(provider.DisplayName)
 	provider.AuthMode = strings.TrimSpace(provider.AuthMode)
+	provider.CredentialProvider = strings.TrimSpace(provider.CredentialProvider)
 	for i, alias := range provider.Aliases {
 		provider.Aliases[i] = strings.TrimSpace(alias)
 	}
@@ -130,8 +133,16 @@ func ActionSpecs(provider Provider) []actions.Spec {
 	return actions.LeafSpecs(actions.ProviderName(provider.ID), provider.Tree)
 }
 
+func CredentialProviderID(provider Provider) string {
+	if provider.CredentialProvider != "" {
+		return provider.CredentialProvider
+	}
+	return provider.ID
+}
+
 func cloneProvider(provider Provider) Provider {
 	provider.Aliases = slices.Clone(provider.Aliases)
+	provider.ConnectionScopes = slices.Clone(provider.ConnectionScopes)
 	provider.Handlers = maps.Clone(provider.Handlers)
 	return provider
 }

@@ -40,10 +40,11 @@ func ConfigFromEnv() Config {
 }
 
 type oauthBroker struct {
-	config    Config
-	providers map[actions.ProviderName]oauthProvider
-	mu        sync.Mutex
-	sessions  map[string]*oauthSession
+	config            Config
+	providers         map[actions.ProviderName]oauthProvider
+	callbackFallbacks map[actions.ProviderName]brokers.OAuthCallbackFallback
+	mu                sync.Mutex
+	sessions          map[string]*oauthSession
 }
 
 type oauthProvider struct {
@@ -122,6 +123,7 @@ func registerOAuthHandlers(mux *http.ServeMux, config Config) {
 		config.Providers = map[actions.ProviderName]brokers.Config{}
 	}
 	registered := map[actions.ProviderName]oauthProvider{}
+	callbackFallbacks := map[actions.ProviderName]brokers.OAuthCallbackFallback{}
 	for _, descriptor := range brokers.All() {
 		providerConfig := descriptor.CompleteConfig(config.Providers[descriptor.ID], config.HTTPClient)
 		registered[descriptor.ID] = oauthProvider{
@@ -129,11 +131,19 @@ func registerOAuthHandlers(mux *http.ServeMux, config Config) {
 			config:     providerConfig,
 			broker:     descriptor.NewOAuthProvider(providerConfig),
 		}
+		if descriptor.RegisterHTTP != nil {
+			descriptor.RegisterHTTP(mux, providerConfig, brokers.HTTPContext{
+				PublicBaseURL:          config.PublicBaseURL,
+				SessionTTL:             config.SessionTTL,
+				OAuthCallbackFallbacks: callbackFallbacks,
+			})
+		}
 	}
 	broker := &oauthBroker{
-		config:    config,
-		providers: registered,
-		sessions:  make(map[string]*oauthSession),
+		config:            config,
+		providers:         registered,
+		callbackFallbacks: callbackFallbacks,
+		sessions:          make(map[string]*oauthSession),
 	}
 	mux.HandleFunc("POST /v1/oauth/sessions", broker.createSession)
 	mux.HandleFunc("GET /v1/oauth/sessions/{session_id}", broker.getSession)
@@ -169,12 +179,17 @@ func (b *oauthBroker) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	scopes, err := allowedOAuthSessionScopes(request.Scopes, provider.config.Scopes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scope_not_allowed", err.Error())
+		return
+	}
 	session := &oauthSession{
 		ID:          id,
 		Provider:    string(provider.descriptor.ID),
 		State:       state,
 		RedirectURI: b.redirectURI(r, provider),
-		Scopes:      cleanOAuthSessionScopes(request.Scopes),
+		Scopes:      scopes,
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(b.config.SessionTTL),
 		Status:      "pending",
@@ -263,6 +278,9 @@ func (b *oauthBroker) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	session, ok := b.sessionByState(state)
 	if !ok {
+		if fallback := b.callbackFallbacks[provider.descriptor.ID]; fallback != nil && fallback(w, r) {
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_state", "OAuth state is invalid or expired")
 		return
 	}
@@ -435,6 +453,31 @@ func cleanOAuthSessionScopes(values []string) []string {
 		}
 	}
 	return scopes
+}
+
+func allowedOAuthSessionScopes(requested, allowed []string) ([]string, error) {
+	scopes := cleanOAuthSessionScopes(requested)
+	allowedScopes := cleanOAuthSessionScopes(allowed)
+	if len(scopes) == 0 {
+		return allowedScopes, nil
+	}
+	if len(allowedScopes) == 0 {
+		return scopes, nil
+	}
+	allowedSet := map[string]bool{}
+	for _, scope := range allowedScopes {
+		allowedSet[scope] = true
+	}
+	var denied []string
+	for _, scope := range scopes {
+		if !allowedSet[scope] {
+			denied = append(denied, scope)
+		}
+	}
+	if len(denied) > 0 {
+		return nil, errors.New("requested OAuth scopes are not allowed by this broker: " + strings.Join(denied, ", "))
+	}
+	return scopes, nil
 }
 
 func randomHex(bytesLen int) (string, error) {

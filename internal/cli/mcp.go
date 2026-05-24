@@ -1328,6 +1328,9 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	}
 	execCtx := actionExecutionContext(ctx, server.opts, store, provider)
 	execCtx.Interactive = false
+	if execCtx.OpenBrowser == nil && spec.Action == string(actions.VerbOpen) {
+		execCtx.OpenBrowser = openURL
+	}
 	result, err := handler(execCtx, actions.Invocation{
 		Spec:  spec,
 		Args:  arguments.args,

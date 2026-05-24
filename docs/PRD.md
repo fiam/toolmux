@@ -1,6 +1,6 @@
 # Toolmux MCP-First Provider PRD
 
-Last updated: 2026-05-11
+Last updated: 2026-05-24
 
 ## Summary
 
@@ -11,7 +11,17 @@ build native integrations only for providers or workflows without an adequate
 MCP path. The current product path is remote MCP catalog first; native
 providers are deferred until a provider-specific workflow clearly needs one.
 
-The first release optimizes for a simple connection experience without asking users to create personal API keys or provider developer apps. Provider tokens are stored locally by default; Toolmux does not provide cloud token storage in the initial release.
+The first release optimizes for a simple connection experience without asking
+users to create personal API keys or provider developer apps. Provider tokens
+are stored locally by default; Toolmux does not provide cloud token storage in
+the initial release. Google is exposed through one native Drive-focused
+`google` toolbox, backed by brokered OAuth through `toolmuxd`, one local
+credential bundle, and the non-sensitive `drive.file` scope unless a product
+requirement explicitly justifies broader Google data access. Existing Drive
+files are selected through the brokered Google Picker flow, with a normal
+`google drive pick` action for one-off selection and `google drive selected ...`
+actions for local selected-file cache management. Accessible files can be
+copied into My Drive through `google drive files copy`.
 
 ## Goals
 

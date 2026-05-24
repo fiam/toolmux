@@ -203,6 +203,21 @@ fake upstreams: explicit token+cookie storage, user-owned OAuth, brokered
 OAuth through `toolmuxd`, token refresh, and representative Web API commands.
 Do not use live Slack workspaces as the default correctness signal.
 
+Google native-provider tests must exercise the preferred unified `google`
+namespace and the `google drive` command group against fake upstreams while
+sharing one local `google` OAuth credential bundle. Keep Google auth on
+Google's non-sensitive `drive.file` scope unless product requirements
+explicitly justify broader access. Cover brokered OAuth through `toolmuxd`,
+toolmuxd token exchange, local missing-scope failures before Google API calls,
+refresh-token preservation, and representative Drive API commands. Cover
+`toolmux google drive selected add/list/remove`,
+`toolmux google drive files copy`, `toolmux google drive pick`, and
+`toolmux google drive available` through fake brokered Picker flows without
+using live Google. The brokered Picker flow must use Google's
+`trigger_onepick=true` flow, request only `drive.file`, and keep hosted Google
+client secrets and Picker configuration out of CLI output. Do not add a local
+Google Picker fallback unless product requirements explicitly change.
+
 Tests that need a real toolmuxd instance should use
 `internal/testutil/toolmuxdtest` instead of constructing `server.NewHandler`
 or `httptest.Server` directly. Provider-specific fake upstream behavior should
@@ -213,6 +228,10 @@ stay with the provider test fixtures.
 Toolmux has one command surface for humans and agents. Do not add a separate
 provider-specific TUI, and do not let provider commands hand-roll ANSI styles,
 pagers, prompts, or table layouts.
+Native provider behavior must be exposed through provider-owned action specs so
+the CLI and MCP surfaces stay aligned. Keep provider handlers in provider
+client packages; the CLI root may only handle policy, context construction,
+invocation, and shared rendering.
 
 Provider commands must return structured results and route all presentation
 through `internal/output`. Human table output may use shared styles, color,
@@ -464,6 +483,9 @@ registration: no env reads, filesystem access, network calls, goroutines,
 credentials, or logging. Add client providers to `internal/providers/all` and
 broker providers to `internal/providers/brokers/all`; binaries and test
 harnesses import the appropriate bundle for side effects.
+If separate native command namespaces share one provider OAuth grant, set the
+provider registry's shared credential provider and keep scope merging/checking
+inside the provider client package, not in `internal/cli`.
 
 Broker facets register through `internal/providers/brokers`. Keep
 `internal/server` generic: it may use broker descriptors and OAuth interfaces,

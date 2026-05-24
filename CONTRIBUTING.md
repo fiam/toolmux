@@ -335,6 +335,22 @@ For Slack broker testing, configure fake or local upstream endpoints through
 `toolmuxd`, use `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, optional endpoint
 overrides, and `SLACK_SCOPES`.
 
+Google uses the native command namespace `google`, with a `drive` command
+group. Google stores one local OAuth bundle under the `google` credential
+provider. Its client facet lives under `internal/providers/google/client`, and
+shared Google REST/OAuth helpers live under
+`internal/providers/google/googleapi`. Google tests must cover brokered OAuth
+through `toolmuxd`, the default non-sensitive `drive.file`
+scope, local scope checks before API calls, refresh-token preservation, and
+representative Drive API commands against fake upstream servers. Google tests
+must cover `toolmux google drive selected add/list/remove`,
+`toolmux google drive files copy`, `toolmux google drive pick`, and
+`toolmux google drive available` through fake brokered Picker flows without
+using live Google. Brokered Picker tests must assert `trigger_onepick=true`, a
+single `drive.file` scope, returned `picked_file_ids`, token exchange in
+`toolmuxd`, and no CLI-side Picker API key. Configure Google broker credentials
+on `toolmuxd`.
+
 ## Local OAuth Testing
 
 For brokered OAuth flows, run a local server tunnel:

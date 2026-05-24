@@ -73,7 +73,7 @@ func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	for _, provider := range []string{"jira", "google"} {
+	for _, provider := range []string{"jira", "google" + "-docs", "google" + "-drive"} {
 		if strings.Contains(rendered, provider) {
 			t.Fatalf("unimplemented provider command %q should not appear in help: %q", provider, rendered)
 		}
@@ -110,6 +110,57 @@ func TestMCPToolCallTimeoutMustBePositive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--mcp-tool-call-timeout must be greater than 0") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOpenBrowserCommandUsesToolmuxBrowserOnDarwin(t *testing.T) {
+	t.Parallel()
+	command, args := openBrowserCommand("darwin", "Google Chrome", "", "https://example.com/picker")
+	if command != "open" {
+		t.Fatalf("expected open command, got %q", command)
+	}
+	want := []string{"-a", "Google Chrome", "https://example.com/picker"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("expected args %#v, got %#v", want, args)
+	}
+}
+
+func TestOpenBrowserCommandUsesBrowserCommand(t *testing.T) {
+	t.Parallel()
+	command, args := openBrowserCommand("linux", "", "firefox --new-window %s", "https://example.com/picker")
+	if command != "firefox" {
+		t.Fatalf("expected firefox command, got %q", command)
+	}
+	want := []string{"--new-window", "https://example.com/picker"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("expected args %#v, got %#v", want, args)
+	}
+}
+
+func TestOpenBrowserCommandDefaults(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		goosName    string
+		wantCommand string
+		wantArgs    []string
+	}{
+		{name: "darwin", goosName: "darwin", wantCommand: "open", wantArgs: []string{"https://example.com/picker"}},
+		{name: "windows", goosName: "windows", wantCommand: "rundll32", wantArgs: []string{"url.dll,FileProtocolHandler", "https://example.com/picker"}},
+		{name: "linux", goosName: "linux", wantCommand: "xdg-open", wantArgs: []string{"https://example.com/picker"}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			command, args := openBrowserCommand(tt.goosName, "", "", "https://example.com/picker")
+			if command != tt.wantCommand {
+				t.Fatalf("expected command %q, got %q", tt.wantCommand, command)
+			}
+			if strings.Join(args, "\x00") != strings.Join(tt.wantArgs, "\x00") {
+				t.Fatalf("expected args %#v, got %#v", tt.wantArgs, args)
+			}
+		})
 	}
 }
 

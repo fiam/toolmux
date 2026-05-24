@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/credentials"
@@ -22,6 +23,7 @@ type Config struct {
 	RedirectURI string
 	APIVersion  string
 	Scopes      []string
+	Extra       map[string]string
 	HTTPClient  *http.Client
 }
 
@@ -55,7 +57,18 @@ type Descriptor struct {
 	DefaultRevokeURL  string
 	DefaultAPIVersion string
 	DefaultScopes     []string
+	ExtraEnv          map[string]string
+	DefaultExtra      map[string]string
 	NewOAuthProvider  func(Config) OAuthProvider
+	RegisterHTTP      func(*http.ServeMux, Config, HTTPContext)
+}
+
+type OAuthCallbackFallback func(http.ResponseWriter, *http.Request) bool
+
+type HTTPContext struct {
+	PublicBaseURL          string
+	SessionTTL             time.Duration
+	OAuthCallbackFallbacks map[actions.ProviderName]OAuthCallbackFallback
 }
 
 var registry = struct {
@@ -130,6 +143,7 @@ func (d Descriptor) CompleteConfig(config Config, httpClient *http.Client) Confi
 	if len(config.Scopes) == 0 {
 		config.Scopes = splitScopes(firstNonEmpty(os.Getenv(d.ScopesEnv), strings.Join(d.DefaultScopes, ",")))
 	}
+	config.Extra = completeExtra(config.Extra, d.DefaultExtra, d.ExtraEnv)
 	if config.HTTPClient == nil {
 		config.HTTPClient = httpClient
 	}
@@ -169,6 +183,8 @@ func normalizeDescriptor(descriptor Descriptor) Descriptor {
 		*value = strings.TrimSpace(*value)
 	}
 	descriptor.DefaultScopes = splitScopes(strings.Join(descriptor.DefaultScopes, ","))
+	descriptor.DefaultExtra = cleanStringMap(descriptor.DefaultExtra)
+	descriptor.ExtraEnv = cleanStringMap(descriptor.ExtraEnv)
 	return descriptor
 }
 
@@ -189,6 +205,48 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func completeExtra(config, defaults, envs map[string]string) map[string]string {
+	out := cleanStringMap(config)
+	if len(out) == 0 {
+		out = map[string]string{}
+	}
+	for key, value := range cleanStringMap(defaults) {
+		if out[key] == "" {
+			out[key] = value
+		}
+	}
+	for key, envName := range cleanStringMap(envs) {
+		if out[key] != "" {
+			continue
+		}
+		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cleanStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func splitScopes(value string) []string {

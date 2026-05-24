@@ -46,6 +46,7 @@ type Context struct {
 	ProviderURL   string
 	ProviderAPI   string
 	ToolmuxdURL   string
+	Env           func(string) string
 	Interactive   bool
 	ReadFile      func(string) ([]byte, error)
 	OpenBrowser   func(string) error

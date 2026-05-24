@@ -1,6 +1,6 @@
 # Toolmux MCP-First Implementation Plan
 
-Last updated: 2026-05-11
+Last updated: 2026-05-18
 
 ## Technical Direction
 
@@ -36,9 +36,13 @@ internal/policy/              # local command policy and RBAC engine
 internal/credentials/         # domain credential store over OS keyrings
 internal/oauth/               # PKCE, state, loopback, server handoff
 internal/providers/           # provider registry and common interfaces
+internal/providers/oauthbroker/ # shared native broker session client helpers
 internal/providers/brokers/   # toolmuxd OAuth/token broker registry
 internal/providers/all/       # client provider side-effect imports
 internal/providers/brokers/all/ # server broker side-effect imports
+internal/providers/google/client/
+internal/providers/google/broker/
+internal/providers/google/googleapi/
 internal/providers/slack/client/
 internal/providers/slack/broker/
 internal/providers/slack/slackapi/
