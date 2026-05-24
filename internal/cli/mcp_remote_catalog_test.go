@@ -165,9 +165,9 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
 
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "list --enable linear")
-	if !strings.Contains(policyOutput, "allowed") {
-		t.Fatalf("expected catalog manage policy check, got %q", policyOutput)
+	_, policyErr := runRootForRemoteTestError(t, env, "policy", "check", "--command", "list --enable linear")
+	if policyErr == nil || !strings.Contains(policyErr.Error(), "no command spec found") {
+		t.Fatalf("expected catalog management outside policy, got %v", policyErr)
 	}
 
 	mcpOutput := runRootForRemoteTest(t, env, "list", "--mcp")

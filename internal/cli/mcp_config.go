@@ -174,9 +174,13 @@ func toolmuxConfigWritePath(scope mcpProfileScopeOptions, startDir string) (stri
 		return "", "", fmt.Errorf("use only one of --global or --project")
 	}
 	if scope.Project {
+		globalPath, err := globalToolmuxConfigPath()
+		if err != nil {
+			return "", "", err
+		}
 		if path, ok, err := discoverToolmuxConfigFile(startDir); err != nil {
 			return "", "", err
-		} else if ok {
+		} else if ok && !sameFilesystemPath(globalPath, path) {
 			return path, "project", nil
 		}
 		if startDir != "" {

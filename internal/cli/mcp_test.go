@@ -120,6 +120,11 @@ func TestMCPToolsListShowsOnlyRegisteredNativeTools(t *testing.T) {
 	if slices.Contains(names, "slack.auth_test") {
 		t.Fatalf("expected unregistered Slack tool to be hidden from MCP tools/list, got %#v", names)
 	}
+	for _, name := range names {
+		if strings.HasPrefix(name, "toolmux.config") || strings.HasPrefix(name, "config.") {
+			t.Fatalf("config command must not be exposed as an MCP tool, got %#v", names)
+		}
+	}
 }
 
 func TestMCPConfigureDryRunIncludesMCPToolCallTimeout(t *testing.T) {

@@ -20,9 +20,6 @@ func schemaCommand(opts *options) *cobra.Command {
 		Short: "Show a tool input schema",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, schemaSpec(), args); err != nil {
-				return err
-			}
 			serverName, toolName, err := parseSchemaToolArgs(args)
 			if err != nil {
 				return err

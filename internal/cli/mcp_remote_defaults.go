@@ -51,9 +51,6 @@ func mcpRemoteDefaultsListCommand(opts *options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
 			}
-			if err := authorize(cmd, opts, mcpRemoteDefaultsListSpec(), args); err != nil {
-				return err
-			}
 			result := mcpRemoteDefaultArgumentsResult{
 				Server:    entry.Name,
 				Scope:     mcpRemoteScopeLabel(entry.Scope),
@@ -89,9 +86,6 @@ func mcpRemoteDefaultsSetCommand(opts *options) *cobra.Command {
 			}
 			target, err := mcpRemoteDefaultArgumentsWriteTargetForScope(name, scope, true)
 			if err != nil {
-				return err
-			}
-			if err := authorize(cmd, opts, mcpRemoteDefaultsSetSpec(), args); err != nil {
 				return err
 			}
 			if target.Server.DefaultArguments == nil {
@@ -133,9 +127,6 @@ func mcpRemoteDefaultsRemoveCommand(opts *options) *cobra.Command {
 			}
 			target, err := mcpRemoteDefaultArgumentsWriteTargetForScope(name, scope, false)
 			if err != nil {
-				return err
-			}
-			if err := authorize(cmd, opts, mcpRemoteDefaultsRemoveSpec(), args); err != nil {
 				return err
 			}
 			for _, key := range keys {

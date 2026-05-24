@@ -24,9 +24,6 @@ func mcpConfigureCommand(opts *options) *cobra.Command {
 			if _, err := newMCPToolSelector(resolved); err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpConfigureSpec(), args); err != nil {
-				return err
-			}
 			runtime := mcpAgentRuntime{
 				lookPath: exec.LookPath,
 				run:      runMCPAgentCommand,
@@ -104,9 +101,6 @@ func mcpEnableCommand(opts *options) *cobra.Command {
 			if _, err := newMCPToolSelector(resolved); err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpEnableSpec(), args); err != nil {
-				return err
-			}
 			runtime := mcpAgentRuntime{
 				lookPath: exec.LookPath,
 				run:      runMCPAgentCommand,
@@ -144,9 +138,6 @@ func mcpDisableCommand(opts *options) *cobra.Command {
 		Short: "Disable Toolmux MCP for agents",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, mcpDisableSpec(), args); err != nil {
-				return err
-			}
 			runtime := mcpAgentRuntime{
 				lookPath: exec.LookPath,
 				run:      runMCPAgentCommand,

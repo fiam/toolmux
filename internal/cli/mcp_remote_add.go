@@ -124,9 +124,6 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 	if !ok || provider.AddHandler == nil {
 		return false, nil
 	}
-	if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
-		return true, err
-	}
 	store, err := opts.credentials()
 	if err != nil {
 		return true, err
@@ -175,9 +172,6 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 		return fmt.Errorf("MCP server %q is already registered; use `toolmux mcp rename %s <new-name>` first", name, name)
 	}
 	if err := ensureMCPRemoteNameAvailable(cmd.Root(), name); err != nil {
-		return err
-	}
-	if err := authorize(cmd, opts, toolboxAddSpec(), args); err != nil {
 		return err
 	}
 	server = normalizeMCPRemoteServer(server)

@@ -17,9 +17,6 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 		Short:   "List registered remote MCP servers",
 		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, mcpRemoteListSpec(), args); err != nil {
-				return err
-			}
 			entries, err := effectiveMCPRemoteServerEntries("")
 			if err != nil {
 				return err
@@ -90,9 +87,6 @@ func mcpRemoteShowCommand(opts *options) *cobra.Command {
 			}
 			if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
-			}
-			if err := authorize(cmd, opts, mcpRemoteShowSpec(), args); err != nil {
-				return err
 			}
 			type result struct {
 				Name   string          `json:"name" yaml:"name"`

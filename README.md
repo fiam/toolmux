@@ -13,7 +13,7 @@ Toolmux is built around four ideas:
 
 1. One command surface for people, scripts, and agents.
 2. Local credential custody through the operating system credential store.
-3. Policy and `--read-only` checks before credentials are loaded.
+3. Tool policy and `--read-only` checks before tool credentials are loaded.
 4. Workflows that turn repeatable prompts into commands.
 
 Toolmux is early software. Today it is most useful for Slack, Google Drive,
@@ -476,22 +476,35 @@ Provider tokens, OAuth tokens, refresh tokens, bearer tokens, auth codes,
 client secrets, and Slack token-cookie credentials are stored only in the OS
 credential store or transient process memory.
 
-Use `--read-only` to block commands with local or remote write effects before
-credentials are read:
+Inspect and create config files with:
 
 ```bash
-toolmux --read-only mcp ls -R
+toolmux config paths
+toolmux config show
+toolmux config init --global
+toolmux config init --project
+toolmux config edit --global
+```
+
+`toolmux config show` prints the merged effective config by default. Use
+`--global` or `--project` to print only one config file.
+
+Use `--read-only` to block tool calls with local or remote write effects before
+tool credentials are read:
+
+```bash
+toolmux --read-only google drive available
 toolmux --read-only slack conversations_add_message \
   --channel_id C123456 \
   --text "This will be blocked"
 ```
 
-Use local policy files for project guardrails:
+Use local policy files for project guardrails around tool execution:
 
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "mcp ls"
+toolmux policy check --command "google drive available"
 ```
 
 Policy discovery order:

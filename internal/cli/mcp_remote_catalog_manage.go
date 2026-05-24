@@ -313,14 +313,3 @@ func removeMCPRemoteCatalogServers(names []string, cacheDir string) ([]string, e
 	sort.Strings(ordered)
 	return ordered, nil
 }
-
-func mcpRemoteCatalogCommandModifies(parts []string) bool {
-	for _, part := range parts {
-		if part == "--manage" || part == "--enable" || part == "--disable" ||
-			strings.HasPrefix(part, "--manage=") ||
-			strings.HasPrefix(part, "--enable=") || strings.HasPrefix(part, "--disable=") {
-			return true
-		}
-	}
-	return false
-}

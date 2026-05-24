@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/fiam/toolmux/internal/actions"
 )
 
 func mcpProfileCommand(opts *options) *cobra.Command {
@@ -30,9 +28,6 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 			}
 			setSelection.Profile = name
 			if _, err := newMCPToolSelector(setSelection); err != nil {
-				return err
-			}
-			if err := authorize(cmd, opts, mcpProfileSetSpec(), args); err != nil {
 				return err
 			}
 			configPath, scope, err := mcpProfileWritePath(setScope)
@@ -68,9 +63,6 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 			name := strings.TrimSpace(args[0])
 			if name == "" {
 				return fmt.Errorf("profile name is required")
-			}
-			if err := authorize(cmd, opts, mcpProfileDefaultSpec(), args); err != nil {
-				return err
 			}
 			configPath, scope, err := mcpProfileWritePath(defaultScope)
 			if err != nil {
@@ -147,53 +139,6 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 	})
 
 	return cmd
-}
-
-func mcpConfigureSpec() actions.Spec {
-	return actions.Command("toolmux.mcp.configure", "configure",
-		actions.Use("mcp configure [agent...]"),
-		actions.Short("Configure agent MCP settings"),
-		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("agent-config"),
-	)
-}
-
-func mcpEnableSpec() actions.Spec {
-	return actions.Command("toolmux.mcp.enable", "enable",
-		actions.Use("mcp enable [agent...]"),
-		actions.Short("Enable Toolmux MCP for agents"),
-		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("agent-config"),
-	)
-}
-
-func mcpDisableSpec() actions.Spec {
-	return actions.Command("toolmux.mcp.disable", "disable",
-		actions.Use("mcp disable [agent...]"),
-		actions.Short("Disable Toolmux MCP for agents"),
-		actions.RBAC("agent_config", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("agent-config"),
-	)
-}
-
-func mcpProfileSetSpec() actions.Spec {
-	return actions.Command("toolmux.mcp.profile.set", "set",
-		actions.Use("mcp profile set <name>"),
-		actions.Short("Create or update MCP tool profile"),
-		actions.RBAC("mcp_profile", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("agent-config"),
-		actions.ExactArgs(1),
-	)
-}
-
-func mcpProfileDefaultSpec() actions.Spec {
-	return actions.Command("toolmux.mcp.profile.default", "default",
-		actions.Use("mcp profile default <name>"),
-		actions.Short("Set default MCP tool profile"),
-		actions.RBAC("mcp_profile", actions.VerbUpdate, actions.EffectNone, actions.EffectWrite),
-		actions.Risks("agent-config"),
-		actions.ExactArgs(1),
-	)
 }
 
 func addMCPToolSelectionFlags(cmd *cobra.Command, selection *mcpToolSelection) {

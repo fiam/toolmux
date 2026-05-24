@@ -230,8 +230,8 @@ provider-specific TUI, and do not let provider commands hand-roll ANSI styles,
 pagers, prompts, or table layouts.
 Native provider behavior must be exposed through provider-owned action specs so
 the CLI and MCP surfaces stay aligned. Keep provider handlers in provider
-client packages; the CLI root may only handle policy, context construction,
-invocation, and shared rendering.
+client packages; the CLI root may only handle policy for provider tool
+execution, context construction, invocation, and shared rendering.
 
 Provider commands must return structured results and route all presentation
 through `internal/output`. Human table output may use shared styles, color,
@@ -263,9 +263,12 @@ scope.
 
 MCP tool profiles are non-secret configuration under the general Toolmux config
 `mcp` key. Global config lives at `~/.toolmux/config.yaml`; project config
-lives in `.toolmux/config.yaml`. Manage both through `toolmux mcp profile`.
+lives in `.toolmux/config.yaml`. Inspect, initialize, and edit both with
+`toolmux config`; manage profile entries through `toolmux mcp profile`.
 Project config overrides global config for matching profile names and default
-profile selection, similar to Git config layering.
+profile selection, similar to Git config layering. The root `toolmux config`
+command is a CLI-only management surface and must never be listed as an MCP
+tool.
 Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
 regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
 and tests in sync when changing selection behavior.
@@ -305,15 +308,18 @@ sessionful remote servers. Remote MCP `tools/call` response inactivity timeout
 defaults to 60 seconds and is controlled by the top-level
 `--mcp-tool-call-timeout` flag for both CLI remote commands and
 `toolmux mcp serve`.
+Root MCP management commands such as `mcp ls`, `mcp show`, `mcp sync`,
+`mcp auth`, `mcp defaults`, and `mcp schema` are CLI maintenance surfaces and
+do not need policy metadata because they are not tools.
 Command-backed MCP servers use the `stdio` transport and are added with
 `toolmux add <command> [args...]` when the input is not a URL, catalog entry,
 or native toolbox. Use `--name` to override the derived namespace, `--stdio` or
 `--transport stdio` only to disambiguate a command name that matches a catalog
 or native toolbox, and `--` before command-owned flags. Stdio command
 definitions are non-secret config, inherit the Toolmux process environment, do
-not use Toolmux-managed MCP OAuth or bearer tokens, and must run policy before
-the configured process is started. Treat stdio tool calls as both remote-write
-and local-write for policy because the configured command can touch local
+not use Toolmux-managed MCP OAuth or bearer tokens. Treat stdio tool calls as
+both remote-write and local-write for policy because the configured command can
+touch local
 files, caches, containers, browsers, or network services.
 `toolmux mcp auth login` must use MCP protected-resource metadata discovery,
 authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
@@ -364,13 +370,12 @@ plain and stable for agents.
 Toolbox status is owned by the root `status [toolbox...]` command, which should
 report registered toolbox state, backend kind, stored auth type, tool count,
 scope, and source URL when available. Do not add provider-specific
-`status` subcommands. The root status command must construct its own policy
-spec before reading credentials.
+`status` subcommands. The root status command is CLI-only management and does
+not need policy metadata.
 
 Diagnostics are owned by the root `doctor` command. Do not add
 provider-specific `doctor` subcommands. `doctor` should run active core and
-remote MCP diagnostics with actionable remediation, while still checking policy
-before reading credentials.
+remote MCP diagnostics with actionable remediation as CLI-only management.
 
 When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
@@ -437,18 +442,17 @@ Expose Slack identity through provider-owned read-only actions such as
 `slack.auth_test`; do not add special self-DM shortcuts when existing Slack
 message commands can address a user or configured conversation.
 
-Policy checks must run before credential reads, token refresh, or provider API
-calls.
-Every executable command and alias needs policy metadata for evaluation. For
-provider commands, add data-driven action specs with both `remote_effect` and
-`local_effect`; do not register placeholder specs for providers that are not
-implemented yet.
+Policy checks must run before tool credential reads, token refresh, or provider
+API calls. Only executable tools need policy metadata: native provider leaf
+actions and synthetic remote MCP tool commands. For provider commands, add
+data-driven action specs with both `remote_effect` and `local_effect`; do not
+register placeholder specs for providers that are not implemented yet.
 
-Remote MCP management commands and synthetic remote tool commands also need
-policy metadata. Imported remote MCP server names must not collide with native
-top-level commands or aliases. If a newly added native command collides with an
-existing imported MCP server, startup must fail with an actionable error that
-prints `toolmux mcp rename <old-name> <new-name>`.
+Remote MCP management commands do not need policy metadata. Synthetic remote
+MCP tool commands do need policy metadata. Imported remote MCP server names
+must not collide with native top-level commands or aliases. If a newly added
+native command collides with an existing imported MCP server, startup must fail
+with an actionable error that prints `toolmux mcp rename <old-name> <new-name>`.
 Synthetic remote MCP tool commands must generate flags for representable
 top-level input-schema properties, keep help focused on command usage, expose
 full schemas through the `toolmux mcp schema` command, and provide
@@ -459,9 +463,9 @@ Provider command paths, argument constraints, flags, group help, aliases, and
 leaf help must come from a provider-owned `actions.Spec` tree. Use the same
 type for group nodes and leaf actions, and let upper layers walk the tree
 instead of maintaining a parallel group model. Do not hardcode provider command
-trees or provider command flags in the Cobra root layer. Root `add`, `remove`,
-`rm`, `status`, and `doctor` are the only code-driven CLI-only command
-surfaces.
+trees or provider command flags in the Cobra root layer. Root management
+surfaces such as `add`, `remove`, `rm`, `list`, `status`, `doctor`, `config`,
+`policy`, `workflow`, and `mcp` are code-driven CLI-only command surfaces.
 Use `actions.Short` for compact command listings and `actions.Description` for
 detailed long help and MCP `tools/list` descriptions. Keep provider
 descriptions concrete enough for agents to understand identifiers, timestamp
@@ -472,8 +476,9 @@ in `internal/cli`. Register provider-owned `actions.Handler` functions through
 the provider catalog, return structured results, and implement shared
 renderable interfaces from `internal/actions` when human table output needs
 tables, Markdown, text, browser opens, or follow-up interactions. The Cobra
-layer may walk metadata, evaluate policy, invoke handlers, and render shared
-results; it must not contain provider-specific command implementations.
+layer may walk metadata, evaluate policy for tool execution, invoke handlers,
+and render shared results; it must not contain provider-specific command
+implementations.
 
 Provider facets self-register. Use `internal/providers/<provider>/client` for
 CLI/API/MCP action metadata, handlers, diagnostics, and API clients; use

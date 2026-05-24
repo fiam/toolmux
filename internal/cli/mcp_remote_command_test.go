@@ -371,9 +371,9 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	if dottedSchemaOutput != schemaOutput {
 		t.Fatalf("expected dotted schema lookup to match two-arg lookup:\n%s\n---\n%s", dottedSchemaOutput, schemaOutput)
 	}
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp schema linear.calculate")
-	if !strings.Contains(policyOutput, "allowed") {
-		t.Fatalf("expected schema command policy check, got %q", policyOutput)
+	_, policyErr := runRootForRemoteTestError(t, env, "policy", "check", "--command", "mcp schema linear.calculate")
+	if policyErr == nil || !strings.Contains(policyErr.Error(), "no command spec found") {
+		t.Fatalf("expected schema command outside policy, got %v", policyErr)
 	}
 
 	_, rootSchemaErr := runRootForRemoteTestError(t, env, "schema", "linear.calculate")

@@ -92,9 +92,6 @@ func mcpRemoteRenameCommand(opts *options) *cobra.Command {
 			if err := ensureMCPRemoteNameAvailable(cmd.Root(), newName); err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpRemoteRenameSpec(), args); err != nil {
-				return err
-			}
 			config.MCP.Servers[newName] = server
 			delete(config.MCP.Servers, oldName)
 			if err := writeToolmuxConfigFile(configPath, config); err != nil {
@@ -127,9 +124,6 @@ func toolboxRemoveCommand(opts *options) *cobra.Command {
 			}
 			removals, err := planMCPRemoteRemovals(names, scope)
 			if err != nil {
-				return err
-			}
-			if err := authorize(cmd, opts, toolboxRemoveSpec(), args); err != nil {
 				return err
 			}
 			store, err := opts.credentials()
@@ -176,9 +170,6 @@ func removeNativeToolboxes(cmd *cobra.Command, opts *options, args []string, acc
 	}
 	if len(native) != len(args) {
 		return true, fmt.Errorf("cannot remove native and remote toolboxes in one command")
-	}
-	if err := authorize(cmd, opts, toolboxRemoveSpec(), args); err != nil {
-		return true, err
 	}
 	store, err := opts.credentials()
 	if err != nil {
@@ -315,9 +306,6 @@ func mcpRemoteAuthSetCommand(opts *options) *cobra.Command {
 			if normalizeMCPRemoteServer(entry.Server).Transport == mcpRemoteTransportStdio {
 				return fmt.Errorf("MCP server %q uses stdio; configure auth in the command environment or arguments", name)
 			}
-			if err := authorize(cmd, opts, mcpRemoteAuthSetSpec(), args); err != nil {
-				return err
-			}
 			token, err := mcpRemoteBearerTokenFromFlags(cmd, bearerToken, bearerTokenEnv, bearerTokenStdin)
 			if err != nil {
 				return err
@@ -353,9 +341,6 @@ func mcpRemoteAuthRemoveCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := authorize(cmd, opts, mcpRemoteAuthRemoveSpec(), args); err != nil {
-				return err
-			}
 			store, err := opts.credentials()
 			if err != nil {
 				return err
@@ -383,9 +368,6 @@ func mcpRemoteAuthStatusCommand(opts *options) *cobra.Command {
 				return err
 			} else if !ok {
 				return fmt.Errorf("MCP server %q is not registered", name)
-			}
-			if err := authorize(cmd, opts, mcpRemoteAuthStatusSpec(), args); err != nil {
-				return err
 			}
 			tokens, ok, err := loadMCPRemoteStoredTokens(commandContext(cmd), opts, name)
 			if err != nil {

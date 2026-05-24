@@ -17,9 +17,9 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	upstream := newFakeMCPRemoteOAuthServer(t, &called)
 	defer upstream.Close()
 
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "mcp auth login linear")
-	if !strings.Contains(policyOutput, "allowed") {
-		t.Fatalf("expected OAuth auth policy check, got %q", policyOutput)
+	_, policyErr := runRootForRemoteTestError(t, env, "policy", "check", "--command", "mcp auth login linear")
+	if policyErr == nil || !strings.Contains(policyErr.Error(), "no command spec found") {
+		t.Fatalf("expected OAuth auth command outside policy, got %v", policyErr)
 	}
 	addOutput := runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
 	for _, want := range []string{

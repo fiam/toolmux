@@ -51,9 +51,6 @@ func workflowInitCommand(opts *options) *cobra.Command {
 			if templateName == "" {
 				templateName = name
 			}
-			if err := authorize(cmd, opts, workflowInitSpec(), args); err != nil {
-				return err
-			}
 			workflow, err := loadWorkflowTemplate(commandContext(cmd), opts.httpClient, templateName)
 			if err != nil {
 				return err
@@ -99,9 +96,6 @@ func workflowListCommand(opts *options) *cobra.Command {
 		Short:   "List workflows",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, workflowListSpec(), args); err != nil {
-				return err
-			}
 			entries, err := workflowEntries(opts.workDir)
 			if err != nil {
 				return err
@@ -133,9 +127,6 @@ func workflowShowCommand(opts *options) *cobra.Command {
 		Short: "Show a workflow",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, workflowShowSpec(), args); err != nil {
-				return err
-			}
 			entry, workflow, err := lookupWorkflow(args[0], opts.workDir)
 			if err != nil {
 				return err
@@ -156,9 +147,6 @@ func workflowRenderCommand(opts *options) *cobra.Command {
 		Short: "Render a workflow prompt",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, workflowRenderSpec(), args); err != nil {
-				return err
-			}
 			result, err := renderWorkflowByName(args[0], opts.workDir, inputs)
 			if err != nil {
 				return err
@@ -182,9 +170,6 @@ func workflowRunCommand(opts *options) *cobra.Command {
 		Short: "Run a workflow with a local agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, workflowRunSpec(), args); err != nil {
-				return err
-			}
 			entry, workflow, err := lookupWorkflow(args[0], opts.workDir)
 			if err != nil {
 				return err
@@ -225,9 +210,6 @@ func workflowTemplatesCommand(opts *options) *cobra.Command {
 		Short: "List workflow templates",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, workflowListSpec(), args); err != nil {
-				return err
-			}
 			templates := workflowTemplateCatalog()
 			return writeValue(cmd, opts, templates, func(w io.Writer) {
 				human := humanOutputOptions(cmd, opts)
@@ -261,9 +243,6 @@ func workflowConfigCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] != "default-agent" {
 				return fmt.Errorf("unknown workflow config key %q", args[0])
-			}
-			if err := authorize(cmd, opts, workflowConfigSetDefaultAgentSpec(), args); err != nil {
-				return err
 			}
 			agentName := ""
 			if len(args) == 2 {

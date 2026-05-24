@@ -15,9 +15,6 @@ import (
 )
 
 func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
-	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), args); err != nil {
-		return mcpRemoteCache{}, false, err
-	}
 	token := ""
 	if entry.Server.Transport != mcpRemoteTransportStdio {
 		var err error
@@ -55,10 +52,6 @@ func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemo
 		syncProgress.Warn("MCP server metadata sync needs refreshed auth")
 		return mcpRemoteCache{}, true, err
 	}
-	if authErr := authorize(cmd, opts, mcpRemoteAuthLoginSpec(), []string{entry.Name}); authErr != nil {
-		syncProgress.Warn("MCP OAuth login denied")
-		return mcpRemoteCache{}, true, fmt.Errorf("%s; OAuth login was denied: %w", err.Error(), authErr)
-	}
 	syncProgress.Done("MCP server requires OAuth")
 	fmt.Fprintf(cmd.OutOrStdout(), "MCP server %s requires auth; starting OAuth login\n", entry.Name)
 	tokens, loginErr := loginMCPRemoteOAuth(cmd, opts, entry, mcpRemoteAuthLoginOptions{Timeout: 2 * time.Minute})
@@ -90,9 +83,6 @@ func refreshMCPRemoteCacheIfStale(ctx context.Context, cmd *cobra.Command, opts 
 	}
 	if ok && mcpRemoteCacheFresh(cache, time.Now().UTC()) {
 		return cache, true
-	}
-	if err := authorize(cmd, opts, mcpRemoteSyncSpec(), []string{entry.Name}); err != nil {
-		return cache, ok
 	}
 	token := ""
 	if entry.Server.Transport != mcpRemoteTransportStdio {

@@ -50,16 +50,10 @@ func toolboxCatalogCommand(opts *options) *cobra.Command {
 				if filters.Internal && !filters.MCP {
 					return fmt.Errorf("catalog management only applies to MCP catalog entries")
 				}
-				if err := authorize(cmd, opts, toolboxCatalogManageSpec(), args); err != nil {
-					return err
-				}
 				if manage {
 					return manageMCPRemoteCatalogInteractive(cmd, opts, scope, syncEnabled)
 				}
 				return applyMCPRemoteCatalogChanges(cmd, opts, scope, enable, disable, syncEnabled)
-			}
-			if err := authorize(cmd, opts, toolboxCatalogListSpec(), args); err != nil {
-				return err
 			}
 			entries, err := toolboxCatalogEntries(commandContext(cmd), cmd.Root(), opts, filters)
 			if err != nil {

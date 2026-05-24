@@ -15,7 +15,7 @@ import (
 func policyCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "policy",
-		Short: "Inspect and evaluate local command policy",
+		Short: "Inspect and evaluate local tool policy",
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -40,7 +40,7 @@ func policyCommand(opts *options) *cobra.Command {
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "catalog",
-		Short: "List policy-aware commands",
+		Short: "List policy-aware tools",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return writeCatalog(cmd, opts)
 		},
@@ -50,7 +50,7 @@ func policyCommand(opts *options) *cobra.Command {
 		var commandLine string
 		sub := &cobra.Command{
 			Use:   name,
-			Short: "Evaluate a command against local policy",
+			Short: "Evaluate a tool command against local policy",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if commandLine == "" {
 					return fmt.Errorf("--command is required")

@@ -24,9 +24,6 @@ func doctorCommand(opts *options) *cobra.Command {
 		Short: "Check Toolmux setup",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, doctorSpec(), args); err != nil {
-				return err
-			}
 			diagnostics := coreDiagnostics(opts)
 			if diagnosticsHaveFailure(diagnostics) {
 				return writeDiagnostics(cmd, opts, diagnostics)

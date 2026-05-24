@@ -90,7 +90,8 @@ Toolmux MCP server from agents that are unchecked. Use `toolmux mcp enable`
 and `toolmux mcp disable` for non-interactive agent setup and teardown. MCP
 tool profiles are stored in the general Toolmux config under the `mcp` key.
 Global config is `~/.toolmux/config.yaml`; project config is
-`.toolmux/config.yaml`. Manage both with `toolmux mcp profile`.
+`.toolmux/config.yaml`. Inspect, initialize, and edit both with
+`toolmux config`; manage profile entries with `toolmux mcp profile`.
 Project config overrides global config for matching profile names and default
 profile selection.
 
@@ -243,8 +244,8 @@ Required repository secrets:
 
 1. Keep changes narrowly scoped.
 2. Prefer existing package patterns over new abstractions.
-3. Add or update policy metadata before a command can read credentials.
-4. Run policy checks before token reads or provider API calls.
+3. Add or update provider action metadata before exposing a tool.
+4. Run policy checks before tool token reads or provider API calls.
 5. Keep human output in `internal/output`.
 6. Keep JSON/YAML output stable and free of ANSI escapes.
 7. Add fake-upstream tests for provider behavior.
@@ -385,20 +386,24 @@ OAuth codes, provider tokens, `.env`, `.envrc`, or local credential material.
 
 ## Policy and RBAC
 
-Every executable command and alias needs policy metadata. Policy must be
-evaluated before:
+Only executable tools need policy metadata: native provider leaf actions and
+synthetic remote MCP tool commands. Root management commands such as `config`,
+`list`, `status`, `doctor`, `add`, `remove`, `workflow`, and MCP setup/auth
+commands are ordinary CLI maintenance surfaces and should not appear in
+`policy catalog`.
+
+Policy must be evaluated before tool execution does any of the following:
 
 1. Loading provider tokens from the credential store.
 2. Refreshing tokens.
 3. Calling provider APIs.
-4. Opening browser flows for provider auth.
 
 Use these commands while developing:
 
 ```bash
 ./bin/toolmux policy catalog
-./bin/toolmux policy check --command "mcp ls"
-./bin/toolmux policy check --command "list --enable linear"
+./bin/toolmux policy check --command "google drive available"
+./bin/toolmux policy check --command "linear create_issue"
 ./bin/toolmux policy doctor
 ```
 
@@ -415,9 +420,10 @@ that tree instead of maintaining separate command models.
 Provider command execution belongs with the provider too. Add client action
 handlers under `internal/providers/<provider>/client`, expose them through the
 provider catalog, and return typed results. The CLI root should only evaluate
-policy, construct an action context, invoke the handler, and render results
-through shared `internal/actions` and `internal/output` interfaces. Do not add
-provider-specific Cobra files under `internal/cli`.
+policy for provider tool actions, construct an action context, invoke the
+handler, and render results through shared `internal/actions` and
+`internal/output` interfaces. Do not add provider-specific Cobra files under
+`internal/cli`.
 
 Provider facets self-register through package `init()` functions. Keep those
 functions pure and static: no env reads, I/O, network calls, credentials,

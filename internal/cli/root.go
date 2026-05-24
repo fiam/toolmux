@@ -118,6 +118,7 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(statusCommand(opts))
 	root.AddCommand(doctorCommand(opts))
 	root.AddCommand(toolboxCatalogCommand(opts))
+	root.AddCommand(configCommand(opts))
 	root.AddCommand(policyCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(workflowCommand(opts))

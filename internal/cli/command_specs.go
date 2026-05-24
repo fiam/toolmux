@@ -42,47 +42,11 @@ func writeCatalog(cmd *cobra.Command, opts *options) error {
 }
 
 func allPolicyCommandSpecs(opts *options) []policy.CommandSpec {
-	specs := rootCommandSpecs()
-	specs = append(specs, providers.CommandSpecs()...)
+	specs := providers.CommandSpecs()
 	specs = append(specs, cachedMCPRemoteCommandSpecs(opts)...)
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
 	})
-	return specs
-}
-
-func rootCommandSpecs() []policy.CommandSpec {
-	specs := []policy.CommandSpec{
-		mcpConfigureSpec(),
-		mcpEnableSpec(),
-		mcpDisableSpec(),
-		mcpProfileSetSpec(),
-		mcpProfileDefaultSpec(),
-		toolboxAddSpec(),
-		toolboxRemoveSpec(),
-		toolboxStatusSpec(),
-		toolboxCatalogListSpec(),
-		toolboxCatalogManageSpec(),
-		doctorSpec(),
-		mcpRemoteSyncSpec(),
-		mcpRemoteRenameSpec(),
-		mcpRemoteListSpec(),
-		mcpRemoteShowSpec(),
-		mcpRemoteDefaultsListSpec(),
-		mcpRemoteDefaultsSetSpec(),
-		mcpRemoteDefaultsRemoveSpec(),
-		mcpRemoteAuthLoginSpec(),
-		mcpRemoteAuthSetSpec(),
-		mcpRemoteAuthRemoveSpec(),
-		mcpRemoteAuthStatusSpec(),
-		schemaSpec(),
-		workflowInitSpec(),
-		workflowListSpec(),
-		workflowShowSpec(),
-		workflowRenderSpec(),
-		workflowRunSpec(),
-		workflowConfigSetDefaultAgentSpec(),
-	}
 	return specs
 }
 
@@ -121,9 +85,6 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 
 func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool) {
 	parts := strings.Fields(commandLine)
-	if spec, ok := rootSpecForCommandParts(parts); ok {
-		return spec, true
-	}
 	if spec, ok := mcpRemoteSpecForCommandParts(opts, parts); ok {
 		return spec, true
 	}
@@ -133,146 +94,6 @@ func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool
 		}
 	}
 	return policy.CommandSpec{}, false
-}
-
-func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) == 0 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[0] {
-	case "add":
-		return toolboxAddSpec(), true
-	case "remove", "rm":
-		return toolboxRemoveSpec(), true
-	case "status":
-		return toolboxStatusSpec(), true
-	case "doctor":
-		return doctorSpec(), true
-	case "list", "ls":
-		return rootCatalogSpecForCommandParts(parts), true
-	case "workflow":
-		return workflowSpecForCommandParts(parts)
-	case "mcp":
-		return rootMCPSpecForCommandParts(parts)
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func rootCatalogSpecForCommandParts(parts []string) policy.CommandSpec {
-	if mcpRemoteCatalogCommandModifies(parts) {
-		return toolboxCatalogManageSpec()
-	}
-	return toolboxCatalogListSpec()
-}
-
-func workflowSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) < 2 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[1] {
-	case "init", "add":
-		return workflowInitSpec(), true
-	case "list", "ls":
-		return workflowListSpec(), true
-	case "show":
-		return workflowShowSpec(), true
-	case "render":
-		return workflowRenderSpec(), true
-	case "run":
-		return workflowRunSpec(), true
-	case "config":
-		return workflowConfigSpecForCommandParts(parts)
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func workflowConfigSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) >= 4 && parts[2] == "set" && parts[3] == "default-agent" {
-		return workflowConfigSetDefaultAgentSpec(), true
-	}
-	return policy.CommandSpec{}, false
-}
-
-func rootMCPSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) < 2 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[1] {
-	case "configure":
-		return mcpConfigureSpec(), true
-	case "enable":
-		return mcpEnableSpec(), true
-	case "disable":
-		return mcpDisableSpec(), true
-	case "profile":
-		return mcpProfileSpecForCommandParts(parts)
-	case "schema":
-		return schemaSpec(), true
-	case "sync":
-		return mcpRemoteSyncSpec(), true
-	case "rename":
-		return mcpRemoteRenameSpec(), true
-	case "ls", "list":
-		return mcpRemoteListSpec(), true
-	case "show":
-		return mcpRemoteShowSpec(), true
-	case "defaults", "default-args":
-		return mcpDefaultsSpecForCommandParts(parts)
-	case "auth":
-		return mcpAuthSpecForCommandParts(parts)
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func mcpProfileSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) < 3 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[2] {
-	case "set":
-		return mcpProfileSetSpec(), true
-	case "default":
-		return mcpProfileDefaultSpec(), true
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func mcpDefaultsSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) < 3 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[2] {
-	case "ls", "list", "show":
-		return mcpRemoteDefaultsListSpec(), true
-	case "set":
-		return mcpRemoteDefaultsSetSpec(), true
-	case "remove", "rm", "unset":
-		return mcpRemoteDefaultsRemoveSpec(), true
-	default:
-		return policy.CommandSpec{}, false
-	}
-}
-
-func mcpAuthSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
-	if len(parts) < 3 {
-		return policy.CommandSpec{}, false
-	}
-	switch parts[2] {
-	case "login", "connect":
-		return mcpRemoteAuthLoginSpec(), true
-	case "set":
-		return mcpRemoteAuthSetSpec(), true
-	case "remove", "rm":
-		return mcpRemoteAuthRemoveSpec(), true
-	case "status":
-		return mcpRemoteAuthStatusSpec(), true
-	default:
-		return policy.CommandSpec{}, false
-	}
 }
 
 func actionExecutionContext(ctx context.Context, opts *options, store credentials.Store, provider providers.Provider) actions.Context {

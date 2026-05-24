@@ -38,8 +38,13 @@ func TestPolicyCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := out.String()
-	if !strings.Contains(rendered, "toolbox.add") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
-		t.Fatalf("expected action effects in catalog, got %q", rendered)
+	if !strings.Contains(rendered, "google.drive.available") || !strings.Contains(rendered, "Remote") || !strings.Contains(rendered, "Local") {
+		t.Fatalf("expected tool action effects in catalog, got %q", rendered)
+	}
+	for _, rootCommand := range []string{"toolbox.add", "mcp.ls", "toolmux.config"} {
+		if strings.Contains(rendered, rootCommand) {
+			t.Fatalf("policy catalog should not list root command %q, got %q", rootCommand, rendered)
+		}
 	}
 	if strings.Contains(rendered, "gmail.send") {
 		t.Fatalf("catalog should not list unimplemented provider commands, got %q", rendered)
@@ -201,7 +206,7 @@ func TestOpenBrowserCommandDefaults(t *testing.T) {
 	}
 }
 
-func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
+func TestReadOnlyModeBlocksMutatingToolCommand(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{
 		Credentials: credentials.NewMemoryStore(),
@@ -209,13 +214,13 @@ func TestReadOnlyModeBlocksMutatingRootCommand(t *testing.T) {
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
-	cmd.SetArgs([]string{"--read-only", "add", "https://example.com/mcp", "--name", "demo", "--no-sync", "--global"})
+	cmd.SetArgs([]string{"--read-only", "slack", "conversations_add_message", "--channel_id", "C123", "--text", "hello"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected read-only denial")
 	}
-	if !strings.Contains(err.Error(), "read-only mode blocks command toolbox.add") {
+	if !strings.Contains(err.Error(), "read-only mode blocks command slack.conversations_add_message") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

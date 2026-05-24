@@ -39,9 +39,6 @@ func statusCommand(opts *options) *cobra.Command {
 		Short: "Show toolbox status",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := authorize(cmd, opts, toolboxStatusSpec(), args); err != nil {
-				return err
-			}
 			remoteArgs, nativeProviders := partitionNativeStatusArgs(args)
 			var selected []mcpRemoteServerEntry
 			if len(args) == 0 || len(remoteArgs) > 0 {
