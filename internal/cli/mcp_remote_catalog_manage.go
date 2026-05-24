@@ -135,7 +135,7 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 			}
 			if rootNativeCommandHasName(cmd.Root(), spec.RegisteredName) {
 				if spec.CatalogName == spec.RegisteredName {
-					return fmt.Errorf("MCP server name %q conflicts with an existing Toolmux command; use `toolmux mcp catalog --enable %s=<new-name>`", spec.RegisteredName, spec.CatalogName)
+					return fmt.Errorf("MCP server name %q conflicts with an existing Toolmux command; use `toolmux list --enable %s=<new-name>`", spec.RegisteredName, spec.CatalogName)
 				}
 				return fmt.Errorf("MCP server name %q conflicts with an existing Toolmux command; choose a different name", spec.RegisteredName)
 			}

@@ -211,7 +211,7 @@ func mcpRemoteCommandAllowsConflicts(cmd *cobra.Command) bool {
 		return false
 	}
 	switch path[2] {
-	case "sync", "rename", "ls", "list", "show", "catalog", "available", "auth":
+	case "sync", "rename", "ls", "list", "show", "auth":
 		return true
 	default:
 		return false
@@ -301,17 +301,19 @@ func toolboxStatusSpec() actions.Spec {
 }
 
 func toolboxCatalogListSpec() actions.Spec {
-	return actions.Command("toolbox.catalog", "catalog",
-		actions.Use("catalog [--mcp|--internal]"),
+	return actions.Command("toolbox.list", "list",
+		actions.Use("list [--mcp|--internal]"),
 		actions.Short("List available toolboxes"),
+		actions.Aliases("ls"),
 		actions.RBAC("toolbox_catalog", actions.VerbList, actions.EffectNone, actions.EffectRead),
 	)
 }
 
 func toolboxCatalogManageSpec() actions.Spec {
-	return actions.Command("toolbox.catalog.manage", "catalog",
-		actions.Use("catalog --manage|--enable <name>|--disable <name>"),
+	return actions.Command("toolbox.list.manage", "list",
+		actions.Use("list --manage|--enable <name>|--disable <name>"),
 		actions.Short("Enable or disable known MCP servers"),
+		actions.Aliases("ls"),
 		actions.RBAC("mcp_server", actions.VerbUpdate, actions.EffectRead, actions.EffectWrite),
 		actions.Risks("mcp-config", "remote-mcp"),
 	)
@@ -365,23 +367,6 @@ func mcpRemoteShowSpec() actions.Spec {
 		actions.Use("mcp show <name>"),
 		actions.Short("Show a registered remote MCP server"),
 		actions.RBAC("mcp_server", actions.VerbRead, actions.EffectNone, actions.EffectRead),
-	)
-}
-
-func mcpRemoteCatalogListSpec() actions.Spec {
-	return actions.Command("mcp.catalog", "catalog",
-		actions.Use("mcp catalog"),
-		actions.Short("List known remote MCP servers"),
-		actions.RBAC("mcp_server_catalog", actions.VerbList, actions.EffectNone, actions.EffectRead),
-	)
-}
-
-func mcpRemoteCatalogManageSpec() actions.Spec {
-	return actions.Command("mcp.catalog.manage", "catalog",
-		actions.Use("mcp catalog --manage|--enable <name>|--disable <name>"),
-		actions.Short("Enable or disable known remote MCP servers"),
-		actions.RBAC("mcp_server", actions.VerbUpdate, actions.EffectRead, actions.EffectWrite),
-		actions.Risks("mcp-config", "remote-mcp"),
 	)
 }
 

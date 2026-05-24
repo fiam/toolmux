@@ -26,9 +26,6 @@ func mcpCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(mcpRemoteAuthCommand(opts))
 	cmd.AddCommand(mcpRemoteListCommand(opts))
 	cmd.AddCommand(mcpRemoteShowCommand(opts))
-	mcpCatalog := mcpRemoteCatalogCommand(opts)
-	mcpCatalog.Hidden = true
-	cmd.AddCommand(mcpCatalog)
 	cmd.AddCommand(mcpRemoteDefaultsCommand(opts))
 	cmd.AddCommand(schemaCommand(opts))
 	cmd.AddCommand(mcpProfileCommand(opts))

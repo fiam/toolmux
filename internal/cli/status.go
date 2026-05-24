@@ -97,7 +97,7 @@ func statusCommand(opts *options) *cobra.Command {
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope", "Tools", "Source"},
+					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope/Profile", "Tools", "Source"},
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
 				})
@@ -206,6 +206,8 @@ func readNativeToolboxStatus(ctx context.Context, opts *options, store credentia
 		URL:       providerBaseURL(opts, provider),
 		Transport: "native",
 	}
+	tools := len(providers.ActionSpecs(provider))
+	item.Tools = &tools
 	tokens, err := store.LoadOAuthTokens(ctx, credentials.ConnectionRef{
 		Profile:   opts.profile,
 		Provider:  providers.CredentialProviderID(provider),

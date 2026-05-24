@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -8,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fiam/toolmux/internal/credentials"
 	"github.com/fiam/toolmux/internal/output"
-	"github.com/fiam/toolmux/internal/providers"
 )
 
 func mcpRemoteCatalogDefinitionForServer(serverName string, server mcpRemoteServer) (string, mcpRemoteCatalogDefinition, bool) {
@@ -31,48 +32,6 @@ func mcpRemoteCatalogDefinitionForServer(serverName string, server mcpRemoteServ
 	return "", mcpRemoteCatalogDefinition{}, false
 }
 
-func mcpRemoteCatalogCommand(opts *options) *cobra.Command {
-	var scope mcpProfileScopeOptions
-	var enable []string
-	var disable []string
-	var manage bool
-	var syncEnabled bool
-	cmd := &cobra.Command{
-		Use:     "catalog",
-		Aliases: []string{"available"},
-		Short:   "List known remote MCP servers",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			modifies := manage || len(enable) > 0 || len(disable) > 0
-			if modifies {
-				if err := authorize(cmd, opts, mcpRemoteCatalogManageSpec(), args); err != nil {
-					return err
-				}
-				if manage {
-					return manageMCPRemoteCatalogInteractive(cmd, opts, scope, syncEnabled)
-				}
-				return applyMCPRemoteCatalogChanges(cmd, opts, scope, enable, disable, syncEnabled)
-			}
-			if err := authorize(cmd, opts, mcpRemoteCatalogListSpec(), args); err != nil {
-				return err
-			}
-			entries, err := mcpRemoteCatalogEntries(cmd.Root(), opts)
-			if err != nil {
-				return err
-			}
-			return writeValue(cmd, opts, entries, func(w io.Writer) {
-				renderMCPRemoteCatalogTable(w, cmd, opts, entries)
-			})
-		},
-	}
-	cmd.Flags().StringArrayVar(&enable, "enable", nil, "known MCP server name to register; use name=alias to choose the command namespace; repeatable")
-	cmd.Flags().StringArrayVar(&disable, "disable", nil, "known MCP server name to remove from config; repeatable")
-	cmd.Flags().BoolVar(&manage, "manage", false, "open an interactive selector to enable or disable known MCP servers")
-	cmd.Flags().BoolVar(&syncEnabled, "sync", false, "sync newly enabled MCP servers after registering them")
-	addMCPProfileScopeFlags(cmd, &scope)
-	return cmd
-}
-
 func toolboxCatalogCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	var enable []string
@@ -81,8 +40,8 @@ func toolboxCatalogCommand(opts *options) *cobra.Command {
 	var syncEnabled bool
 	var filters toolboxCatalogFilters
 	cmd := &cobra.Command{
-		Use:     "catalog",
-		Aliases: []string{"available"},
+		Use:     "list",
+		Aliases: []string{"ls"},
 		Short:   "List available toolboxes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -102,7 +61,7 @@ func toolboxCatalogCommand(opts *options) *cobra.Command {
 			if err := authorize(cmd, opts, toolboxCatalogListSpec(), args); err != nil {
 				return err
 			}
-			entries, err := toolboxCatalogEntries(cmd.Root(), opts, filters)
+			entries, err := toolboxCatalogEntries(commandContext(cmd), cmd.Root(), opts, filters)
 			if err != nil {
 				return err
 			}
@@ -121,10 +80,18 @@ func toolboxCatalogCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-func toolboxCatalogEntries(root *cobra.Command, opts *options, filters toolboxCatalogFilters) ([]toolboxCatalogEntry, error) {
+func toolboxCatalogEntries(ctx context.Context, root *cobra.Command, opts *options, filters toolboxCatalogFilters) ([]toolboxCatalogEntry, error) {
 	includeMCP, includeInternal := toolboxCatalogIncludes(filters)
+	store, err := opts.credentials()
+	if err != nil {
+		return nil, err
+	}
 	entries := []toolboxCatalogEntry{}
 	if includeMCP {
+		registeredEntries, err := effectiveMCPRemoteServerEntries("")
+		if err != nil {
+			return nil, err
+		}
 		mcpEntries, err := mcpRemoteCatalogEntries(root, opts)
 		if err != nil {
 			return nil, err
@@ -147,10 +114,30 @@ func toolboxCatalogEntries(root *cobra.Command, opts *options, filters toolboxCa
 				MissingDefaultArguments: entry.MissingDefaultArguments,
 				Reason:                  entry.Reason,
 			})
+			item := &entries[len(entries)-1]
+			item.Command = output.JoinList(item.RegisteredNames)
+			if item.Command == "-" {
+				item.Command = ""
+			}
+			if entry.Registered && len(entry.RegisteredNames) > 0 {
+				registeredEntry, ok := findMCPRemoteServerEntry(registeredEntries, entry.RegisteredNames[0])
+				if ok {
+					status, err := readMCPRemoteToolboxStatus(ctx, opts, store, registeredEntry)
+					if err != nil {
+						return nil, err
+					}
+					item.Status = status.Status
+					item.Tools = status.Tools
+				}
+			}
 		}
 	}
 	if includeInternal {
-		entries = append(entries, internalCatalogEntries(opts)...)
+		internalEntries, err := internalCatalogEntries(ctx, opts, store)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, internalEntries...)
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].Name != entries[j].Name {
@@ -168,25 +155,26 @@ func toolboxCatalogIncludes(filters toolboxCatalogFilters) (bool, bool) {
 	return filters.MCP, filters.Internal
 }
 
-func internalCatalogEntries(opts *options) []toolboxCatalogEntry {
+func internalCatalogEntries(ctx context.Context, opts *options, store credentials.Store) ([]toolboxCatalogEntry, error) {
 	providerList := nativeStatusProviders()
 	entries := make([]toolboxCatalogEntry, 0, len(providerList))
 	for _, provider := range providerList {
-		tools := len(providers.ActionSpecs(provider))
+		status, err := readNativeToolboxStatus(ctx, opts, store, provider)
+		if err != nil {
+			return nil, err
+		}
 		entries = append(entries, toolboxCatalogEntry{
-			Name:            provider.ID,
-			Type:            "internal",
-			Status:          "available",
-			Registered:      true,
-			RegisteredNames: []string{provider.ID},
-			Scope:           "built-in",
-			Scopes:          []string{"built-in"},
-			Tools:           &tools,
-			URL:             providerBaseURL(opts, provider),
-			Transport:       "native",
+			Name:       provider.ID,
+			Type:       "internal",
+			Status:     status.Status,
+			Registered: nativeToolboxStatusRegistered(status),
+			Command:    provider.ID,
+			Tools:      status.Tools,
+			URL:        status.URL,
+			Transport:  status.Transport,
 		})
 	}
-	return entries
+	return entries, nil
 }
 
 func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, entries []toolboxCatalogEntry) {
@@ -202,14 +190,14 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 			output.ToneText(human, output.ToneInfo, name),
 			entry.Type,
 			toolboxCatalogStatusCell(human, entry.Status),
-			output.JoinList(entry.RegisteredNames),
+			output.Value(firstNonEmpty(entry.Command, output.JoinList(entry.RegisteredNames))),
 			mcpRemoteScopesLabel(entry.Scopes),
 			tools,
 			output.Value(entry.URL),
 		})
 	}
 	output.RenderTable(w, human, output.Table{
-		Headers: []string{"Name", "Type", "Status", "Registered As", "Scope", "Tools", "URL"},
+		Headers: []string{"Name", "Type", "Status", "Command", "Config Scope", "Tools", "URL"},
 		Rows:    rows,
 		Empty:   "no known toolboxes",
 	})
@@ -217,8 +205,6 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 
 func toolboxCatalogStatusCell(human output.Options, status string) string {
 	switch status {
-	case "registered":
-		return output.ToneText(human, output.ToneSuccess, "registered")
 	case "available":
 		return output.ToneText(human, output.ToneInfo, "available")
 	case "alias_required":
@@ -226,6 +212,6 @@ func toolboxCatalogStatusCell(human output.Options, status string) string {
 	case "unavailable":
 		return output.ToneText(human, output.ToneWarning, "unavailable")
 	default:
-		return output.Value(status)
+		return output.StatusBadge(human, status)
 	}
 }

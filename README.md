@@ -25,7 +25,7 @@ CLI.
 | Area | What is supported |
 | --- | --- |
 | Native toolboxes | Slack, Google Drive |
-| Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux catalog --mcp` |
+| Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux list --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
 | Agents | Codex, Claude Code, Gemini CLI |
 | Workflow templates | `slack-recap` |
@@ -34,14 +34,15 @@ Use the CLI for the live list in your installed version:
 
 ```bash
 toolmux --help
-toolmux catalog
-toolmux catalog --mcp
-toolmux catalog --internal
+toolmux list
+toolmux list --mcp
+toolmux list --internal
 toolmux workflow templates
 ```
 
-`toolmux catalog` lists every built-in toolbox and includes a `Type` column so
+`toolmux list` lists every built-in toolbox and includes a `Type` column so
 you can distinguish remote MCP toolboxes from internal Toolmux toolboxes.
+`toolmux ls` is a shortcut for the same command.
 Remote MCP catalog entries are hosted endpoints that can be added and
 authenticated through the server's own OAuth flow without creating your own
 OAuth app first.
@@ -76,8 +77,8 @@ Release archives for macOS, Linux, and Windows are available from
 Start by seeing what Toolmux can connect:
 
 ```bash
-toolmux catalog
-toolmux catalog --mcp
+toolmux list
+toolmux list --mcp
 ```
 
 Add Slack when you are ready to connect a real workspace:
@@ -251,7 +252,7 @@ in two places:
 Add from the built-in catalog:
 
 ```bash
-toolmux catalog
+toolmux list
 toolmux add notion
 toolmux mcp auth login notion
 toolmux mcp sync notion
@@ -434,7 +435,7 @@ Use structured output for scripts and agents:
 
 ```bash
 toolmux --output json mcp ls -R
-toolmux --output yaml catalog
+toolmux --output yaml list
 ```
 
 JSON and YAML output are stable and undecorated: no ANSI escapes, prompts,

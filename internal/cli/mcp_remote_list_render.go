@@ -141,46 +141,6 @@ func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items [
 	}
 }
 
-func renderMCPRemoteCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, entries []mcpRemoteCatalogEntry) {
-	human := humanOutputOptions(cmd, opts)
-	rows := make([][]string, 0, len(entries))
-	for _, entry := range entries {
-		tools := "-"
-		if entry.Tools != nil {
-			tools = fmt.Sprint(*entry.Tools)
-		}
-		name := mcpRemoteCatalogDisplayName(entry.Name, entry.DisplayName)
-		rows = append(rows, []string{
-			output.ToneText(human, output.ToneInfo, name),
-			mcpRemoteCatalogStatusCell(human, entry),
-			output.JoinList(entry.RegisteredNames),
-			mcpRemoteScopesLabel(entry.Scopes),
-			tools,
-			output.Value(entry.URL),
-		})
-	}
-	output.RenderTable(w, human, output.Table{
-		Headers: []string{"Name", "Status", "Registered As", "Scope", "Tools", "URL"},
-		Rows:    rows,
-		Empty:   "no known remote MCP servers",
-	})
-}
-
-func mcpRemoteCatalogStatusCell(human output.Options, entry mcpRemoteCatalogEntry) string {
-	switch entry.Status {
-	case "registered":
-		return output.ToneText(human, output.ToneSuccess, "registered")
-	case "available":
-		return output.ToneText(human, output.ToneInfo, "available")
-	case "alias_required":
-		return output.ToneText(human, output.ToneWarning, "alias required")
-	case "unavailable":
-		return output.ToneText(human, output.ToneWarning, "unavailable")
-	default:
-		return output.Value(entry.Status)
-	}
-}
-
 func sortedMCPRemoteTools(tools []mcpRemoteTool) []mcpRemoteTool {
 	sorted := append([]mcpRemoteTool(nil), tools...)
 	sort.Slice(sorted, func(i, j int) bool {

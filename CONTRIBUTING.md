@@ -117,7 +117,7 @@ the derived namespace, `--stdio` only to disambiguate a command name that
 matches a catalog or native toolbox, and `--` before command-owned flags; use
 `toolmux mcp sync`,
 `toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
-`toolmux catalog`, and `toolmux mcp defaults` for MCP-specific server
+`toolmux list`, and `toolmux mcp defaults` for MCP-specific server
 maintenance. Default arguments are non-secret config values applied only
 to remote tool schemas with matching top-level properties; explicit tool
 arguments override configured defaults. MCP config write commands default to
@@ -164,7 +164,7 @@ keep help focused on command usage, expose full schemas through the top-level
 `toolmux mcp schema` command, and support `-v`/`--verbose` HTTP tracing with
 credential headers redacted. `toolmux add` and `toolmux mcp sync` should
 support the same redacted tracing for sync-time debugging.
-`toolmux catalog` must list all built-in toolboxes, include a toolbox type
+`toolmux list` must list all built-in toolboxes, include a toolbox type
 column, and support `--mcp` and `--internal` filters. MCP catalog entries must
 be listed regardless of registration state and support scriptable
 `--enable`/`--disable` plus interactive `--manage` toggling. Catalog
@@ -398,7 +398,7 @@ Use these commands while developing:
 ```bash
 ./bin/toolmux policy catalog
 ./bin/toolmux policy check --command "mcp ls"
-./bin/toolmux policy check --command "catalog --enable linear"
+./bin/toolmux policy check --command "list --enable linear"
 ./bin/toolmux policy doctor
 ```
 

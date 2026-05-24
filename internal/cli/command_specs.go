@@ -68,8 +68,6 @@ func rootCommandSpecs() []policy.CommandSpec {
 		mcpRemoteRenameSpec(),
 		mcpRemoteListSpec(),
 		mcpRemoteShowSpec(),
-		mcpRemoteCatalogListSpec(),
-		mcpRemoteCatalogManageSpec(),
 		mcpRemoteDefaultsListSpec(),
 		mcpRemoteDefaultsSetSpec(),
 		mcpRemoteDefaultsRemoveSpec(),
@@ -150,7 +148,7 @@ func rootSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 		return toolboxStatusSpec(), true
 	case "doctor":
 		return doctorSpec(), true
-	case "catalog":
+	case "list", "ls":
 		return rootCatalogSpecForCommandParts(parts), true
 	case "workflow":
 		return workflowSpecForCommandParts(parts)
@@ -220,8 +218,6 @@ func rootMCPSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 		return mcpRemoteListSpec(), true
 	case "show":
 		return mcpRemoteShowSpec(), true
-	case "catalog", "available":
-		return mcpCatalogSpecForCommandParts(parts), true
 	case "defaults", "default-args":
 		return mcpDefaultsSpecForCommandParts(parts)
 	case "auth":
@@ -243,13 +239,6 @@ func mcpProfileSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {
 	default:
 		return policy.CommandSpec{}, false
 	}
-}
-
-func mcpCatalogSpecForCommandParts(parts []string) policy.CommandSpec {
-	if mcpRemoteCatalogCommandModifies(parts) {
-		return mcpRemoteCatalogManageSpec()
-	}
-	return mcpRemoteCatalogListSpec()
 }
 
 func mcpDefaultsSpecForCommandParts(parts []string) (policy.CommandSpec, bool) {

@@ -148,7 +148,7 @@ func TestMCPRemoteDefaultArgumentHintComesFromCatalogMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	catalogOutput := runRootForRemoteTest(t, env, "-o", "json", "catalog", "--mcp")
+	catalogOutput := runRootForRemoteTest(t, env, "-o", "json", "list", "--mcp")
 	if !strings.Contains(catalogOutput, "default_argument_hints") || !strings.Contains(catalogOutput, "cloudId") {
 		t.Fatalf("expected catalog output to include cloudId default hint, got %q", catalogOutput)
 	}

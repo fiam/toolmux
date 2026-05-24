@@ -54,6 +54,19 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	out = toolmuxtest.Run(t, deps, "add", "google", "--timeout-seconds", "5")
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
+	out = toolmuxtest.Run(t, deps, "status", "google")
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "8"} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+
+	out = toolmuxtest.Run(t, deps, "list", "--internal")
+	for _, want := range []string{"google", "internal", "connected", "8"} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+	if strings.Contains(out, "built-in") {
+		t.Fatalf("expected internal catalog scope to omit built-in, got:\n%s", out)
+	}
+
 	result = toolmuxtest.RunResult(t, deps, "add", "google", "--scope", googleapi.ScopeDriveMetadata, "--timeout-seconds", "5")
 	if result.Err == nil {
 		t.Fatalf("expected broader Google OAuth scope to fail, got output:\n%s", result.Output)

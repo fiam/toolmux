@@ -166,6 +166,7 @@ type toolboxCatalogEntry struct {
 	Status                  string                         `json:"status" yaml:"status"`
 	Registered              bool                           `json:"registered" yaml:"registered"`
 	RegisteredNames         []string                       `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
+	Command                 string                         `json:"command,omitempty" yaml:"command,omitempty"`
 	Scope                   string                         `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Scopes                  []string                       `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path                    string                         `json:"path,omitempty" yaml:"path,omitempty"`

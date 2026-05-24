@@ -97,7 +97,7 @@ func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
 func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 
-	output := runRootForRemoteTest(t, env, "catalog")
+	output := runRootForRemoteTest(t, env, "list")
 	for _, want := range []string{
 		"mcp",
 		"available",
@@ -109,11 +109,11 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		}
 	}
 
-	enableOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "linear", "--global")
+	enableOutput := runRootForRemoteTest(t, env, "list", "--enable", "linear", "--global")
 	if !strings.Contains(enableOutput, "enabled global MCP server linear") {
 		t.Fatalf("expected enable output, got %q", enableOutput)
 	}
-	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "catalog", "--mcp")
+	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "list", "--mcp")
 	var entries []toolboxCatalogEntry
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
@@ -124,7 +124,7 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 			linear = entry
 		}
 	}
-	if linear.Type != "mcp" || !linear.Registered || linear.Status != "registered" || linear.Scope != "global" {
+	if linear.Type != "mcp" || !linear.Registered || linear.Status != "not_synced" || linear.Scope != "global" {
 		t.Fatalf("expected registered linear catalog entry, got %#v", linear)
 	}
 	if linear.DisplayName != "Linear" {
@@ -134,20 +134,20 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		t.Fatalf("expected linear registered name, got %#v", linear.RegisteredNames)
 	}
 
-	disableOutput := runRootForRemoteTest(t, env, "catalog", "--disable", "linear")
+	disableOutput := runRootForRemoteTest(t, env, "list", "--disable", "linear")
 	if !strings.Contains(disableOutput, "disabled MCP server linear") {
 		t.Fatalf("expected disable output, got %q", disableOutput)
 	}
-	output = runRootForRemoteTest(t, env, "catalog", "--mcp")
+	output = runRootForRemoteTest(t, env, "list", "--mcp")
 	if !strings.Contains(output, "linear") || !strings.Contains(output, "available") {
 		t.Fatalf("expected linear to be available after disable, got:\n%s", output)
 	}
 
-	notionOutput := runRootForRemoteTest(t, env, "catalog", "--enable", "notion", "--global")
+	notionOutput := runRootForRemoteTest(t, env, "list", "--enable", "notion", "--global")
 	if !strings.Contains(notionOutput, "enabled global MCP server notion") {
 		t.Fatalf("expected Notion MCP enable output, got %q", notionOutput)
 	}
-	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "catalog", "--mcp")
+	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "list", "--mcp")
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
 	}
@@ -157,22 +157,38 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 			notion = entry
 		}
 	}
-	if !notion.Registered || notion.Status != "registered" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion" {
+	if !notion.Registered || notion.Status != "not_synced" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion" {
 		t.Fatalf("expected notion registered directly, got %#v", notion)
 	}
-	disableOutput = runRootForRemoteTest(t, env, "catalog", "--disable", "notion")
+	disableOutput = runRootForRemoteTest(t, env, "list", "--disable", "notion")
 	if !strings.Contains(disableOutput, "disabled MCP server notion") {
 		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
 
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "catalog --enable linear")
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "list --enable linear")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected catalog manage policy check, got %q", policyOutput)
 	}
 
-	mcpOutput := runRootForRemoteTest(t, env, "catalog", "--mcp")
+	mcpOutput := runRootForRemoteTest(t, env, "list", "--mcp")
 	if strings.Contains(mcpOutput, "internal") {
-		t.Fatalf("expected --mcp catalog output to omit internal entries, got:\n%s", mcpOutput)
+		t.Fatalf("expected --mcp list output to omit internal entries, got:\n%s", mcpOutput)
+	}
+}
+
+func TestToolboxListAliasAndRemovedLegacyCatalogNames(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+
+	aliasOutput := runRootForRemoteTest(t, env, "ls", "--mcp")
+	if !strings.Contains(aliasOutput, "linear") {
+		t.Fatalf("expected ls alias output to contain linear, got:\n%s", aliasOutput)
+	}
+
+	for _, command := range []string{"catalog", "available"} {
+		output, err := runRootForRemoteTestError(t, env, command)
+		if err == nil {
+			t.Fatalf("expected legacy %s command to fail, got:\n%s", command, output)
+		}
 	}
 }
 
