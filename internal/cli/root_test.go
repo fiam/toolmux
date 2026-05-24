@@ -188,7 +188,6 @@ func TestOpenBrowserCommandDefaults(t *testing.T) {
 		{name: "linux", goosName: "linux", wantCommand: "xdg-open", wantArgs: []string{"https://example.com/picker"}},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			command, args := openBrowserCommand(tt.goosName, "", "", "https://example.com/picker")

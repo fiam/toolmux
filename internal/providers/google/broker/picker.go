@@ -319,7 +319,7 @@ func (b *pickerBroker) publicURL(r *http.Request) string {
 func pickedFileIDs(value string) []pickerFile {
 	seen := map[string]bool{}
 	var files []pickerFile
-	for _, part := range strings.Split(value, ",") {
+	for part := range strings.SplitSeq(value, ",") {
 		id := strings.TrimSpace(part)
 		if id == "" || seen[id] {
 			continue

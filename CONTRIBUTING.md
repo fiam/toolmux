@@ -50,7 +50,8 @@ make lint
 `make lint` builds the `lint` target from the root `Dockerfile`. Contributors
 do not need to install `staticcheck`, `golangci-lint`, `govulncheck`,
 `gosec`, `gitleaks`, `actionlint`, or `yamllint` on the host. The Docker lint
-pass also checks Go formatting and import order through `golangci-lint fmt`.
+pass also checks Go formatting and import order through `golangci-lint fmt`,
+and enforces cyclomatic-complexity checks through `gocyclo`.
 
 GitHub Actions runs these checks for pull requests and pushes to `main`, plus
 race tests, fake-upstream integration tests, coverage generation, binary

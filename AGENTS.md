@@ -124,7 +124,7 @@ CI should run at least:
    `goimports`, and `gci`.
 2. `go vet ./...`.
 3. Dockerfile-based `make lint`, including `staticcheck`, `golangci-lint`,
-   `modernize`, `paralleltest`, `govulncheck`, `gosec`, `gitleaks`,
+   `gocyclo`, `modernize`, `paralleltest`, `govulncheck`, `gosec`, `gitleaks`,
    `actionlint`, and repository-wide YAML linting.
 4. `go test ./...`.
 5. `go test -race ./...`.

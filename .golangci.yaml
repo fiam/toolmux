@@ -5,9 +5,13 @@ run:
 
 linters:
   default: none
+  settings:
+    gocyclo:
+      min-complexity: 30
   enable:
     - bodyclose
     - errorlint
+    - gocyclo
     - govet
     - ineffassign
     - modernize
