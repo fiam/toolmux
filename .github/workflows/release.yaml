@@ -27,7 +27,7 @@ jobs:
   release:
     name: release-please
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Run release-please
         id: release
@@ -53,15 +53,46 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Check Homebrew tap token
+      - name: Validate release secrets
         if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
+          APPLE_CODESIGN_CERT_P12_BASE64: ${{ secrets.APPLE_CODESIGN_CERT_P12_BASE64 }}
+          APPLE_CODESIGN_CERT_PASSWORD: ${{ secrets.APPLE_CODESIGN_CERT_PASSWORD }}
+          APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_API_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+          APPLE_NOTARY_API_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_API_PRIVATE_KEY }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          if [[ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]]; then
-            echo "HOMEBREW_TAP_GITHUB_TOKEN is required to update fiam/homebrew-tap" >&2
+          required_vars=(
+            APPLE_CODESIGN_CERT_P12_BASE64
+            APPLE_CODESIGN_CERT_PASSWORD
+            APPLE_NOTARY_API_KEY_ID
+            APPLE_NOTARY_API_ISSUER_ID
+            APPLE_NOTARY_API_PRIVATE_KEY
+            HOMEBREW_TAP_GITHUB_TOKEN
+          )
+
+          missing=()
+          for name in "${required_vars[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required release secret(s): %s\n' "${missing[*]}" >&2
             exit 1
           fi
+
+      - name: Write App Store Connect API key
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          APPLE_NOTARY_API_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_API_PRIVATE_KEY }}
+          APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_NOTARY_API_PRIVATE_KEY" > "$KEY_PATH"
+          echo "APPLE_NOTARY_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Install registry auth helper
         if: ${{ steps.release.outputs.release_created == 'true' }}
@@ -85,3 +116,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          APPLE_CODESIGN_CERT_P12_BASE64: ${{ secrets.APPLE_CODESIGN_CERT_P12_BASE64 }}
+          APPLE_CODESIGN_CERT_PASSWORD: ${{ secrets.APPLE_CODESIGN_CERT_PASSWORD }}
+          APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_API_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}

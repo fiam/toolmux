@@ -215,7 +215,8 @@ Releases are managed by release-please and GoReleaser.
 3. Merge the release PR to create the GitHub release and tag.
 4. GoReleaser builds `toolmux` archives for macOS, Linux, and Windows on amd64
    and arm64. macOS CLI artifacts are cgo-enabled so Slack browser-session
-   auth can call Cocoa/WKWebView.
+   auth can call Cocoa/WKWebView, then Developer ID-signed with hardened
+   runtime and notarized before packaging.
 5. GoReleaser publishes a Ko-built `toolmuxd` Linux image for amd64 and arm64
    to `ghcr.io/fiam/toolmuxd:<tag>`.
 6. GoReleaser uploads CLI release artifacts and checksums to GitHub Releases.
@@ -226,8 +227,8 @@ For a no-publish release rehearsal, run the `release dry run` workflow. It
 checks out latest `main`, runs `goreleaser check`, builds native `toolmux` with
 cgo and `toolmuxd` without cgo, and runs
 `goreleaser release --snapshot --clean --skip=ko` with read-only repository
-permissions. It does not log in to GHCR, require the Homebrew tap token, or
-publish release artifacts.
+permissions. It does not import Apple signing credentials, notarize binaries,
+log in to GHCR, require the Homebrew tap token, or publish release artifacts.
 
 PR, local Make builds, and GoReleaser releases use split cgo settings:
 `toolmux` is cgo-enabled where native platform integrations require it,
@@ -237,9 +238,15 @@ artifacts are built without cgo, and `toolmuxd` remains pure-Go with
 
 Required repository secrets:
 
-1. `HOMEBREW_TAP_GITHUB_TOKEN`: token with contents write access to
+1. `APPLE_CODESIGN_CERT_P12_BASE64`: base64-encoded Developer ID Application
+   certificate bundle exported from Keychain.
+2. `APPLE_CODESIGN_CERT_PASSWORD`: password for the exported `.p12` bundle.
+3. `APPLE_NOTARY_API_KEY_ID`: App Store Connect API key ID for notarization.
+4. `APPLE_NOTARY_API_ISSUER_ID`: App Store Connect API issuer ID.
+5. `APPLE_NOTARY_API_PRIVATE_KEY`: App Store Connect `.p8` private key content.
+6. `HOMEBREW_TAP_GITHUB_TOKEN`: token with contents write access to
    `fiam/homebrew-tap`.
-2. `RELEASE_PLEASE_TOKEN`: optional token for release-please PRs. Configure it
+7. `RELEASE_PLEASE_TOKEN`: optional token for release-please PRs. Configure it
    when release PRs need to trigger CI under branch protection; otherwise the
    workflow falls back to `GITHUB_TOKEN`.
 

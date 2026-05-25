@@ -71,6 +71,7 @@ toolmux version
 
 Release archives for macOS, Linux, and Windows are available from
 [GitHub Releases](https://github.com/fiam/toolmux/releases).
+macOS release binaries are Developer ID-signed and notarized.
 
 ## Quick Start
 

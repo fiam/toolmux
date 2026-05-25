@@ -134,8 +134,8 @@ CI should run at least:
 9. Generic `toolmuxd` container image build validation.
 10. Coverage generation with `make coverage`.
 11. GoReleaser snapshot release validation for the CLI archive matrix on
-    macOS, covering cgo-enabled Darwin artifacts and no-cgo Linux/Windows
-    artifacts.
+    macOS, covering unsigned cgo-enabled Darwin artifacts and no-cgo
+    Linux/Windows artifacts.
 12. A non-publishing release dry run against latest `main` through
     `goreleaser release --snapshot --clean --skip=ko`, plus Linux validation
     of the generic `toolmuxd` container image.
@@ -153,18 +153,26 @@ Release automation uses release-please and GoReleaser.
    Darwin release artifacts are built on macOS with cgo, Linux/Windows CLI
    artifacts are built without cgo, and `toolmuxd` remains pure-Go with
    `CGO_ENABLED=0`.
-4. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
+4. Darwin `toolmux` release binaries must be Developer ID-signed with hardened
+   runtime and notarized before packaging. Snapshot release validation may skip
+   signing and notarization when Apple credentials are unavailable.
+5. `toolmux` release archives must cover macOS, Linux, and Windows on amd64
    and arm64 unless release support is intentionally changed and documented.
-5. `toolmuxd` must not be released as a binary archive. Release it only as a
+6. `toolmuxd` must not be released as a binary archive. Release it only as a
    Linux amd64/arm64 image at `ghcr.io/fiam/toolmuxd:<tag>`.
-6. The release workflow publishes a Homebrew cask to `fiam/homebrew-tap`.
-7. The release dry-run workflow must stay read-only, check out latest `main`,
-   skip Ko publishing in the GoReleaser snapshot, and must not log in to GHCR,
-   publish GitHub release artifacts, or update Homebrew.
-8. Keep the Homebrew cask binary stanza aligned with released binary names.
-9. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
+7. The release workflow publishes a Homebrew cask to `fiam/homebrew-tap`.
+8. The release dry-run workflow must stay read-only, check out latest `main`,
+   skip Ko publishing in the GoReleaser snapshot, and must not import Apple
+   signing credentials, notarize binaries, log in to GHCR, publish GitHub
+   release artifacts, or update Homebrew.
+9. Keep the Homebrew cask binary stanza aligned with released binary names.
+10. `HOMEBREW_TAP_GITHUB_TOKEN` must have contents write access to
    `fiam/homebrew-tap`.
-10. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
+11. The release workflow uses GoReleaser's native `notarize.macos` pipeline and
+    requires `APPLE_CODESIGN_CERT_P12_BASE64`, `APPLE_CODESIGN_CERT_PASSWORD`,
+    `APPLE_NOTARY_API_KEY_ID`, `APPLE_NOTARY_API_ISSUER_ID`, and
+    `APPLE_NOTARY_API_PRIVATE_KEY`.
+12. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
    branch protection; otherwise the workflow falls back to `GITHUB_TOKEN`.
 
 ## Integration Tests

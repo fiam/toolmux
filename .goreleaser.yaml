@@ -77,6 +77,21 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "APPLE_CODESIGN_CERT_P12_BASE64" }}'
+      ids:
+        - toolmux-darwin
+      sign:
+        certificate: "{{ .Env.APPLE_CODESIGN_CERT_P12_BASE64 }}"
+        password: "{{ .Env.APPLE_CODESIGN_CERT_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.APPLE_NOTARY_API_ISSUER_ID }}"
+        key_id: "{{ .Env.APPLE_NOTARY_API_KEY_ID }}"
+        key: "{{ .Env.APPLE_NOTARY_API_KEY_PATH }}"
+        wait: true
+        timeout: 20m
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
@@ -105,9 +120,3 @@ homebrew_casks:
     homepage: "https://github.com/fiam/toolmux"
     description: "Local-first CLI for working with SaaS tools from one policy-aware command surface."
     commit_msg_template: "brew: update toolmux cask to {{ .Tag }}"
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/toolmux"]
-          end
