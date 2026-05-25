@@ -139,6 +139,8 @@ CI should run at least:
 12. A non-publishing release dry run against latest `main` through
     `goreleaser release --snapshot --clean --skip=ko`, plus Linux validation
     of the generic `toolmuxd` container image.
+13. GitHub Pages deployment from `docs/` through the `pages` workflow when
+    website files change on `main`.
 
 ## Releases
 
@@ -174,6 +176,9 @@ Release automation uses release-please and GoReleaser.
     `APPLE_NOTARY_API_PRIVATE_KEY`.
 12. Use `RELEASE_PLEASE_TOKEN` when release-please PRs need to trigger CI under
    branch protection; otherwise the workflow falls back to `GITHUB_TOKEN`.
+13. The public website lives in `docs/` and is deployed by GitHub Pages from
+    `.github/workflows/pages.yaml`. Keep the homepage, privacy policy, terms of
+    service, and `docs/CNAME` aligned with OAuth consent-screen URLs.
 
 ## Integration Tests
 

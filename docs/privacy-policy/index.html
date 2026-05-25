@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy - Toolmux</title>
+    <meta name="description" content="Toolmux privacy policy for Google OAuth, Google Drive, Google Docs, and local credential storage.">
+    <link rel="icon" href="/assets/toolmux-icon.png">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="nav">
+        <a class="brand" href="/">
+          <img src="/assets/toolmux-icon.png" alt="">
+          <span>Toolmux</span>
+        </a>
+        <nav class="nav-links" aria-label="Main navigation">
+          <a href="/">Home</a>
+          <a href="/tos/">Terms</a>
+          <a href="https://github.com/fiam/toolmux">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="section narrow legal">
+      <p class="eyebrow">Effective May 25, 2026</p>
+      <h1>Privacy Policy</h1>
+      <p>
+        This Privacy Policy explains how Toolmux handles information when you
+        use the Toolmux CLI, the hosted OAuth broker at <code>api.toolmux.com</code>,
+        and the Toolmux Google Drive and Google Docs integration.
+      </p>
+
+      <div class="notice">
+        Toolmux's use and transfer to any other app of information received
+        from Google APIs will adhere to the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+        including the Limited Use requirements.
+      </div>
+
+      <h2>Information Toolmux accesses</h2>
+      <p>
+        Toolmux requests Google OAuth access only when you choose to connect a
+        Google toolbox. The supported Google scope is <code>drive.file</code>.
+        With that scope, Toolmux can create files and access Google Drive or
+        Google Docs files that you explicitly open for Toolmux or create with
+        Toolmux.
+      </p>
+      <p>
+        Depending on the command you run, Toolmux may access file metadata,
+        document text, document structure, exported file content, uploaded file
+        content, file names, file IDs, and Drive Picker selections.
+      </p>
+
+      <h2>How Toolmux uses Google user data</h2>
+      <p>
+        Toolmux uses Google user data only to perform the command or workflow
+        you request, such as exporting a document, appending text to a document,
+        inserting an image, uploading a file, copying a file, or listing files
+        you selected through Google Picker.
+      </p>
+      <p>
+        Toolmux does not sell Google user data, use it for advertising, or use
+        it to train machine learning models. If you connect Toolmux to a local
+        coding agent, information returned by a Toolmux command may be shown to
+        that agent only as part of the task you initiated.
+      </p>
+
+      <h2>Credential storage</h2>
+      <p>
+        The Toolmux CLI stores OAuth credentials in your operating system
+        credential store under the registered toolbox name. The hosted OAuth
+        broker handles OAuth callbacks and token exchange for supported
+        providers, then hands credentials back to your local Toolmux CLI. The
+        broker is designed not to persist Google OAuth access tokens or refresh
+        tokens.
+      </p>
+
+      <h2>Website and broker logs</h2>
+      <p>
+        The Toolmux website and hosted OAuth broker may receive ordinary server
+        log data such as IP address, user agent, request path, and request time
+        for operations, abuse prevention, security, and debugging. Logs are not
+        intended to contain provider tokens, authorization codes, document
+        contents, or file contents.
+      </p>
+
+      <h2>Sharing</h2>
+      <p>
+        Toolmux sends Google user data to Google APIs as needed to complete your
+        requested commands. Toolmux does not share Google user data with third
+        parties except when you direct Toolmux to pass command results to a
+        local agent or workflow, when required to comply with law, or when
+        necessary to protect the security and integrity of the service.
+      </p>
+
+      <h2>Retention and deletion</h2>
+      <p>
+        Google OAuth credentials remain in your local operating system
+        credential store until you remove the toolbox or delete the credentials.
+        Files and documents remain in your Google account unless you delete them
+        in Google Drive or with a Google API command you choose to run. Local
+        Toolmux configuration and cache files remain on your machine until you
+        delete them.
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>You can disconnect Toolmux from Google by removing the Google toolbox or deleting its stored credential.</li>
+        <li>You can revoke Toolmux access from your Google account permissions page.</li>
+        <li>You can remove local Toolmux configuration and cache files from your machine.</li>
+      </ul>
+
+      <h2>Security</h2>
+      <p>
+        Toolmux is designed to keep provider credentials out of prompts, logs,
+        and committed files. Policy checks run before provider credentials are
+        read for tool execution. No online service can be guaranteed perfectly
+        secure, but Toolmux is built to minimize credential exposure.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about this policy can be sent to
+        <a href="mailto:alberto@garciahierro.com">alberto@garciahierro.com</a>.
+      </p>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Toolmux</span>
+        <nav aria-label="Footer navigation">
+          <a href="/">Home</a>
+          <a href="/tos/">Terms</a>
+          <a href="mailto:alberto@garciahierro.com">Contact</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

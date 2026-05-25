@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Toolmux</title>
+    <meta name="description" content="Toolmux is a local-first CLI for connecting SaaS tools to coding agents without copying provider tokens into prompts.">
+    <link rel="icon" href="/assets/toolmux-icon.png">
+    <link rel="apple-touch-icon" href="/assets/toolmux-icon.png">
+    <meta property="og:title" content="Toolmux">
+    <meta property="og:description" content="Local-first tool access for coding agents.">
+    <meta property="og:image" content="https://toolmux.com/assets/toolmux-header.png">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="nav">
+        <a class="brand" href="/">
+          <img src="/assets/toolmux-icon.png" alt="">
+          <span>Toolmux</span>
+        </a>
+        <nav class="nav-links" aria-label="Main navigation">
+          <a href="/privacy-policy/">Privacy Policy</a>
+          <a href="/tos/">Terms</a>
+          <a href="https://github.com/fiam/toolmux">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Local-first CLI for agent tools</p>
+          <h1>Toolmux</h1>
+          <p class="lede">
+            Toolmux connects services such as Slack, Google Drive, Google Docs,
+            and remote MCP servers to local coding agents through one
+            policy-aware command surface.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/fiam/toolmux">View on GitHub</a>
+            <a class="button" href="/privacy-policy/">Privacy Policy</a>
+            <a class="button" href="/tos/">Terms of Service</a>
+          </div>
+        </div>
+        <figure class="hero-art">
+          <img src="/assets/toolmux-header.png" alt="Toolmux logo and terminal interface">
+        </figure>
+      </section>
+
+      <section class="band">
+        <div class="section">
+          <h2>Designed for local control</h2>
+          <div class="grid">
+            <article class="card">
+              <h3>One command surface</h3>
+              <p>
+                People, scripts, and agents use the same provider-owned CLI and
+                MCP tool definitions.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Local credential custody</h3>
+              <p>
+                OAuth credentials are stored in the operating system credential
+                store, not copied into prompts.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Policy before access</h3>
+              <p>
+                Tool policy and read-only checks run before provider credentials
+                are loaded or remote APIs are called.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="section">
+          <h2>Google Drive and Docs integration</h2>
+          <p class="lede">
+            Toolmux uses Google's non-sensitive <code>drive.file</code> scope.
+            It can create files and access files you explicitly open for
+            Toolmux, then run Drive and Docs commands you request.
+          </p>
+          <pre class="terminal"><code>toolmux add google
+toolmux google docs export 1abc... --format markdown
+toolmux google drive files upload ./report.docx --target-mime-type application/vnd.google-apps.document</code></pre>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="section">
+          <h2>Toolmux in use</h2>
+          <img class="demo" src="/assets/toolmux-demo.gif" alt="Toolmux terminal demo">
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Toolmux is open source software by Alberto Garcia Hierro.</span>
+        <nav aria-label="Footer navigation">
+          <a href="/privacy-policy/">Privacy Policy</a>
+          <a href="/tos/">Terms</a>
+          <a href="mailto:alberto@garciahierro.com">Contact</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

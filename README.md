@@ -4,6 +4,8 @@
 
 # Toolmux
 
+Website: [toolmux.com](https://toolmux.com)
+
 Toolmux connects services to your local agents and gives you the same tools as
 a normal CLI. Register Slack, Google, or a remote MCP server once, configure
 your agent once, then ask the agent to use those tools without copying tokens

@@ -59,6 +59,8 @@ builds, commit-message validation, and the generic `toolmuxd` container image
 build. CI also runs a macOS GoReleaser snapshot release so the cgo-enabled
 Darwin CLI artifacts and no-cgo Linux/Windows CLI artifacts are validated
 before a release.
+The `pages` workflow deploys the static website from `docs/` to GitHub Pages
+when website files change on `main`.
 PR and Make-based local builds use the Make defaults: `toolmux` is compiled
 with `CGO_ENABLED=1`, and `toolmuxd` is compiled with `CGO_ENABLED=0`.
 The `release dry run` workflow also runs weekly and can be triggered manually;
