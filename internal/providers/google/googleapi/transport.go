@@ -93,10 +93,6 @@ func (c Client) getBytes(ctx context.Context, suffix string, values url.Values) 
 	return doGoogleBytes(req, c.HTTPClient)
 }
 
-func (c Client) postJSON(ctx context.Context, suffix string, body any, out any) error {
-	return c.postJSONQuery(ctx, suffix, nil, body, out)
-}
-
 func (c Client) postDocsJSON(ctx context.Context, suffix string, body any, out any) error {
 	return c.postJSONURL(ctx, docsAPIURL(c, suffix), nil, body, out)
 }

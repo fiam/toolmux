@@ -167,14 +167,14 @@ func docsRawBatchUpdateRequest(exec actions.Context, inv actions.Invocation) (ma
 		return nil, fmt.Errorf("decode Docs batchUpdate JSON: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return nil, fmt.Errorf("Docs batchUpdate JSON must contain one value")
+		return nil, fmt.Errorf("docs batchUpdate JSON must contain one value")
 	}
 	request, err := docsBatchUpdateObject(decoded)
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := request["requests"]; !ok {
-		return nil, fmt.Errorf("Docs batchUpdate JSON must include requests")
+		return nil, fmt.Errorf("docs batchUpdate JSON must include requests")
 	}
 	if revisionID := strings.TrimSpace(inv.String("required-revision-id")); revisionID != "" {
 		writeControl, err := docsRawWriteControl(request)
@@ -217,7 +217,7 @@ func docsBatchUpdateObject(decoded any) (map[string]any, error) {
 	case []any:
 		return map[string]any{"requests": value}, nil
 	default:
-		return nil, fmt.Errorf("Docs batchUpdate JSON must be an object or requests array")
+		return nil, fmt.Errorf("docs batchUpdate JSON must be an object or requests array")
 	}
 }
 
@@ -228,7 +228,7 @@ func docsRawWriteControl(request map[string]any) (map[string]any, error) {
 	}
 	writeControl, ok := raw.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("Docs batchUpdate writeControl must be an object")
+		return nil, fmt.Errorf("docs batchUpdate writeControl must be an object")
 	}
 	return writeControl, nil
 }

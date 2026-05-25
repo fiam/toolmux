@@ -387,7 +387,7 @@ func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, e
 		}
 		mimeType := uploadMIMEType(inv.String("mime-type"), uploadFile, content)
 		if !isDocsInlineImageMIME(mimeType) {
-			return docsImage{}, fmt.Errorf("Docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
+			return docsImage{}, fmt.Errorf("docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
 		}
 		if !inv.Bool("make-public") {
 			return docsImage{}, fmt.Errorf("--make-public is required when using --upload-file because Docs fetches images from public URLs")
@@ -408,7 +408,7 @@ func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, e
 		name := firstNonEmpty(inv.String("name"), "image")
 		mimeType := uploadMIMEType(inv.String("mime-type"), name, content)
 		if !isDocsInlineImageMIME(mimeType) {
-			return docsImage{}, fmt.Errorf("Docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
+			return docsImage{}, fmt.Errorf("docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
 		}
 		if !inv.Bool("make-public") {
 			return docsImage{}, fmt.Errorf("--make-public is required when using --content-base64 because Docs fetches images from public URLs")
@@ -546,9 +546,7 @@ func textMatches(elements []googleapi.StructuralElement, query string, matchCase
 			if element.TextRun == nil || element.TextRun.Content == "" {
 				continue
 			}
-			for _, match := range textRunMatches(element, query, matchCase) {
-				matches = append(matches, match)
-			}
+			matches = append(matches, textRunMatches(element, query, matchCase)...)
 		}
 	})
 	return matches

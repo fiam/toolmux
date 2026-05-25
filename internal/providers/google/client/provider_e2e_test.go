@@ -191,6 +191,13 @@ func TestGoogleDriveUploadAndDocsInsertUploadedImage(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "image-1")
 	upstream.assertDriveUpload(t, "diagram.png", "image/png", "base64 png")
 
+	encodedDocx := base64.StdEncoding.EncodeToString([]byte("base64 docx"))
+	docxMIME := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	out = toolmuxtest.Run(t, deps, "google", "drive", "files", "upload", "--content-base64", encodedDocx, "--name", "report.docx", "--mime-type", docxMIME, "--target-mime-type", googleapi.GoogleDocsMIMEType())
+	toolmuxtest.AssertContains(t, out, googleapi.GoogleDocsMIMEType())
+	upstream.assertDriveUpload(t, "report.docx", docxMIME, "base64 docx")
+	upstream.assertDriveUploadTargetMIME(t, googleapi.GoogleDocsMIMEType())
+
 	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--upload-file", imagePath, "--mime-type", "image/png", "--make-public", "--index", "2")
 	toolmuxtest.AssertContains(t, out, "image-1")
 	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")

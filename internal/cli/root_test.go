@@ -29,7 +29,7 @@ func TestVersionCommand(t *testing.T) {
 
 func TestPolicyCatalog(t *testing.T) {
 	t.Parallel()
-	cmd := NewRootCommand()
+	cmd := NewRootCommandWithDeps(Dependencies{WorkDir: registeredGoogleWorkDir(t)})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -54,7 +54,7 @@ func TestPolicyCatalog(t *testing.T) {
 
 func TestColorAlwaysColorsTableOutput(t *testing.T) {
 	t.Parallel()
-	cmd := NewRootCommand()
+	cmd := NewRootCommandWithDeps(Dependencies{WorkDir: registeredGoogleWorkDir(t)})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -66,6 +66,20 @@ func TestColorAlwaysColorsTableOutput(t *testing.T) {
 	if !strings.Contains(out.String(), "\x1b[") {
 		t.Fatalf("expected --color always to color table output, got %q", out.String())
 	}
+}
+
+func registeredGoogleWorkDir(t *testing.T) string {
+	t.Helper()
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"google": {Type: toolboxTypeInternal, Provider: "google"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return workDir
 }
 
 func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
