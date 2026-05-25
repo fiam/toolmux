@@ -1,6 +1,6 @@
 # Toolmux MCP-First Provider PRD
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 ## Summary
 
@@ -21,7 +21,12 @@ requirement explicitly justifies broader Google data access. Existing Drive
 files are selected through the brokered Google Picker flow, with a normal
 `google drive pick` action for one-off selection and `google drive selected ...`
 actions for local selected-file cache management. Accessible files can be
-copied into My Drive through `google drive files copy`.
+copied into My Drive through `google drive files copy`, updated in place
+through `google drive files update`, and moved to Drive trash through
+`google drive files trash`. Drive copy, upload, and content-replacing update
+commands can request Google Workspace conversion with an explicit target MIME
+type, and commands that upload content accept base64 payloads so MCP callers do
+not need a shared filesystem with the Toolmux process.
 
 ## Goals
 

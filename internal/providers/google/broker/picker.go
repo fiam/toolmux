@@ -1,11 +1,12 @@
 package broker
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"html"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -196,7 +197,11 @@ func (b *pickerBroker) handleCallback(w http.ResponseWriter, r *http.Request, wr
 	}
 	if providerErr := strings.TrimSpace(r.URL.Query().Get("error")); providerErr != "" {
 		b.failSession(session, providerErr)
-		writePickerDonePage(w, "Google Picker failed", "Google returned an authorization error. Return to your terminal for details.")
+		writePickerDonePage(w, pickerDonePage{
+			Title:   "Google Picker failed",
+			Message: "Google returned an authorization error. Return to your terminal for details.",
+			Success: false,
+		})
 		return true
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
@@ -224,7 +229,11 @@ func (b *pickerBroker) handleCallback(w http.ResponseWriter, r *http.Request, wr
 	}
 	tokens = oauthbroker.MergeTokens(credentials.OAuthTokens{}, tokens, []string{googleapi.ScopeDriveFile})
 	b.completeSession(session, files, tokens)
-	writePickerDonePage(w, "Google Picker selection received", "Toolmux has the selected file IDs. You can close this tab and return to your terminal.")
+	writePickerDonePage(w, pickerDonePage{
+		Title:   "Google Picker selection received",
+		Message: "Toolmux has the selected file IDs. You can close this tab and return to your terminal.",
+		Success: true,
+	})
 	return true
 }
 
@@ -368,33 +377,163 @@ func writePickerError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
-func writePickerDonePage(w http.ResponseWriter, title, message string) {
+type pickerDonePage struct {
+	Title   string
+	Message string
+	Success bool
+}
+
+func writePickerDonePage(w http.ResponseWriter, page pickerDonePage) {
+	var body bytes.Buffer
+	if err := pickerDoneTemplate.Execute(&body, page); err != nil {
+		writePickerError(w, http.StatusInternalServerError, "render_failed", err.Error())
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, `<!doctype html>
+	_, _ = w.Write(body.Bytes())
+}
+
+var pickerDoneTemplate = template.Must(template.New("google-picker-done").Parse(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>%s - Toolmux</title>
+  <title>{{.Title}} - Toolmux</title>
   <style>
-    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f8fb; color: #111827; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
-    main { width: min(34rem, calc(100vw - 2rem)); padding: 2rem; border: 1px solid #dbe3ef; border-radius: 8px; background: #ffffff; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.10); text-align: center; }
-    h1 { margin: 0; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
-    p { margin: 0.75rem 0 0; line-height: 1.55; color: #4b5563; }
+    :root {
+      color-scheme: dark;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      background: #0a0d12;
+      color: #e8edf7;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%),
+        #0a0d12;
+    }
+    main {
+      width: min(760px, calc(100vw - 32px));
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(14, 18, 27, 0.96);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+      overflow: hidden;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 28px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .logo {
+      width: 56px;
+      height: 56px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #111111;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 30px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #8ea0b8;
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 36px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    .terminal {
+      margin: 28px;
+      padding: 20px;
+      border-radius: 8px;
+      background: #05070a;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #cbd6e6;
+      font-size: 15px;
+      line-height: 1.8;
+      overflow-wrap: anywhere;
+    }
+    .prompt {
+      color: #7dd3fc;
+    }
+    .ok {
+      color: #86efac;
+      font-weight: 700;
+    }
+    .err {
+      color: #fca5a5;
+      font-weight: 700;
+    }
+    .muted {
+      color: #8ea0b8;
+    }
+    .hint {
+      margin: 0;
+      padding: 0 28px 28px;
+      color: #a8b4c6;
+      line-height: 1.55;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    @media (max-width: 520px) {
+      header {
+        align-items: flex-start;
+        padding: 22px;
+      }
+      .terminal {
+        margin: 22px;
+        font-size: 13px;
+      }
+      .hint {
+        padding: 0 22px 22px;
+      }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>%s</h1>
-    <p>%s</p>
+    <header>
+      <div class="logo" aria-label="Google logo">G</div>
+      <div>
+        <p class="eyebrow">toolmux google picker</p>
+        <h1>{{.Title}}</h1>
+      </div>
+    </header>
+    <section class="terminal" aria-live="polite">
+      <div><span class="muted">...</span> waiting for Google Picker selection</div>
+      {{if .Success}}
+      <div><span class="ok">OK</span> picker selection received</div>
+      <div><span class="ok">OK</span> selected file IDs handed to Toolmux</div>
+      {{else}}
+      <div><span class="err">ERR</span> picker authorization failed</div>
+      {{end}}
+      <div><span class="muted">...</span> return to your terminal</div>
+    </section>
+    <p class="hint">{{.Message}}</p>
   </main>
 </body>
-</html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(message))
-}
+</html>`))
 
 func httpClient(client *http.Client) *http.Client {
 	if client != nil {

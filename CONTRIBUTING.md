@@ -356,12 +356,15 @@ against fake upstream servers. Google tests must cover the Docs commands
 `get`, `find-structure`, `export`, `append`, `replace-all-text`,
 `style-ranges`, `insert-table`, `insert-image`, and `batch-update`;
 `toolmux google drive selected add/list/remove`;
-`toolmux google drive files copy/upload`; `toolmux google drive pick`; and
-`toolmux google drive available` through fake brokered Picker flows without
-using live Google. Brokered Picker tests must assert `trigger_onepick=true`, a
+`toolmux google drive files copy/upload/update/trash`;
+`toolmux google drive pick`; and `toolmux google drive available` through fake
+brokered Picker flows without using live Google. Brokered Picker tests must
+assert `trigger_onepick=true`, a
 single `drive.file` scope, returned `picked_file_ids`, token exchange in
-`toolmuxd`, and no CLI-side Picker API key. Configure Google broker credentials
-on `toolmuxd`.
+`toolmuxd`, and no CLI-side Picker API key. Drive upload/update tests must
+cover local file paths and `--content-base64`; Drive copy/upload/update tests
+must cover `--target-mime-type` conversion metadata. Configure Google broker
+credentials on `toolmuxd`.
 
 ## Local OAuth Testing
 

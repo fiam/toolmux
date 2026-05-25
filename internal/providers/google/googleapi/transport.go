@@ -106,6 +106,14 @@ func (c Client) postJSONQuery(ctx context.Context, suffix string, values url.Val
 }
 
 func (c Client) postJSONURL(ctx context.Context, rawURL string, values url.Values, body any, out any) error {
+	return c.jsonURL(ctx, http.MethodPost, rawURL, values, body, out)
+}
+
+func (c Client) patchJSONQuery(ctx context.Context, suffix string, values url.Values, body any, out any) error {
+	return c.jsonURL(ctx, http.MethodPatch, apiURL(c.BaseURL, suffix), values, body, out)
+}
+
+func (c Client) jsonURL(ctx context.Context, method string, rawURL string, values url.Values, body any, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -121,7 +129,7 @@ func (c Client) postJSONURL(ctx context.Context, rawURL string, values url.Value
 		}
 	}
 	reqURL.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, method, reqURL.String(), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -131,6 +139,14 @@ func (c Client) postJSONURL(ctx context.Context, rawURL string, values url.Value
 }
 
 func (c Client) postMultipartQuery(ctx context.Context, suffix string, values url.Values, metadata any, mediaType string, media []byte, out any) error {
+	return c.multipartQuery(ctx, http.MethodPost, suffix, values, metadata, mediaType, media, out)
+}
+
+func (c Client) patchMultipartQuery(ctx context.Context, suffix string, values url.Values, metadata any, mediaType string, media []byte, out any) error {
+	return c.multipartQuery(ctx, http.MethodPatch, suffix, values, metadata, mediaType, media, out)
+}
+
+func (c Client) multipartQuery(ctx context.Context, method string, suffix string, values url.Values, metadata any, mediaType string, media []byte, out any) error {
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
 	metadataHeader := textproto.MIMEHeader{}
@@ -165,7 +181,7 @@ func (c Client) postMultipartQuery(ctx context.Context, suffix string, values ur
 		}
 	}
 	reqURL.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), &requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, reqURL.String(), &requestBody)
 	if err != nil {
 		return err
 	}

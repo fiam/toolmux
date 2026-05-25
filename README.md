@@ -222,12 +222,24 @@ toolmux google docs style-ranges 1abc... --paragraph-style-type HEADING_2 \
 toolmux google docs insert-table 1abc... --rows 3 --columns 2
 toolmux google docs insert-image 1abc... --upload-file ./diagram.png \
   --mime-type image/png --make-public
+toolmux google docs insert-image 1abc... --content-base64 "$PNG_BASE64" \
+  --name diagram.png --mime-type image/png --make-public
 toolmux google docs batch-update 1abc... --json @requests.json
 
 toolmux google drive selected add
 toolmux google drive selected list
-toolmux google drive files copy 1abc... --name "Working copy"
+toolmux google drive files copy 1abc... --name "Working copy" \
+  --target-mime-type application/vnd.google-apps.document
 toolmux google drive files upload ./diagram.png --mime-type image/png --make-public
+toolmux google drive files upload --content-base64 "$DOCX_BASE64" \
+  --name report.docx \
+  --mime-type application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+  --target-mime-type application/vnd.google-apps.document
+toolmux google drive files update 1abc... --name "Renamed file"
+toolmux google drive files update 1abc... ./report.docx \
+  --mime-type application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+  --target-mime-type application/vnd.google-apps.document
+toolmux google drive files trash 1abc...
 toolmux google drive selected remove 1abc...
 
 toolmux google drive pick
@@ -267,13 +279,22 @@ and poll the broker until Google returns selected file IDs.
 reference, while `toolmux google drive pick` returns Picker output without
 saving it. `toolmux google drive files copy` accepts a raw file ID or a
 Docs/Drive URL and copies an accessible file into My Drive, defaulting the
-destination parent to `root`. `toolmux google drive files upload` uploads a
-local file with Drive `files.create`; use `--make-public` only when the file
-must be readable by anyone with the link, such as when using a Drive-hosted
-image with Docs `insert-image`. With `drive.file`, shared source files must be
-selected through Picker before Toolmux can copy them. Removing a saved file
-removes it from Toolmux's local list; users can revoke app grants from their
-Google account when they need Google to forget that per-file app access.
+destination parent to `root`. The `--target-mime-type` flag requests Google
+Workspace conversion during copy, such as converting a DOCX to native Google
+Docs with `application/vnd.google-apps.document`. `toolmux google drive files
+upload` uploads content with Drive `files.create`; pass either a local path or
+`--content-base64` for MCP callers that do not share the CLI filesystem. Use
+`--make-public` only when the file must be readable by anyone with the link,
+such as when using a Drive-hosted image with Docs `insert-image`. The `files
+update` command uses Drive `files.update` to rename an accessible file, change
+its trash state, or replace content with `--upload-file`, `--content-base64`,
+or a second positional path. The `--target-mime-type` flag also requests
+conversion during upload or content-replacing update. The `files trash` command
+is a convenience command that moves an accessible file to Drive trash. With
+`drive.file`, shared source files must be selected through Picker before Toolmux
+can copy or update them. Removing a saved file only removes it from Toolmux's
+local list; users can revoke app grants from their Google account when they need
+Google to forget that per-file app access.
 
 Toolmux uses one Picker path: a short-lived brokered Google Picker session
 through `toolmuxd`. The CLI does not expose a local Picker fallback or a Picker

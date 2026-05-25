@@ -38,6 +38,10 @@ type fakeGoogleUpstream struct {
 	lastUploadMetadata   map[string]any
 	lastUploadMIME       string
 	lastUploadContent    string
+	lastUpdateFileID     string
+	lastUpdateMetadata   map[string]any
+	lastUpdateMIME       string
+	lastUpdateContent    string
 	lastPermissionFileID string
 	lastPermissionBody   map[string]any
 }
@@ -71,6 +75,10 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 			upstream.copyFile(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/upload/drive/v3/files":
 			upstream.uploadFile(t, w, r)
+		case r.Method == http.MethodPatch && r.URL.Path == "/drive/v3/files/doc-1":
+			upstream.updateFile(t, w, r)
+		case r.Method == http.MethodPatch && r.URL.Path == "/upload/drive/v3/files/doc-1":
+			upstream.updateFileUpload(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/image-1/permissions":
 			upstream.createPermission(t, w, r)
 		default:
@@ -325,13 +333,14 @@ func (s *fakeGoogleUpstream) copyFile(t *testing.T, w http.ResponseWriter, r *ht
 	s.lastCopyParentID = parentID
 	s.mu.Unlock()
 	name, _ := body["name"].(string)
+	targetMIME, _ := body["mimeType"].(string)
 	if name == "" {
 		name = "Copy of Shared plan"
 	}
 	writeGoogleJSON(w, map[string]any{
 		"id":           "doc-copy",
 		"name":         name,
-		"mimeType":     googleapi.GoogleDocsMIMEType(),
+		"mimeType":     firstNonEmptyTest(targetMIME, googleapi.GoogleDocsMIMEType()),
 		"webViewLink":  "https://docs.google.com/document/d/doc-copy/edit",
 		"modifiedTime": "2026-05-24T10:00:00Z",
 	})
@@ -356,52 +365,86 @@ func (s *fakeGoogleUpstream) uploadFile(t *testing.T, w http.ResponseWriter, r *
 	if !s.authorizeAPI(t, w, r) {
 		return
 	}
-	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "multipart/related" {
-		http.Error(w, "bad multipart", http.StatusBadRequest)
-		t.Errorf("expected multipart/related upload, got %q: %v", r.Header.Get("Content-Type"), err)
+	metadata, uploadMIME, content, ok := readDriveMultipart(t, w, r)
+	if !ok {
 		return
 	}
-	reader := multipart.NewReader(r.Body, params["boundary"])
-	metadataPart, err := reader.NextPart()
-	if err != nil {
-		http.Error(w, "missing metadata", http.StatusBadRequest)
-		t.Errorf("read metadata part: %v", err)
-		return
-	}
-	var metadata map[string]any
-	if err := json.NewDecoder(metadataPart).Decode(&metadata); err != nil {
-		http.Error(w, "bad metadata", http.StatusBadRequest)
-		t.Errorf("decode upload metadata: %v", err)
-		return
-	}
-	mediaPart, err := reader.NextPart()
-	if err != nil {
-		http.Error(w, "missing media", http.StatusBadRequest)
-		t.Errorf("read media part: %v", err)
-		return
-	}
-	content, err := io.ReadAll(mediaPart)
-	if err != nil {
-		http.Error(w, "bad media", http.StatusBadRequest)
-		t.Errorf("read media content: %v", err)
-		return
-	}
-	uploadMIME := mediaPart.Header.Get("Content-Type")
 	s.mu.Lock()
 	s.lastDriveAPIToken = bearerToken(r)
 	s.lastUploadMetadata = metadata
 	s.lastUploadMIME = uploadMIME
-	s.lastUploadContent = string(content)
+	s.lastUploadContent = content
 	s.mu.Unlock()
 	name, _ := metadata["name"].(string)
+	targetMIME, _ := metadata["mimeType"].(string)
 	writeGoogleJSON(w, map[string]any{
 		"id":             "image-1",
 		"name":           firstNonEmptyTest(name, "diagram.png"),
-		"mimeType":       uploadMIME,
+		"mimeType":       firstNonEmptyTest(targetMIME, uploadMIME),
 		"webViewLink":    "https://drive.google.com/file/d/image-1/view",
 		"webContentLink": "https://drive.google.com/uc?id=image-1&export=download",
 		"modifiedTime":   "2026-05-24T10:15:00Z",
+	})
+}
+
+func (s *fakeGoogleUpstream) updateFile(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		t.Errorf("decode update body: %v", err)
+		return
+	}
+	s.mu.Lock()
+	s.lastDriveAPIToken = bearerToken(r)
+	s.lastUpdateFileID = "doc-1"
+	s.lastUpdateMetadata = body
+	s.lastUpdateMIME = ""
+	s.lastUpdateContent = ""
+	s.mu.Unlock()
+	name, _ := body["name"].(string)
+	targetMIME, _ := body["mimeType"].(string)
+	trashed, _ := body["trashed"].(bool)
+	writeGoogleJSON(w, map[string]any{
+		"id":           "doc-1",
+		"name":         firstNonEmptyTest(name, "Shared plan"),
+		"mimeType":     firstNonEmptyTest(targetMIME, googleapi.GoogleDocsMIMEType()),
+		"webViewLink":  "https://docs.google.com/document/d/doc-1/edit",
+		"modifiedTime": "2026-05-24T10:30:00Z",
+		"trashed":      trashed,
+	})
+}
+
+func (s *fakeGoogleUpstream) updateFileUpload(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	metadata, updateMIME, content, ok := readDriveMultipart(t, w, r)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.lastDriveAPIToken = bearerToken(r)
+	s.lastUpdateFileID = "doc-1"
+	s.lastUpdateMetadata = metadata
+	s.lastUpdateMIME = updateMIME
+	s.lastUpdateContent = content
+	s.mu.Unlock()
+	name, _ := metadata["name"].(string)
+	targetMIME, _ := metadata["mimeType"].(string)
+	trashed, _ := metadata["trashed"].(bool)
+	writeGoogleJSON(w, map[string]any{
+		"id":             "doc-1",
+		"name":           firstNonEmptyTest(name, "Shared plan"),
+		"mimeType":       firstNonEmptyTest(targetMIME, updateMIME),
+		"webViewLink":    "https://drive.google.com/file/d/doc-1/view",
+		"webContentLink": "https://drive.google.com/uc?id=doc-1&export=download",
+		"modifiedTime":   "2026-05-24T10:35:00Z",
+		"trashed":        trashed,
 	})
 }
 
@@ -425,6 +468,42 @@ func (s *fakeGoogleUpstream) createPermission(t *testing.T, w http.ResponseWrite
 		"type": body["type"],
 		"role": body["role"],
 	})
+}
+
+func readDriveMultipart(t *testing.T, w http.ResponseWriter, r *http.Request) (map[string]any, string, string, bool) {
+	t.Helper()
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/related" {
+		http.Error(w, "bad multipart", http.StatusBadRequest)
+		t.Errorf("expected multipart/related upload, got %q: %v", r.Header.Get("Content-Type"), err)
+		return nil, "", "", false
+	}
+	reader := multipart.NewReader(r.Body, params["boundary"])
+	metadataPart, err := reader.NextPart()
+	if err != nil {
+		http.Error(w, "missing metadata", http.StatusBadRequest)
+		t.Errorf("read metadata part: %v", err)
+		return nil, "", "", false
+	}
+	var metadata map[string]any
+	if err := json.NewDecoder(metadataPart).Decode(&metadata); err != nil {
+		http.Error(w, "bad metadata", http.StatusBadRequest)
+		t.Errorf("decode upload metadata: %v", err)
+		return nil, "", "", false
+	}
+	mediaPart, err := reader.NextPart()
+	if err != nil {
+		http.Error(w, "missing media", http.StatusBadRequest)
+		t.Errorf("read media part: %v", err)
+		return nil, "", "", false
+	}
+	content, err := io.ReadAll(mediaPart)
+	if err != nil {
+		http.Error(w, "bad media", http.StatusBadRequest)
+		t.Errorf("read media content: %v", err)
+		return nil, "", "", false
+	}
+	return metadata, mediaPart.Header.Get("Content-Type"), string(content), true
 }
 
 func (s *fakeGoogleUpstream) authorizeAPI(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
@@ -460,6 +539,15 @@ func (s *fakeGoogleUpstream) assertCopyRequest(t *testing.T, wantSourceID, wantN
 	}
 	if s.lastCopyParentID != wantParentID {
 		t.Fatalf("expected copy parent %q, got %q in %#v", wantParentID, s.lastCopyParentID, s.lastCopyBody)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertCopyTargetMIME(t *testing.T, wantTargetMIME string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gotMIME, _ := s.lastCopyBody["mimeType"].(string); gotMIME != wantTargetMIME {
+		t.Fatalf("expected copy target MIME %q, got %q in %#v", wantTargetMIME, gotMIME, s.lastCopyBody)
 	}
 }
 
@@ -583,6 +671,49 @@ func (s *fakeGoogleUpstream) assertDriveUpload(t *testing.T, wantName, wantMIME,
 	}
 	if s.lastUploadContent != wantContent {
 		t.Fatalf("expected upload content %q, got %q", wantContent, s.lastUploadContent)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDriveUploadTargetMIME(t *testing.T, wantTargetMIME string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gotMIME, _ := s.lastUploadMetadata["mimeType"].(string); gotMIME != wantTargetMIME {
+		t.Fatalf("expected upload target MIME %q, got %q in %#v", wantTargetMIME, gotMIME, s.lastUploadMetadata)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDriveUpdate(t *testing.T, wantFileID, wantName string, wantTrashed *bool, wantMIME, wantContent string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastUpdateFileID != wantFileID {
+		t.Fatalf("expected update file %q, got %q", wantFileID, s.lastUpdateFileID)
+	}
+	if wantName != "" {
+		if gotName, _ := s.lastUpdateMetadata["name"].(string); gotName != wantName {
+			t.Fatalf("expected update name %q, got %q in %#v", wantName, gotName, s.lastUpdateMetadata)
+		}
+	}
+	if wantTrashed != nil {
+		if gotTrashed, _ := s.lastUpdateMetadata["trashed"].(bool); gotTrashed != *wantTrashed {
+			t.Fatalf("expected trashed %v, got %#v in %#v", *wantTrashed, s.lastUpdateMetadata["trashed"], s.lastUpdateMetadata)
+		}
+	}
+	if wantMIME != "" && s.lastUpdateMIME != wantMIME {
+		t.Fatalf("expected update MIME %q, got %q", wantMIME, s.lastUpdateMIME)
+	}
+	if wantContent != "" && s.lastUpdateContent != wantContent {
+		t.Fatalf("expected update content %q, got %q", wantContent, s.lastUpdateContent)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDriveUpdateTargetMIME(t *testing.T, wantTargetMIME string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gotMIME, _ := s.lastUpdateMetadata["mimeType"].(string); gotMIME != wantTargetMIME {
+		t.Fatalf("expected update target MIME %q, got %q in %#v", wantTargetMIME, gotMIME, s.lastUpdateMetadata)
 	}
 }
 

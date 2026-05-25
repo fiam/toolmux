@@ -361,14 +361,15 @@ func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, e
 	uri := strings.TrimSpace(inv.String("uri"))
 	driveFileID := strings.TrimSpace(inv.String("drive-file-id"))
 	uploadFile := strings.TrimSpace(inv.String("upload-file"))
+	contentBase64 := strings.TrimSpace(inv.String("content-base64"))
 	sources := 0
-	for _, value := range []string{uri, driveFileID, uploadFile} {
+	for _, value := range []string{uri, driveFileID, uploadFile, contentBase64} {
 		if value != "" {
 			sources++
 		}
 	}
 	if sources != 1 {
-		return docsImage{}, fmt.Errorf("pass exactly one of --uri, --drive-file-id, or --upload-file")
+		return docsImage{}, fmt.Errorf("pass exactly one of --uri, --drive-file-id, --upload-file, or --content-base64")
 	}
 	switch {
 	case uri != "":
@@ -379,7 +380,7 @@ func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, e
 			return docsImage{}, err
 		}
 		return docsImage{DriveFileID: fileID, URI: googleDrivePublicImageURI(fileID)}, nil
-	default:
+	case uploadFile != "":
 		content, err := readLocalFile(exec, uploadFile)
 		if err != nil {
 			return docsImage{}, err
@@ -394,6 +395,27 @@ func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, e
 		return docsImage{
 			Upload: &googleapi.UploadDriveFileOptions{
 				Name:     firstNonEmpty(inv.String("name"), filepathBase(uploadFile)),
+				ParentID: strings.TrimSpace(inv.String("parent-id")),
+				MIMEType: mimeType,
+				Content:  content,
+			},
+		}, nil
+	default:
+		content, err := decodeBase64Content(contentBase64)
+		if err != nil {
+			return docsImage{}, err
+		}
+		name := firstNonEmpty(inv.String("name"), "image")
+		mimeType := uploadMIMEType(inv.String("mime-type"), name, content)
+		if !isDocsInlineImageMIME(mimeType) {
+			return docsImage{}, fmt.Errorf("Docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
+		}
+		if !inv.Bool("make-public") {
+			return docsImage{}, fmt.Errorf("--make-public is required when using --content-base64 because Docs fetches images from public URLs")
+		}
+		return docsImage{
+			Upload: &googleapi.UploadDriveFileOptions{
+				Name:     name,
 				ParentID: strings.TrimSpace(inv.String("parent-id")),
 				MIMEType: mimeType,
 				Content:  content,

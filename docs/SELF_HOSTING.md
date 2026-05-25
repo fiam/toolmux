@@ -292,6 +292,14 @@ Build or install the CLI, then select a Drive file or Docs document:
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google drive available
+toolmux google drive files copy <file-id-or-url> \
+  --target-mime-type application/vnd.google-apps.document
+toolmux google drive files upload --content-base64 "$DOCX_BASE64" \
+  --name report.docx \
+  --mime-type application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+  --target-mime-type application/vnd.google-apps.document
+toolmux google drive files update <file-id-or-url> --name "Renamed file"
+toolmux google drive files trash <file-id-or-url>
 toolmux google docs get <document-id-or-url>
 ```
 
@@ -323,9 +331,16 @@ explicitly opened that file for the app. `toolmux google drive selected add`
 saves selected file IDs locally; `toolmux google drive selected list` shows that
 cache; `toolmux google drive selected remove <file-id>` removes a cached ID.
 `toolmux google drive files copy <file-id-or-url>` copies an accessible source
-file into My Drive, defaulting the destination parent to `root`. With
-`drive.file`, shared source files must first be selected through Picker unless
-Toolmux created or opened them before. Removing a cached ID is a Toolmux-local
+file into My Drive, defaulting the destination parent to `root`. Use
+`--target-mime-type application/vnd.google-apps.document` to request conversion
+to native Google Docs during copy, upload, or content-replacing update.
+`toolmux google drive files upload` and `toolmux google drive files update`
+accept either local paths or `--content-base64` for MCP callers without shared
+filesystem access. With `drive.file`, shared source files must first be selected
+through Picker unless Toolmux created or opened them before. `toolmux google
+drive files update` uses Drive `files.update` to rename an accessible file,
+change its trash state, or replace content. `toolmux google drive files trash`
+moves an accessible file to Drive trash. Removing a cached ID is a Toolmux-local
 operation; users should revoke app access from their Google account when they
 need Google to forget the app-level grant.
 
@@ -350,10 +365,10 @@ Docs `batchUpdate` request without applying it.
 Docs inline images require a public image URL. The
 `toolmux google drive files upload` command with `--make-public` uploads an
 image to Drive and creates an anyone-reader permission. The
-`toolmux google docs insert-image` command can also use `--upload-file` with
-`--make-public` before inserting the resulting Drive public image URI. Use
-`--make-public` only for images that are acceptable to expose to anyone with
-the link.
+`toolmux google docs insert-image` command can also use `--upload-file` or
+`--content-base64` with `--make-public` before inserting the resulting Drive
+public image URI. Use `--make-public` only for images that are acceptable to
+expose to anyone with the link.
 
 ### Manual smoke test
 
@@ -377,7 +392,20 @@ toolmux google drive files upload ./diagram.png \
   --mime-type image/png \
   --make-public \
   --dry-run
-toolmux google drive files copy <file-id-or-url>
+toolmux google drive files copy <file-id-or-url> \
+  --target-mime-type application/vnd.google-apps.document
+toolmux google drive files update <file-id-or-url> --name "Renamed file"
+toolmux google drive files update <file-id-or-url> ./report.docx \
+  --mime-type application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+  --target-mime-type application/vnd.google-apps.document \
+  --dry-run
+toolmux google drive files update --file <file-id-or-url> \
+  --content-base64 "$DOCX_BASE64" \
+  --name report.docx \
+  --mime-type application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+  --target-mime-type application/vnd.google-apps.document \
+  --dry-run
+toolmux google drive files trash <file-id-or-url> --dry-run
 toolmux google drive pick
 toolmux google drive available
 ```

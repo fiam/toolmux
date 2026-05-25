@@ -162,18 +162,29 @@ type DriveFile struct {
 	WebViewLink    string `json:"webViewLink,omitempty"`
 	WebContentLink string `json:"webContentLink,omitempty"`
 	ModifiedTime   string `json:"modifiedTime,omitempty"`
+	Trashed        bool   `json:"trashed,omitempty"`
 }
 
 type CopyDriveFileOptions struct {
-	Name     string
-	ParentID string
+	Name           string
+	ParentID       string
+	TargetMIMEType string
 }
 
 type UploadDriveFileOptions struct {
-	Name     string
-	ParentID string
-	MIMEType string
-	Content  []byte
+	Name           string
+	ParentID       string
+	MIMEType       string
+	TargetMIMEType string
+	Content        []byte
+}
+
+type UpdateDriveFileOptions struct {
+	Name           string
+	Trashed        *bool
+	MIMEType       string
+	TargetMIMEType string
+	Content        []byte
 }
 
 type DriveFilesResponse struct {

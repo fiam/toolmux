@@ -214,12 +214,16 @@ refresh-token preservation, and representative Drive and Docs API commands. Cove
 the Docs commands `get`, `find-structure`, `export`, `append`,
 `replace-all-text`, `style-ranges`, `insert-table`, `insert-image`, and
 `batch-update`; `toolmux google drive selected add/list/remove`,
-`toolmux google drive files copy/upload`, `toolmux google drive pick`, and
-`toolmux google drive available` through fake brokered Picker flows without
-using live Google. The brokered Picker flow must use Google's
+`toolmux google drive files copy/upload/update/trash`,
+`toolmux google drive pick`, and `toolmux google drive available` through fake
+brokered Picker flows without using live Google. The brokered Picker flow must
+use Google's
 `trigger_onepick=true` flow, request only `drive.file`, and keep hosted Google
-client secrets and Picker configuration out of CLI output. Do not add a local
-Google Picker fallback unless product requirements explicitly change.
+client secrets and Picker configuration out of CLI output. Drive upload/update
+tests must cover local file paths and `--content-base64`; Drive
+copy/upload/update tests must cover `--target-mime-type` conversion metadata.
+Do not add a local Google Picker fallback unless product requirements
+explicitly change.
 
 Tests that need a real toolmuxd instance should use
 `internal/testutil/toolmuxdtest` instead of constructing `server.NewHandler`

@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,12 +58,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "18"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "20"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "18"} {
+	for _, want := range []string{"google", "internal", "connected", "20"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -185,11 +186,21 @@ func TestGoogleDriveUploadAndDocsInsertUploadedImage(t *testing.T) {
 	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")
 	upstream.assertAnyoneReaderPermission(t, "image-1")
 
+	encodedImage := base64.StdEncoding.EncodeToString([]byte("base64 png"))
+	out = toolmuxtest.Run(t, deps, "google", "drive", "files", "upload", "--content-base64", encodedImage, "--name", "diagram.png", "--mime-type", "image/png")
+	toolmuxtest.AssertContains(t, out, "image-1")
+	upstream.assertDriveUpload(t, "diagram.png", "image/png", "base64 png")
+
 	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--upload-file", imagePath, "--mime-type", "image/png", "--make-public", "--index", "2")
 	toolmuxtest.AssertContains(t, out, "image-1")
 	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")
 	upstream.assertAnyoneReaderPermission(t, "image-1")
 	upstream.assertDocsInsertImage(t, "https://drive.google.com/uc?export=view&id=image-1", 2)
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--content-base64", encodedImage, "--name", "inline.png", "--mime-type", "image/png", "--make-public", "--index", "3")
+	toolmuxtest.AssertContains(t, out, "image-1")
+	upstream.assertDriveUpload(t, "inline.png", "image/png", "base64 png")
+	upstream.assertDocsInsertImage(t, "https://drive.google.com/uc?export=view&id=image-1", 3)
 }
 
 func TestGoogleDriveReportsMissingScopeAfterDocsSensitiveOverride(t *testing.T) {
@@ -292,9 +303,62 @@ func TestGoogleDriveFilesCopyCopiesAccessibleFile(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Copied plan")
 	upstream.assertCopyRequest(t, "doc-1", "Copied plan", "root")
 
+	out = toolmuxtest.Run(t, deps, "google", "drive", "files", "copy", "doc-1", "--target-mime-type", googleapi.GoogleDocsMIMEType())
+	toolmuxtest.AssertContains(t, out, googleapi.GoogleDocsMIMEType())
+	upstream.assertCopyTargetMIME(t, googleapi.GoogleDocsMIMEType())
+
 	out = toolmuxtest.Run(t, deps, "--output", "json", "google", "drive", "files", "copy", "--file", "doc-1", "--parent-id", "folder-1", "--dry-run")
 	toolmuxtest.AssertContains(t, out, "google.drive.files.copy")
 	toolmuxtest.AssertContains(t, out, "folder-1")
+}
+
+func TestGoogleDriveFilesUpdateUpdatesAccessibleFile(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	store := credentials.NewMemoryStore()
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
+	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
+		AccessToken:  "ya29.drive",
+		RefreshToken: "refresh-google",
+		TokenType:    "Bearer",
+		Scopes:       []string{googleapi.ScopeDriveFile},
+		Extra:        map[string]string{"auth_type": "oauth_broker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deps := googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
+	replacementPath := filepath.Join(t.TempDir(), "replacement.docx")
+	if err := os.WriteFile(replacementPath, []byte("replacement docx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	docxMIME := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	result := toolmuxtest.RunResult(t, deps, "google", "drive", "files", "update", "doc-1", "--target-mime-type", googleapi.GoogleDocsMIMEType())
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "--target-mime-type requires replacement content") {
+		t.Fatalf("expected replacement content validation error, got err=%v output:\n%s", result.Err, result.Output)
+	}
+
+	out := toolmuxtest.Run(t, deps, "google", "drive", "files", "update", "https://docs.google.com/document/d/doc-1/edit", replacementPath, "--name", "Updated plan", "--mime-type", docxMIME, "--target-mime-type", googleapi.GoogleDocsMIMEType())
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	toolmuxtest.AssertContains(t, out, "Updated plan")
+	upstream.assertDriveUpdate(t, "doc-1", "Updated plan", nil, docxMIME, "replacement docx")
+	upstream.assertDriveUpdateTargetMIME(t, googleapi.GoogleDocsMIMEType())
+
+	encodedDocx := base64.StdEncoding.EncodeToString([]byte("replacement from base64"))
+	out = toolmuxtest.Run(t, deps, "google", "drive", "files", "update", "--file", "doc-1", "--content-base64", encodedDocx, "--name", "Converted plan", "--mime-type", docxMIME, "--target-mime-type", googleapi.GoogleDocsMIMEType())
+	toolmuxtest.AssertContains(t, out, googleapi.GoogleDocsMIMEType())
+	upstream.assertDriveUpdate(t, "doc-1", "Converted plan", nil, docxMIME, "replacement from base64")
+	upstream.assertDriveUpdateTargetMIME(t, googleapi.GoogleDocsMIMEType())
+
+	out = toolmuxtest.Run(t, deps, "--output", "json", "google", "drive", "files", "update", "--file", "doc-1", "--trashed", "--dry-run")
+	toolmuxtest.AssertContains(t, out, "google.drive.files.update")
+	toolmuxtest.AssertContains(t, out, `"trashed": true`)
+
+	out = toolmuxtest.Run(t, deps, "google", "drive", "files", "trash", "doc-1")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	toolmuxtest.AssertContains(t, out, "Trashed")
+	trashed := true
+	upstream.assertDriveUpdate(t, "doc-1", "", &trashed, "", "")
 }
 
 func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
@@ -317,6 +381,8 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 		"google.drive.selected.list",
 		"google.drive.files.copy",
 		"google.drive.files.upload",
+		"google.drive.files.update",
+		"google.drive.files.trash",
 		"google.drive.selected.remove",
 		"google.drive.available",
 	} {

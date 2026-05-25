@@ -37,14 +37,16 @@ func handleDriveFilesCopy(exec actions.Context, inv actions.Invocation) (any, er
 		return nil, err
 	}
 	request := googleapi.CopyDriveFileOptions{
-		Name:     inv.String("name"),
-		ParentID: inv.String("parent-id"),
+		Name:           inv.String("name"),
+		ParentID:       inv.String("parent-id"),
+		TargetMIMEType: inv.String("target-mime-type"),
 	}
 	if inv.Bool("dry-run") {
 		return actions.NewDryRun(inv.Spec.ID, map[string]any{
-			"file_id":   fileID,
-			"name":      strings.TrimSpace(request.Name),
-			"parent_id": strings.TrimSpace(request.ParentID),
+			"file_id":          fileID,
+			"name":             strings.TrimSpace(request.Name),
+			"parent_id":        strings.TrimSpace(request.ParentID),
+			"target_mime_type": strings.TrimSpace(request.TargetMIMEType),
 		}), nil
 	}
 	client, err := googleClient(exec, inv, defaultDriveScopes)

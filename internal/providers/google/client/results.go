@@ -20,24 +20,27 @@ func (result authResult) Text() string {
 type driveFileResult googleapi.DriveFile
 
 func (result driveFileResult) Table(output.Options) output.Table {
-	return output.Table{
-		Headers: []string{"Field", "Value"},
-		Rows: [][]string{
-			{"File ID", result.ID},
-			{"Name", result.Name},
-			{"MIME type", result.MIMEType},
-			{"Modified", result.ModifiedTime},
-			{"URL", result.WebViewLink},
-		},
+	rows := [][]string{
+		{"File ID", result.ID},
+		{"Name", result.Name},
+		{"MIME type", result.MIMEType},
+		{"Modified", result.ModifiedTime},
+		{"URL", result.WebViewLink},
 	}
+	if result.Trashed {
+		rows = append(rows, []string{"Trashed", strconv.FormatBool(result.Trashed)})
+	}
+	return output.Table{Headers: []string{"Field", "Value"}, Rows: rows}
 }
 
 type driveUploadDryRun struct {
 	Path       string `json:"path" yaml:"path"`
 	Name       string `json:"name" yaml:"name"`
 	MIMEType   string `json:"mime_type" yaml:"mime_type"`
+	TargetMIME string `json:"target_mime_type,omitempty" yaml:"target_mime_type,omitempty"`
 	ParentID   string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 	Size       int    `json:"size" yaml:"size"`
+	FromBase64 bool   `json:"from_base64,omitempty" yaml:"from_base64,omitempty"`
 	MakePublic bool   `json:"make_public" yaml:"make_public"`
 }
 
