@@ -96,23 +96,29 @@ jobs:
           set -euo pipefail
 
           empty_tree=0000000000000000000000000000000000000000
+          range_args=()
           case "${{ github.event_name }}" in
           pull_request)
-            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+            range_args=("${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}")
             ;;
           push)
-            if [[ "${{ github.event.before }}" == "$empty_tree" ]]; then
-              range="${{ github.sha }}"
+            before="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [[ "$before" == "$empty_tree" ]]; then
+              range_args=("$head")
+            elif git rev-parse --verify --quiet "${before}^{commit}" >/dev/null; then
+              range_args=("$before..$head")
             else
-              range="${{ github.event.before }}..${{ github.sha }}"
+              echo "Push base $before is unavailable in this checkout; checking $head only" >&2
+              range_args=(-1 "$head")
             fi
             ;;
           *)
-            range="${{ github.sha }}"
+            range_args=(-1 "${{ github.sha }}")
             ;;
           esac
 
-          scripts/check-commit-range.sh "$range"
+          scripts/check-commit-range.sh "${range_args[@]}"
 
   release-build:
     name: release build
