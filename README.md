@@ -24,7 +24,7 @@ CLI.
 
 | Area | What is supported |
 | --- | --- |
-| Native toolboxes | Slack, Google Drive |
+| Native toolboxes | Slack, Google Drive, Google Docs |
 | Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux list --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
 | Agents | Codex, Claude Code, Gemini CLI |
