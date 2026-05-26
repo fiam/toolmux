@@ -12,7 +12,7 @@ import (
 // These tests intentionally do not call t.Parallel because they exercise config
 // discovery through process-global cwd and environment variables.
 
-func TestMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
+func TestLiveMCPBuiltinRemoteServersUseOAuthReadyEndpoints(t *testing.T) {
 	server, ok := mcpBuiltinRemoteServers()["atlassian"]
 	if !ok {
 		t.Fatal("expected atlassian built-in MCP server")

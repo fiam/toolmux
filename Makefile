@@ -7,6 +7,12 @@ LINT_IMAGE ?= toolmux-lint:dev
 BIN_DIR ?= bin
 CODESIGN_IDENTITY ?=
 UNAME_S ?= $(shell uname -s)
+INTEGRATION_TEST_PACKAGES ?= \
+	./internal/cli \
+	./internal/providers/google/broker \
+	./internal/providers/google/client \
+	./internal/providers/slack/client \
+	./internal/server
 
 .DEFAULT_GOAL := help
 
@@ -90,11 +96,14 @@ test-race:
 
 .PHONY: test-integration
 test-integration:
-	$(GO) test -run Integration ./...
+	$(GO) test -skip Live $(INTEGRATION_TEST_PACKAGES)
 
 .PHONY: test-live
 test-live:
-	@if [ "$$TOOLMUX_LIVE_TESTS" != "1" ]; then echo "set TOOLMUX_LIVE_TESTS=1 to run live tests"; exit 0; fi
+	@if [ "$$TOOLMUX_LIVE_TESTS" != "1" ]; then \
+		echo "set TOOLMUX_LIVE_TESTS=1 to run live tests"; \
+		exit 0; \
+	fi; \
 	$(GO) test -run Live ./...
 
 .PHONY: coverage
