@@ -269,10 +269,10 @@ credentials are read. Native provider tools should be listed only when that
 toolbox is registered in the merged Toolmux config. Do not add separate
 MCP-only provider command trees for native providers.
 
-`toolmux mcp configure` manages supported agent CLIs: Codex, Claude Code, and
-Gemini CLI. With no agent argument it autodetects installed supported CLIs; with
-arguments it accepts known agent names and aliases such as `claude-code` and
-`gemini-cli`. Interactive no-argument runs must show a checkbox selector and
+`toolmux mcp configure` manages supported agent CLIs: Codex and Claude Code.
+With no agent argument it autodetects installed supported CLIs; with arguments
+it accepts known agent names and aliases such as `claude-code`. Interactive
+no-argument runs must show a checkbox selector and
 preselect agents where Toolmux MCP is configured and enabled. The selector must
 show how each existing Toolmux MCP server is configured, and unchecking a
 configured agent must remove the Toolmux MCP server from that agent. It
@@ -301,13 +301,14 @@ Workflow definitions are non-secret YAML. Global workflows live under
 Template catalog entries must point at YAML files committed under `workflows/`
 and loaded from GitHub, not hardcoded as Go workflow structs. Workflow prompts
 are inline Go `text/template` strings. Missing template inputs without defaults
-must fail clearly. A workflow can declare an agent, but `workflow run` must also
-support `--agent` and `workflows.default_agent`; if no agent is available,
-interactive runs should prompt for a detected or configured local agent and
-non-interactive runs must fail. `toolmux workflow config set default-agent`
-with no agent argument should open the same selector interactively. Agent
-command definitions may include `{{ .prompt }}`; otherwise Toolmux appends the
-rendered prompt as an extra argument. Workflows may declare required toolboxes
+must fail clearly. Workflow YAML must not declare an `agent:` field; the agent
+is selected via `--agent`, `workflows.default_agent` in Toolmux config, or the
+interactive picker. If no agent is available, interactive runs should prompt
+for a detected or configured local agent and non-interactive runs must fail.
+`toolmux workflow config set default-agent` with no agent argument should open
+the same selector interactively. Agent command definitions may include
+`{{ .prompt }}`; otherwise Toolmux appends the rendered prompt as an extra
+argument. Workflows may declare required toolboxes
 with compact values such as `internal:slack`, `catalog:linear`, or a remote MCP
 URL, and missing requirements should be added automatically during
 `workflow init` and `workflow run` unless `--no-setup` is passed.

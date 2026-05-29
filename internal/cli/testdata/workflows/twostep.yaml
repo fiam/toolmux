@@ -1,0 +1,11 @@
+version: 1
+name: twostep
+steps:
+  - id: fetch
+    name: Fetching
+    outputs:
+      count:
+        type: int
+    prompt: fetch items
+  - name: Summarizing
+    prompt: "items: {{ .previous.outputs.count }}"

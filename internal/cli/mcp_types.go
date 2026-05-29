@@ -21,7 +21,6 @@ type mcpConfigureOptions struct {
 	ServerName  string
 	AgentScope  string
 	ClaudeScope string
-	GeminiScope string
 	DryRun      bool
 }
 

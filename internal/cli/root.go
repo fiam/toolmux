@@ -21,34 +21,52 @@ const (
 )
 
 type options struct {
-	output             string
-	color              string
-	pager              string
-	profile            string
-	policy             string
-	readOnly           bool
-	credentials        func() (credentials.Store, error)
-	httpClient         *http.Client
-	openBrowser        func(string) error
-	env                func(string) string
-	providerURL        map[string]string
-	providerAPI        map[string]string
-	toolmuxdURL        string
-	mcpCacheDir        string
-	mcpToolCallTimeout time.Duration
-	mcpRemoteConflicts []mcpRemoteNameConflict
-	workDir            string
+	output                  string
+	color                   string
+	pager                   string
+	profile                 string
+	policy                  string
+	readOnly                bool
+	credentials             func() (credentials.Store, error)
+	httpClient              *http.Client
+	openBrowser             func(string) error
+	env                     func(string) string
+	providerURL             map[string]string
+	providerAPI             map[string]string
+	toolmuxdURL             string
+	mcpCacheDir             string
+	mcpToolCallTimeout      time.Duration
+	mcpRemoteConflicts      []mcpRemoteNameConflict
+	workDir                 string
+	workflowAgentDiscoverer workflowAgentDiscoverer
 }
 
 type Dependencies struct {
-	Credentials credentials.Store
-	HTTPClient  *http.Client
-	OpenBrowser func(string) error
-	Env         func(string) string
-	ProviderURL map[string]string
-	ProviderAPI map[string]string
-	ToolmuxdURL string
-	WorkDir     string
+	Credentials             credentials.Store
+	HTTPClient              *http.Client
+	OpenBrowser             func(string) error
+	Env                     func(string) string
+	ProviderURL             map[string]string
+	ProviderAPI             map[string]string
+	ToolmuxdURL             string
+	WorkDir                 string
+	WorkflowAgentDiscoverer func(config WorkflowConfigSnapshot) []WorkflowAgentCandidate
+}
+
+// WorkflowAgentCandidate is the public projection of an internal workflow
+// agent candidate, used by external callers wiring up a custom discoverer.
+type WorkflowAgentCandidate struct {
+	Name    string
+	Label   string
+	Command string
+	Args    []string
+}
+
+// WorkflowConfigSnapshot is the read-only view of the workflow config exposed
+// to external discoverers.
+type WorkflowConfigSnapshot struct {
+	DefaultAgent string
+	AgentNames   []string
 }
 
 func NewRootCommand() *cobra.Command {
@@ -90,6 +108,9 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	opts.toolmuxdURL = strings.TrimRight(firstNonEmpty(deps.ToolmuxdURL, env("TOOLMUX_TOOLMUXD_URL"), "https://api.toolmux.com"), "/")
 	opts.mcpCacheDir = strings.TrimSpace(env("TOOLMUX_MCP_CACHE_DIR"))
 	opts.workDir = strings.TrimSpace(deps.WorkDir)
+	if deps.WorkflowAgentDiscoverer != nil {
+		opts.workflowAgentDiscoverer = adaptWorkflowAgentDiscoverer(deps.WorkflowAgentDiscoverer)
+	}
 	configureProviders(opts, env)
 
 	root := &cobra.Command{
@@ -129,6 +150,32 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
 
 	return root
+}
+
+func adaptWorkflowAgentDiscoverer(external func(WorkflowConfigSnapshot) []WorkflowAgentCandidate) workflowAgentDiscoverer {
+	return func(config workflowConfig) []workflowAgentCandidate {
+		names := make([]string, 0, len(config.Agents))
+		for name := range config.Agents {
+			names = append(names, name)
+		}
+		snapshot := WorkflowConfigSnapshot{
+			DefaultAgent: config.DefaultAgent,
+			AgentNames:   names,
+		}
+		external := external(snapshot)
+		out := make([]workflowAgentCandidate, 0, len(external))
+		for _, candidate := range external {
+			out = append(out, workflowAgentCandidate{
+				Name:  candidate.Name,
+				Label: firstNonEmpty(candidate.Label, candidate.Name),
+				Config: workflowAgentConfig{
+					Command: candidate.Command,
+					Args:    append([]string(nil), candidate.Args...),
+				},
+			})
+		}
+		return out
+	}
 }
 
 func configureProviders(opts *options, env func(string) string) {

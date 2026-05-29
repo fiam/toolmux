@@ -1,0 +1,93 @@
+version: 1
+name: runbook-from-incident
+description: Turn a resolved incident's actual resolution into a reusable Notion runbook
+requires:
+  - catalog:incident-io
+  - catalog:notion
+inputs:
+  incident:
+    description: Incident reference (e.g. INC-1234) or incident.io ID
+  notion_parent:
+    description: Notion parent page or database for the runbook. Empty = leave the page unfiled.
+    default: ""
+steps:
+  - id: source
+    name: Reading incident
+    outputs:
+      summary:
+        type: json
+        description: Incident metadata and resolution narrative
+        schema:
+          type: object
+          required: [reference, name, severity, started_at, resolved_at, summary]
+          properties:
+            reference:    { type: string }
+            name:         { type: string }
+            severity:     { type: string }
+            started_at:   { type: string }
+            resolved_at:  { type: string }
+            summary:      { type: string }
+      timeline:
+        type: json
+        description: Time-ordered key events that drove the resolution
+        schema:
+          type: array
+          items:
+            type: object
+            required: [at, actor, event]
+            properties:
+              at:    { type: string }
+              actor: { type: string }
+              event: { type: string }
+    prompt: |
+      Use incident.io tools (incident_show, incident_update_list,
+      ask_incident) to load incident "{{ .inputs.incident }}". Extract
+      the summary metadata and a compact timeline of the actions that
+      actually resolved the issue (max ~12 events).
+
+  - id: extract
+    name: Extracting resolution steps
+    outputs:
+      procedure:
+        type: json
+        description: Ordered, generalized steps a responder could take next time
+        schema:
+          type: array
+          items:
+            type: object
+            required: [step, why]
+            properties:
+              step: { type: string, description: "imperative instruction, no incident-specific names" }
+              why:  { type: string, description: "what signal or condition this step addresses" }
+      preconditions:
+        type: json
+        description: Conditions that should trigger this runbook
+        schema:
+          type: array
+          items: { type: string }
+    prompt: |
+      Read the timeline below and extract a generalized set of resolution
+      steps. Replace incident-specific names (services, regions, people)
+      with placeholders like <service>, <region>, <responder>. The output
+      should be a runbook the next responder could follow even if the
+      incident is different in details.
+
+      Timeline:
+      {{ .steps.source.outputs.timeline }}
+
+  - name: Publishing runbook
+    prompt: |
+      Use notion-create-pages to create a Notion page titled
+      "Runbook: {{ .steps.source.outputs.summary }}"
+      {{ if .inputs.notion_parent }}under parent {{ .inputs.notion_parent }}{{ end }}
+      with this Markdown body. Print the page URL on a final standalone
+      line.
+
+      ## When to use this runbook
+      {{ .steps.extract.outputs.preconditions }}
+
+      ## Steps
+      {{ .steps.extract.outputs.procedure }}
+
+      ## Source incident
+      {{ .steps.source.outputs.summary }}

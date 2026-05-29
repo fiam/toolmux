@@ -1,0 +1,76 @@
+version: 1
+name: focus-prep
+description: Build today's focus plan and stash it as a Notion daily note
+requires:
+  - catalog:atlassian
+  - catalog:notion
+inputs:
+  top_n:
+    type: int
+    description: How many priority issues to surface
+    default: "3"
+  notion_parent:
+    description: Notion parent page or database where the daily note should live. Empty = leave the page unfiled.
+    default: ""
+steps:
+  - id: priorities
+    name: Picking top issues
+    outputs:
+      issues:
+        type: json
+        description: Highest-priority Jira issues assigned to me
+        schema:
+          type: array
+          items:
+            type: object
+            required: [key, summary, priority, status]
+            properties:
+              key:      { type: string }
+              summary:  { type: string }
+              priority: { type: string }
+              status:   { type: string }
+    prompt: |
+      Use atlassianUserInfo and searchJiraIssuesUsingJql to find my top
+      {{ .inputs.top_n }} open Jira issues, ordered by priority then due
+      date. JQL such as:
+        assignee = currentUser() AND statusCategory != Done
+        ORDER BY priority DESC, duedate ASC
+      Return the top {{ .inputs.top_n }} entries.
+
+  - id: recent_docs
+    name: Surfacing recent Notion notes
+    outputs:
+      pages:
+        type: json
+        description: Most recent Notion pages mentioning me or my team
+        schema:
+          type: array
+          items:
+            type: object
+            required: [title, url]
+            properties:
+              title: { type: string }
+              url:   { type: string }
+    prompt: |
+      Use notion-search to find up to 5 recent pages that mention me or
+      my work, sorted by last_edited_time descending.
+
+  - name: Creating the daily note
+    prompt: |
+      Create a Notion page titled "Focus — {{ .inputs.top_n }} priorities for today"
+      {{ if .inputs.notion_parent }}under parent {{ .inputs.notion_parent }}{{ end }}
+      with the following Markdown body, then print the page URL on a
+      final standalone line.
+
+      ## Priorities
+      {{ .steps.priorities.outputs.issues }}
+
+      ## Recent context
+      {{ .steps.recent_docs.outputs.pages }}
+
+      ## Intent for today
+      (One paragraph the agent should write summarizing the day's focus,
+      grounded in the priorities and recent context above. Keep it
+      under 80 words.)
+
+      Use notion-create-pages to create the page.

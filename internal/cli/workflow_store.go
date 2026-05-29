@@ -12,6 +12,9 @@ import (
 )
 
 func lookupWorkflow(name, startDir string) (workflowEntry, workflowFile, error) {
+	if isWorkflowPathArgument(name) {
+		return loadWorkflowFromPath(name)
+	}
 	cleaned, err := cleanWorkflowName(name)
 	if err != nil {
 		return workflowEntry{}, workflowFile{}, err
@@ -31,6 +34,36 @@ func lookupWorkflow(name, startDir string) (workflowEntry, workflowFile, error) 
 		return entry, workflow, nil
 	}
 	return workflowEntry{}, workflowFile{}, fmt.Errorf("workflow %q not found", cleaned)
+}
+
+func isWorkflowPathArgument(arg string) bool {
+	if arg == "" {
+		return false
+	}
+	if strings.ContainsAny(arg, "/"+string(filepath.Separator)) {
+		return true
+	}
+	if strings.HasSuffix(arg, ".yaml") || strings.HasSuffix(arg, ".yml") {
+		return true
+	}
+	return false
+}
+
+func loadWorkflowFromPath(path string) (workflowEntry, workflowFile, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return workflowEntry{}, workflowFile{}, err
+	}
+	workflow, err := readWorkflowFile(abs)
+	if err != nil {
+		return workflowEntry{}, workflowFile{}, err
+	}
+	return workflowEntry{
+		Name:        workflow.Name,
+		Description: workflow.Description,
+		Scope:       "file",
+		Path:        abs,
+	}, workflow, nil
 }
 
 func workflowEntries(startDir string) ([]workflowEntry, error) {

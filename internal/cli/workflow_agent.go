@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -13,36 +12,52 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func resolveWorkflowAgent(workflow workflowFile, config workflowConfig, override string) (workflowAgentConfig, error) {
+func resolveWorkflowAgent(workflow workflowFile, config workflowConfig, override string, discoverer workflowAgentDiscoverer) (workflowAgentConfig, error) {
 	if strings.TrimSpace(override) != "" {
 		return workflowAgentByName(strings.TrimSpace(override), config)
 	}
-	if workflow.Agent.Set {
-		if workflow.Agent.Config.Command != "" {
-			return workflow.Agent.Config, nil
-		}
-		if workflow.Agent.Name != "" {
-			return workflowAgentByName(workflow.Agent.Name, config)
-		}
-	}
 	if config.DefaultAgent != "" {
 		return workflowAgentByName(config.DefaultAgent, config)
+	}
+	candidates := discoverer(config)
+	if len(candidates) == 1 {
+		return candidates[0].Config, nil
 	}
 	return workflowAgentConfig{}, fmt.Errorf("workflow %s has no agent; pass --agent or set workflows.default_agent", workflow.Name)
 }
 
 func resolveWorkflowAgentForCommand(cmd *cobra.Command, opts *options, workflow workflowFile, config workflowConfig, override string) (workflowAgentConfig, error) {
-	if strings.TrimSpace(override) != "" || workflow.Agent.Set || config.DefaultAgent != "" || !interactiveCommand(cmd, opts) {
-		return resolveWorkflowAgent(workflow, config, override)
+	discoverer := workflowAgentDiscovererFor(opts)
+	if strings.TrimSpace(override) != "" || config.DefaultAgent != "" {
+		return resolveWorkflowAgent(workflow, config, override, discoverer)
 	}
-	selected, ok, err := selectWorkflowAgentInteractive(cmd, config, "Select workflow agent")
+	candidates := discoverer(config)
+	if len(candidates) == 1 {
+		return candidates[0].Config, nil
+	}
+	if !interactiveCommand(cmd, opts) {
+		return resolveWorkflowAgent(workflow, config, override, discoverer)
+	}
+	selected, ok, err := selectWorkflowAgentInteractive(cmd, candidates, "Select workflow agent")
 	if err != nil {
 		return workflowAgentConfig{}, err
 	}
 	if !ok {
 		return workflowAgentConfig{}, fmt.Errorf("workflow %s has no agent; pass --agent or set workflows.default_agent", workflow.Name)
 	}
+	for _, candidate := range candidates {
+		if candidate.Name == selected {
+			return candidate.Config, nil
+		}
+	}
 	return workflowAgentByName(selected, config)
+}
+
+func workflowAgentDiscovererFor(opts *options) workflowAgentDiscoverer {
+	if opts != nil && opts.workflowAgentDiscoverer != nil {
+		return opts.workflowAgentDiscoverer
+	}
+	return defaultWorkflowAgentDiscoverer
 }
 
 func workflowAgentByName(name string, config workflowConfig) (workflowAgentConfig, error) {
@@ -76,15 +91,18 @@ func workflowAgentByName(name string, config workflowConfig) (workflowAgentConfi
 	}
 	if canonical, ok := canonicalMCPAgent(parts[0]); ok {
 		definition, _ := mcpAgentDefinition(canonical)
-		return workflowAgentConfig{Command: definition.command, Args: parts[1:]}, nil
+		args := parts[1:]
+		if len(args) == 0 {
+			args = append([]string(nil), definition.workflowDefault...)
+		}
+		return workflowAgentConfig{Command: definition.command, Args: args}, nil
 	}
 	return workflowAgentConfig{Command: parts[0], Args: parts[1:]}, nil
 }
 
-func selectWorkflowAgentInteractive(cmd *cobra.Command, config workflowConfig, title string) (string, bool, error) {
-	candidates := workflowAgentCandidates(config)
+func selectWorkflowAgentInteractive(cmd *cobra.Command, candidates []workflowAgentCandidate, title string) (string, bool, error) {
 	if len(candidates) == 0 {
-		return "", false, fmt.Errorf("no workflow agents available; install codex, claude, or gemini, configure workflows.agents, or pass --agent")
+		return "", false, fmt.Errorf("no workflow agents available; install codex or claude, configure workflows.agents, or pass --agent")
 	}
 	selected := candidates[0].Name
 	options := make([]huh.Option[string], 0, len(candidates))
@@ -116,11 +134,17 @@ func selectWorkflowAgentInteractive(cmd *cobra.Command, config workflowConfig, t
 }
 
 type workflowAgentCandidate struct {
-	Name  string
-	Label string
+	Name   string
+	Label  string
+	Config workflowAgentConfig
 }
 
-func workflowAgentCandidates(config workflowConfig) []workflowAgentCandidate {
+// workflowAgentDiscoverer reports which agents are available for workflow
+// execution given the current configuration. Tests can swap this out to
+// register only a fake agent.
+type workflowAgentDiscoverer func(config workflowConfig) []workflowAgentCandidate
+
+func defaultWorkflowAgentDiscoverer(config workflowConfig) []workflowAgentCandidate {
 	seen := map[string]bool{}
 	var candidates []workflowAgentCandidate
 	names := make([]string, 0, len(config.Agents))
@@ -129,7 +153,15 @@ func workflowAgentCandidates(config workflowConfig) []workflowAgentCandidate {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		candidates = append(candidates, workflowAgentCandidate{Name: name, Label: name + " (configured)"})
+		agent := config.Agents[name]
+		if agent.Command == "" {
+			agent.Command = name
+		}
+		candidates = append(candidates, workflowAgentCandidate{
+			Name:   name,
+			Label:  name + " (configured)",
+			Config: agent,
+		})
 		seen[name] = true
 	}
 	for _, agent := range supportedMCPAgents() {
@@ -140,7 +172,11 @@ func workflowAgentCandidates(config workflowConfig) []workflowAgentCandidate {
 		if seen[agent] {
 			continue
 		}
-		candidates = append(candidates, workflowAgentCandidate{Name: agent, Label: mcpAgentDisplayName(agent)})
+		candidates = append(candidates, workflowAgentCandidate{
+			Name:   agent,
+			Label:  mcpAgentDisplayName(agent),
+			Config: workflowAgentConfig{Command: definition.command, Args: append([]string(nil), definition.workflowDefault...)},
+		})
 		seen[agent] = true
 	}
 	return candidates
@@ -222,13 +258,4 @@ func splitWorkflowAgentCommandLine(value string) ([]string, error) {
 		args = append(args, current.String())
 	}
 	return args, nil
-}
-
-func runWorkflowAgent(ctx context.Context, cmd *cobra.Command, name string, args []string) error {
-	// #nosec G204 -- workflow agent commands come from explicit local workflow configuration.
-	process := exec.CommandContext(ctx, name, args...)
-	process.Stdin = cmd.InOrStdin()
-	process.Stdout = cmd.OutOrStdout()
-	process.Stderr = cmd.ErrOrStderr()
-	return process.Run()
 }

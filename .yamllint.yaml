@@ -7,3 +7,7 @@ rules:
     max: 120
   truthy:
     check-keys: false
+  braces:
+    max-spaces-inside: 1
+  colons:
+    max-spaces-after: -1

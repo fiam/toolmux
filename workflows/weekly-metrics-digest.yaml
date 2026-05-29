@@ -1,0 +1,121 @@
+version: 1
+name: weekly-metrics-digest
+description: Pull Grafana metrics, Jira throughput, and incidents for the past week into a Notion digest
+requires:
+  - catalog:grafana
+  - catalog:atlassian
+  - catalog:incident-io
+  - catalog:notion
+inputs:
+  window:
+    type: duration
+    description: Reporting window
+    default: 7d
+  prometheus_datasource:
+    description: Grafana Prometheus datasource UID or name
+  notion_parent:
+    description: Notion parent page or database for the digest. Empty = leave the page unfiled.
+    default: ""
+steps:
+  - id: metrics
+    name: Querying Grafana metrics
+    outputs:
+      summary:
+        type: json
+        description: Headline metric snapshots
+        schema:
+          type: array
+          items:
+            type: object
+            required: [metric, value, trend]
+            properties:
+              metric: { type: string }
+              value:  { type: string }
+              trend:  { type: string, description: "up | down | flat" }
+    prompt: |
+      Query Grafana (datasource: {{ .inputs.prometheus_datasource }}) for
+      the headline service-health metrics for the past
+      {{ .inputs.window }}.
+
+      Use list_prometheus_metric_names to discover available metrics if
+      you don't already know them. Pick 4–6 that best represent system
+      health (request rate, error rate, latency p95, saturation). Use
+      query_prometheus for current values and query_prometheus_histogram
+      where appropriate. Compare against the prior matching window to
+      classify trend as up/down/flat.
+
+  - id: throughput
+    name: Counting shipped issues
+    outputs:
+      shipped:
+        type: int
+        description: Number of Jira issues resolved in the window
+      issues:
+        type: json
+        description: Brief list of shipped issues
+        schema:
+          type: array
+          items:
+            type: object
+            required: [key, summary]
+            properties:
+              key:     { type: string }
+              summary: { type: string }
+    prompt: |
+      Use searchJiraIssuesUsingJql to count Jira issues resolved in the
+      past {{ .inputs.window }}:
+        resolutiondate >= -{{ .inputs.window }} AND statusCategory = Done
+      Return the count plus a brief list (max 10) of the resolved issues.
+
+  - id: incidents
+    name: Counting incidents
+    outputs:
+      count:
+        type: int
+        description: Incidents declared in the window
+      total_minutes:
+        type: int
+        description: Total incident minutes across the window
+      list:
+        type: json
+        description: Top incidents by duration
+        schema:
+          type: array
+          items:
+            type: object
+            required: [reference, name, severity, minutes]
+            properties:
+              reference: { type: string }
+              name:      { type: string }
+              severity:  { type: string }
+              minutes:   { type: integer }
+    prompt: |
+      Use incident_list and incident_stats to count incidents declared in
+      the past {{ .inputs.window }}, the total time spent in active
+      state, and the top 5 by duration.
+
+  - name: Drafting Notion digest
+    prompt: |
+      Create a Notion page titled "Weekly digest — past {{ .inputs.window }}"
+      {{ if .inputs.notion_parent }}under parent {{ .inputs.notion_parent }}{{ end }}
+      using notion-create-pages, with this Markdown body:
+
+      ## Metrics
+      {{ .steps.metrics.outputs.summary }}
+
+      ## Shipped this week
+      {{ .steps.throughput.outputs.shipped }} issues resolved.
+
+      {{ .steps.throughput.outputs.issues }}
+
+      ## Incidents
+      {{ .steps.incidents.outputs.count }} incidents,
+      {{ .steps.incidents.outputs.total_minutes }} minutes total.
+
+      {{ .steps.incidents.outputs.list }}
+
+      ## Narrative
+      (One short paragraph the agent writes synthesizing the above —
+      what's trending, what shipped, where time went.)
+
+      Print the created page URL on a final standalone line.

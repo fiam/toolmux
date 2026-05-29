@@ -85,11 +85,48 @@ func loadURLWorkflowTemplate(ctx context.Context, client *http.Client, rawURL st
 }
 
 func workflowTemplateCatalog() []workflowTemplateEntry {
-	return []workflowTemplateEntry{{
-		Name:        "slack-recap",
-		Description: "Summarize Slack channel activity since a time",
-		Source:      workflowTemplateGitHubSource("slack-recap.yaml"),
-	}}
+	return []workflowTemplateEntry{
+		{
+			Name:        "slack-recap",
+			Description: "Summarize Slack channel activity since a time",
+			Source:      workflowTemplateGitHubSource("slack-recap.yaml"),
+		},
+		{
+			Name:        "test",
+			Description: "Minimal smoke test that exits as soon as the agent replies",
+			Source:      workflowTemplateGitHubSource("test.yaml"),
+		},
+		{
+			Name:        "my-week",
+			Description: "Recap your week across Jira, Notion, and incident.io",
+			Source:      workflowTemplateGitHubSource("my-week.yaml"),
+		},
+		{
+			Name:        "yesterday-standup",
+			Description: "Three-bullet morning standup from yesterday's activity",
+			Source:      workflowTemplateGitHubSource("yesterday-standup.yaml"),
+		},
+		{
+			Name:        "focus-prep",
+			Description: "Pick today's priorities and stash a Notion daily note",
+			Source:      workflowTemplateGitHubSource("focus-prep.yaml"),
+		},
+		{
+			Name:        "weekly-metrics-digest",
+			Description: "Grafana + Jira + incident.io weekly digest in Notion",
+			Source:      workflowTemplateGitHubSource("weekly-metrics-digest.yaml"),
+		},
+		{
+			Name:        "error-budget-burn",
+			Description: "SLO burn report correlated with incidents over a window",
+			Source:      workflowTemplateGitHubSource("error-budget-burn.yaml"),
+		},
+		{
+			Name:        "runbook-from-incident",
+			Description: "Turn a resolved incident's resolution into a reusable Notion runbook",
+			Source:      workflowTemplateGitHubSource("runbook-from-incident.yaml"),
+		},
+	}
 }
 
 func workflowTemplateByName(name string) (workflowTemplateEntry, bool) {

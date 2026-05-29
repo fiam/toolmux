@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,7 +33,7 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
-		"mcp", "configure", "codex", "claude-code", "gemini-cli",
+		"mcp", "configure", "codex", "claude-code",
 		"--dry-run",
 		"--command", "/opt/toolmux/bin/toolmux",
 		"--mcp-profile", "ops read",
@@ -50,7 +49,6 @@ func TestMCPConfigureDryRunSupportsKnownAgents(t *testing.T) {
 	for _, want := range []string{
 		"codex: codex mcp add toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
 		"claude: claude mcp add --scope project --transport stdio toolmux-ops-read -- /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
-		"gemini: gemini mcp add --scope project --transport stdio toolmux-ops-read /opt/toolmux/bin/toolmux mcp serve --mcp-profile 'ops read' --tool 'linear.*' --exclude-tool '*.send'",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -203,7 +201,7 @@ func TestMCPDisableDryRunSupportsKnownAgents(t *testing.T) {
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
-		"mcp", "disable", "claude-code", "gemini-cli",
+		"mcp", "disable", "claude-code",
 		"--dry-run",
 		"--mcp-profile", "ops read",
 	})
@@ -216,8 +214,6 @@ func TestMCPDisableDryRunSupportsKnownAgents(t *testing.T) {
 		"claude: claude mcp remove --scope local toolmux-ops-read",
 		"claude: claude mcp remove --scope user toolmux-ops-read",
 		"claude: claude mcp remove --scope project toolmux-ops-read",
-		"gemini: gemini mcp remove --scope user toolmux-ops-read",
-		"gemini: gemini mcp remove --scope project toolmux-ops-read",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, rendered)
@@ -340,7 +336,7 @@ func TestSelectMCPAgentsAutodetectsSupportedCLIs(t *testing.T) {
 	runtime := mcpAgentRuntime{
 		lookPath: func(name string) (string, error) {
 			switch name {
-			case "codex", "gemini":
+			case "codex", "claude":
 				return "/bin/" + name, nil
 			default:
 				return "", errors.New("not found")
@@ -351,7 +347,7 @@ func TestSelectMCPAgentsAutodetectsSupportedCLIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(agents, []string{"codex", "gemini"}) {
+	if !slices.Equal(agents, []string{"codex", "claude"}) {
 		t.Fatalf("unexpected agents: %v", agents)
 	}
 }
@@ -362,10 +358,9 @@ func TestSelectedEnabledMCPAgentsKeepsSupportedOrder(t *testing.T) {
 	statuses := map[string]mcpAgentStatus{
 		"codex":  {Configured: true, Enabled: true},
 		"claude": {Configured: true, Enabled: false},
-		"gemini": {Configured: true, Enabled: true},
 	}
-	selected := selectedEnabledMCPAgents(statuses, []string{"codex", "claude", "gemini"})
-	if !slices.Equal(selected, []string{"codex", "gemini"}) {
+	selected := selectedEnabledMCPAgents(statuses, []string{"codex", "claude"})
+	if !slices.Equal(selected, []string{"codex"}) {
 		t.Fatalf("unexpected selected agents: %v", selected)
 	}
 }
@@ -380,38 +375,21 @@ func TestRemoveMCPAgentsRemovesSupportedScopes(t *testing.T) {
 			return nil
 		},
 	}
-	results, err := removeMCPAgents(context.Background(), runtime, mcpConfigureOptions{}, []string{"claude", "gemini"})
+	results, err := removeMCPAgents(context.Background(), runtime, mcpConfigureOptions{}, []string{"claude"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("expected removal results for two agents, got %+v", results)
+	if len(results) != 1 {
+		t.Fatalf("expected removal result for one agent, got %+v", results)
 	}
 	for _, want := range []string{
 		"claude mcp remove --scope local toolmux",
 		"claude mcp remove --scope user toolmux",
 		"claude mcp remove --scope project toolmux",
-		"gemini mcp remove --scope user toolmux",
-		"gemini mcp remove --scope project toolmux",
 	} {
 		if !slices.Contains(ran, want) {
 			t.Fatalf("expected removal command %q, got %v", want, ran)
 		}
-	}
-}
-
-func TestGeminiMCPConfigDetectsConfiguredServer(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"mcpServers":{"toolmux":{"command":"toolmux"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !mcpConfigHasServer(path, "toolmux") {
-		t.Fatal("expected toolmux MCP server to be detected")
-	}
-	if mcpConfigHasServer(path, "other") {
-		t.Fatal("unexpected MCP server detection")
 	}
 }
 
@@ -452,15 +430,11 @@ func decodeMCPTestResponse(t *testing.T, output string) mcpTestResponse {
 func TestMCPAgentConfigureCommandsRejectInvalidScopes(t *testing.T) {
 	t.Parallel()
 
-	_, err := mcpAgentConfigureCommands("gemini", "toolmux", mcpConfigureOptions{GeminiScope: "local"}, []string{"mcp", "serve"})
-	if err == nil || !strings.Contains(err.Error(), "--gemini-scope") {
-		t.Fatalf("expected Gemini scope error, got %v", err)
-	}
-	_, err = mcpAgentConfigureCommands("claude", "toolmux", mcpConfigureOptions{ClaudeScope: "global"}, []string{"mcp", "serve"})
+	_, err := mcpAgentConfigureCommands("claude", "toolmux", mcpConfigureOptions{ClaudeScope: "global"}, []string{"mcp", "serve"})
 	if err == nil || !strings.Contains(err.Error(), "--claude-scope") {
 		t.Fatalf("expected Claude scope error, got %v", err)
 	}
-	_, err = mcpAgentConfigureCommands("gemini", "toolmux", mcpConfigureOptions{AgentScope: "local"}, []string{"mcp", "serve"})
+	_, err = mcpAgentConfigureCommands("claude", "toolmux", mcpConfigureOptions{AgentScope: "global"}, []string{"mcp", "serve"})
 	if err == nil || !strings.Contains(err.Error(), "--scope") {
 		t.Fatalf("expected common scope error, got %v", err)
 	}

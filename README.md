@@ -19,8 +19,7 @@ Toolmux is built around four ideas:
 4. Workflows that turn repeatable prompts into commands.
 
 Toolmux is early software. Today it is most useful for Slack, Google Drive,
-remote MCP toolboxes, and local agent setup for Codex, Claude Code, and Gemini
-CLI.
+remote MCP toolboxes, and local agent setup for Codex and Claude Code.
 
 ## Supported Today
 
@@ -29,7 +28,7 @@ CLI.
 | Native toolboxes | Slack, Google Drive, Google Docs |
 | Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux list --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
-| Agents | Codex, Claude Code, Gemini CLI |
+| Agents | Codex, Claude Code |
 | Workflow templates | `slack-recap` |
 
 Use the CLI for the live list in your installed version:
@@ -101,7 +100,7 @@ With no agent argument, Toolmux detects installed supported agents and opens an
 interactive selector. For scripts, name the agents explicitly:
 
 ```bash
-toolmux mcp configure codex claude gemini
+toolmux mcp configure codex claude
 ```
 
 Now ask your agent to use Toolmux, for example:
@@ -388,7 +387,6 @@ Most users should configure an agent instead of running `mcp serve` manually:
 toolmux mcp configure
 toolmux mcp configure codex
 toolmux mcp configure claude --scope project
-toolmux mcp configure gemini --scope user
 ```
 
 Supported agent names:
@@ -397,13 +395,16 @@ Supported agent names:
 | --- | --- |
 | Codex | `codex` |
 | Claude Code | `claude`, `claude-code` |
-| Gemini CLI | `gemini`, `gemini-cli` |
+
+Configure additional agents through `workflows.agents` in
+`~/.toolmux/config.yaml` or `.toolmux/config.yaml`, mapping a name to a command
+and arguments.
 
 For non-interactive setup and teardown:
 
 ```bash
 toolmux mcp enable codex claude
-toolmux mcp disable gemini
+toolmux mcp disable claude
 ```
 
 Limit which tools an agent can see with MCP profiles:

@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/muesli/termenv v0.16.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/crypto v0.51.0

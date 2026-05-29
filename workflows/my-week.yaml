@@ -1,0 +1,96 @@
+version: 1
+name: my-week
+description: Recap what you worked on in the past week across Jira, Notion, and incident.io
+requires:
+  - catalog:atlassian
+  - catalog:notion
+  - catalog:incident-io
+inputs:
+  window:
+    type: duration
+    description: How far back to look
+    default: 7d
+steps:
+  - id: jira
+    name: Collecting Jira activity
+    outputs:
+      issues:
+        type: json
+        description: Jira issues I touched in the window
+        schema:
+          type: array
+          items:
+            type: object
+            required: [key, summary, status, last_activity]
+            properties:
+              key:           { type: string }
+              summary:       { type: string }
+              status:        { type: string }
+              last_activity: { type: string }
+    prompt: |
+      Use the Atlassian tools to find Jira issues I (the current user)
+      commented on, transitioned, or was assigned in the past
+      {{ .inputs.window }}.
+
+      Prefer atlassianUserInfo to learn my accountId, then
+      searchJiraIssuesUsingJql with JQL such as:
+        updated >= -{{ .inputs.window }} AND (assignee = currentUser()
+        OR comment ~ currentUser())
+      Limit to the most relevant 20 issues.
+
+  - id: notion
+    name: Collecting Notion edits
+    outputs:
+      pages:
+        type: json
+        description: Notion pages I edited in the window
+        schema:
+          type: array
+          items:
+            type: object
+            required: [title, url, last_edited]
+            properties:
+              title:        { type: string }
+              url:          { type: string }
+              last_edited:  { type: string }
+    prompt: |
+      Use the Notion tools to find pages I edited in the past
+      {{ .inputs.window }}. Use notion-search filtered by editor and
+      sorted by last_edited_time. Limit to 20 results.
+
+  - id: incidents
+    name: Collecting incident.io activity
+    outputs:
+      incidents:
+        type: json
+        description: Incidents I responded to in the window
+        schema:
+          type: array
+          items:
+            type: object
+            required: [reference, name, role, status]
+            properties:
+              reference: { type: string }
+              name:      { type: string }
+              role:      { type: string }
+              status:    { type: string }
+    prompt: |
+      Use the incident.io tools to find incidents in the past
+      {{ .inputs.window }} where I appear in the timeline, as a responder,
+      or as commander/lead. Prefer incident_list with appropriate filters.
+
+  - name: Drafting weekly recap
+    prompt: |
+      Write a concise Markdown recap of my week using the data collected by
+      previous steps. Group by area (Engineering / Docs / Incidents). Keep
+      it under 300 words. Reference issues by key, pages by title with URL,
+      and incidents by reference. Do not call any tools — just write.
+
+      Jira issues:
+      {{ .steps.jira.outputs.issues }}
+
+      Notion edits:
+      {{ .steps.notion.outputs.pages }}
+
+      Incidents:
+      {{ .steps.incidents.outputs.incidents }}

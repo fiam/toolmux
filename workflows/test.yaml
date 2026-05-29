@@ -1,0 +1,14 @@
+version: 1
+name: test
+description: Minimal smoke test that exits as soon as the agent replies
+inputs:
+  message:
+    description: Phrase the agent should echo back.
+    default: Toolmux workflow test OK
+prompt: |
+  Reply with exactly this line, with no surrounding text, no quotation marks,
+  no code fences, and no follow-up question, then stop:
+
+  {{ .inputs.message }}
+
+  Do not call any tools.

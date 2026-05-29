@@ -162,45 +162,36 @@ func workflowRenderCommand(opts *options) *cobra.Command {
 }
 
 func workflowRunCommand(opts *options) *cobra.Command {
-	var inputs []string
-	var agentName string
-	var noSetup bool
+	runOpts := workflowRunOptions{}
 	cmd := &cobra.Command{
-		Use:   "run <name>",
+		Use:   "run <name|path>",
 		Short: "Run a workflow with a local agent",
+		Long:  "Run a workflow with a local agent. Accepts a registered workflow name or a path to a .yaml workflow file.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entry, workflow, err := lookupWorkflow(args[0], opts.workDir)
+			_, workflow, err := lookupWorkflow(args[0], opts.workDir)
 			if err != nil {
 				return err
 			}
-			if !noSetup {
+			if !runOpts.noSetup {
 				if err := ensureWorkflowRequirements(cmd, opts, workflow); err != nil {
 					return err
 				}
-			}
-			rendered, err := renderWorkflow(workflow, entry.Path, inputs)
-			if err != nil {
-				return err
 			}
 			config, err := effectiveWorkflowConfig(opts.workDir)
 			if err != nil {
 				return err
 			}
-			agent, err := resolveWorkflowAgentForCommand(cmd, opts, workflow, config, agentName)
+			agent, err := resolveWorkflowAgentForCommand(cmd, opts, workflow, config, runOpts.agentName)
 			if err != nil {
 				return err
 			}
-			command, commandArgs, err := workflowAgentCommand(agent, rendered.Prompt)
-			if err != nil {
-				return err
-			}
-			return runWorkflowAgent(commandContext(cmd), cmd, command, commandArgs)
+			return runWorkflow(commandContext(cmd), cmd, opts, workflow, runOpts, agent)
 		},
 	}
-	cmd.Flags().StringArrayVarP(&inputs, "input", "i", nil, "workflow input as key=value")
-	cmd.Flags().StringVar(&agentName, "agent", "", "workflow agent name or command")
-	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "skip adding missing required toolboxes")
+	cmd.Flags().StringArrayVarP(&runOpts.inputs, "input", "i", nil, "workflow input as key=value")
+	cmd.Flags().StringVar(&runOpts.agentName, "agent", "", "workflow agent name or command")
+	cmd.Flags().BoolVar(&runOpts.noSetup, "no-setup", false, "skip adding missing required toolboxes")
 	return cmd
 }
 
@@ -252,7 +243,8 @@ func workflowConfigCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				selected, ok, err := selectWorkflowAgentInteractive(cmd, config, "Set default workflow agent")
+				candidates := workflowAgentDiscovererFor(opts)(config)
+				selected, ok, err := selectWorkflowAgentInteractive(cmd, candidates, "Set default workflow agent")
 				if err != nil {
 					return err
 				}

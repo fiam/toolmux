@@ -7,6 +7,16 @@ const (
 	workflowTemplateFolder = "workflows"
 )
 
+type workflowFieldType string
+
+const (
+	workflowFieldString   workflowFieldType = "string"
+	workflowFieldInt      workflowFieldType = "int"
+	workflowFieldBool     workflowFieldType = "bool"
+	workflowFieldJSON     workflowFieldType = "json"
+	workflowFieldDuration workflowFieldType = "duration"
+)
+
 type workflowTemplateEntry struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -18,9 +28,9 @@ type workflowFile struct {
 	Name        string                      `json:"name" yaml:"name"`
 	Description string                      `json:"description,omitempty" yaml:"description,omitempty"`
 	Requires    []workflowRequirement       `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Agent       workflowAgentRef            `json:"agent,omitzero" yaml:"agent,omitempty"`
 	Inputs      map[string]workflowInput    `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Prompt      string                      `json:"prompt" yaml:"prompt"`
+	Prompt      string                      `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Steps       []workflowStep              `json:"steps,omitempty" yaml:"steps,omitempty"`
 	Template    *workflowTemplateProvenance `json:"template,omitempty" yaml:"template,omitempty"`
 }
 
@@ -35,15 +45,24 @@ type workflowRequirement struct {
 }
 
 type workflowInput struct {
-	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
-	Required    bool    `json:"required,omitempty" yaml:"required,omitempty"`
-	Default     *string `json:"default,omitempty" yaml:"default,omitempty"`
+	Type        workflowFieldType `json:"type,omitempty" yaml:"type,omitempty"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Required    bool              `json:"required,omitempty" yaml:"required,omitempty"`
+	Default     *string           `json:"default,omitempty" yaml:"default,omitempty"`
+	Schema      map[string]any    `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
-type workflowAgentRef struct {
-	Set    bool
-	Name   string
-	Config workflowAgentConfig
+type workflowStep struct {
+	ID      string                    `json:"id,omitempty" yaml:"id,omitempty"`
+	Name    string                    `json:"name,omitempty" yaml:"name,omitempty"`
+	Prompt  string                    `json:"prompt" yaml:"prompt"`
+	Outputs map[string]workflowOutput `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+}
+
+type workflowOutput struct {
+	Type        workflowFieldType `json:"type,omitempty" yaml:"type,omitempty"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Schema      map[string]any    `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
 type workflowAgentConfig struct {
@@ -59,8 +78,16 @@ type workflowEntry struct {
 }
 
 type workflowRenderResult struct {
-	Name   string            `json:"name" yaml:"name"`
-	Path   string            `json:"path" yaml:"path"`
-	Inputs map[string]string `json:"inputs" yaml:"inputs"`
-	Prompt string            `json:"prompt" yaml:"prompt"`
+	Name   string         `json:"name" yaml:"name"`
+	Path   string         `json:"path" yaml:"path"`
+	Inputs map[string]any `json:"inputs" yaml:"inputs"`
+	Steps  []renderedStep `json:"steps" yaml:"steps"`
+	Prompt string         `json:"prompt" yaml:"prompt"`
+}
+
+type renderedStep struct {
+	ID      string                    `json:"id,omitempty" yaml:"id,omitempty"`
+	Name    string                    `json:"name,omitempty" yaml:"name,omitempty"`
+	Prompt  string                    `json:"prompt" yaml:"prompt"`
+	Outputs map[string]workflowOutput `json:"outputs,omitempty" yaml:"outputs,omitempty"`
 }

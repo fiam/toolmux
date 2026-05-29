@@ -48,50 +48,21 @@ func prefixedValue(prefix, value string) string {
 	return prefix + ":" + value
 }
 
-func (ref *workflowAgentRef) UnmarshalYAML(node *yaml.Node) error {
-	ref.Set = true
-	switch node.Kind {
-	case yaml.ScalarNode:
-		ref.Name = strings.TrimSpace(node.Value)
-		return nil
-	case yaml.MappingNode:
-		var raw struct {
-			Name    string   `yaml:"name"`
-			Target  string   `yaml:"target"`
-			Command string   `yaml:"command"`
-			Args    []string `yaml:"args"`
+func (wf *workflowFile) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("workflow file must be a YAML mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind == yaml.ScalarNode && key.Value == "agent" {
+			return fmt.Errorf("workflow field `agent:` is no longer supported; set the workflow agent in toolmux config with `toolmux workflow config set default-agent <name>` or define a custom agent under `workflows.agents`")
 		}
-		if err := node.Decode(&raw); err != nil {
-			return err
-		}
-		ref.Name = firstNonEmpty(raw.Name, raw.Target)
-		ref.Config = workflowAgentConfig{Command: strings.TrimSpace(raw.Command), Args: append([]string(nil), raw.Args...)}
-		return nil
-	default:
-		return fmt.Errorf("workflow agent must be a string or object")
 	}
-}
-
-func (ref workflowAgentRef) MarshalYAML() (any, error) {
-	if !ref.Set {
-		return nil, nil
+	type workflowFileAlias workflowFile
+	var alias workflowFileAlias
+	if err := node.Decode(&alias); err != nil {
+		return err
 	}
-	if ref.Config.Command == "" && len(ref.Config.Args) == 0 {
-		return ref.Name, nil
-	}
-	out := map[string]any{}
-	if ref.Name != "" {
-		out["name"] = ref.Name
-	}
-	if ref.Config.Command != "" {
-		out["command"] = ref.Config.Command
-	}
-	if len(ref.Config.Args) > 0 {
-		out["args"] = ref.Config.Args
-	}
-	return out, nil
-}
-
-func (ref workflowAgentRef) IsZero() bool {
-	return !ref.Set
+	*wf = workflowFile(alias)
+	return nil
 }

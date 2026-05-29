@@ -5,7 +5,8 @@ requires:
   - internal:slack
 inputs:
   since:
-    description: Start time for the recap.
+    type: duration
+    description: How far back to recap (e.g. 8h, 2d).
   channel_types:
     description: Slack channel types to inspect.
     default: public_channel
@@ -13,25 +14,25 @@ inputs:
     description: Slack channel, DM, or user ID for the recap.
     default: ""
 prompt: |
-  Summarize what happened in my Slack channels since {{ .since }}.
+  Summarize what happened in my Slack channels in the last {{ .inputs.since }}.
 
   Use the Slack tools already exposed to you by Toolmux. Do not inspect the
   local toolmux CLI, shell out for command help, or translate this workflow into
   raw Slack Web API method names. Tool names may be namespaced differently in
   your agent; use the available Slack tool descriptions as the source of truth.
 
-  Scope the recap to channel types: {{ .channel_types }}. Use the available
-  Slack conversation listing, unread, history, search, thread, and user identity
-  tools as appropriate. Prefer bounded requests using the requested start time.
-  If a direct history or thread tool is not available, use the available Slack
-  search tool with date and channel filters instead.
+  Scope the recap to channel types: {{ .inputs.channel_types }}. Use the
+  available Slack conversation listing, unread, history, search, thread, and
+  user identity tools as appropriate. Prefer bounded requests using the
+  requested start time. If a direct history or thread tool is not available,
+  use the available Slack search tool with date and channel filters instead.
 
   Keep the recap concise and grouped by channel. Include decisions, blockers,
   important asks, and links or Slack timestamps when available.
 
-  {{ if .delivery_channel }}
-  Send the final recap to {{ .delivery_channel }} with the available Slack
-  message-sending tool.
+  {{ if .inputs.delivery_channel }}
+  Send the final recap to {{ .inputs.delivery_channel }} with the available
+  Slack message-sending tool.
   {{ else }}
   No delivery channel was provided. Send the final recap to yourself as a Slack
   DM. Use the available Slack identity tool to get your user ID, then use the

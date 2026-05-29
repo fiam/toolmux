@@ -1,0 +1,72 @@
+version: 1
+name: yesterday-standup
+description: Three-bullet "what I did yesterday + blockers" for your morning standup
+requires:
+  - catalog:atlassian
+  - catalog:notion
+inputs:
+  window:
+    type: duration
+    description: How far back "yesterday" reaches
+    default: 36h
+steps:
+  - id: activity
+    name: Collecting activity
+    outputs:
+      jira:
+        type: json
+        description: Jira issues touched in the window
+        schema:
+          type: array
+          items:
+            type: object
+            required: [key, summary, action]
+            properties:
+              key:     { type: string }
+              summary: { type: string }
+              action:  { type: string, description: "what I did: commented/transitioned/assigned/resolved" }
+      pages:
+        type: json
+        description: Notion pages I edited in the window
+        schema:
+          type: array
+          items:
+            type: object
+            required: [title, url]
+            properties:
+              title: { type: string }
+              url:   { type: string }
+      blockers:
+        type: json
+        description: Open issues assigned to me, blocked, or stale
+        schema:
+          type: array
+          items:
+            type: object
+            required: [key, summary, reason]
+            properties:
+              key:     { type: string }
+              summary: { type: string }
+              reason:  { type: string }
+    prompt: |
+      Use Atlassian and Notion tools to gather, in parallel where possible:
+
+      1. Jira issues I commented on, transitioned, was assigned, or
+         resolved in the past {{ .inputs.window }}.
+      2. Notion pages I edited in the past {{ .inputs.window }}.
+      3. Open Jira issues assigned to me that are blocked, awaiting
+         review, or have not been updated in 5+ days.
+
+      Be terse — at most 5 entries per bucket.
+
+  - name: Writing standup bullets
+    prompt: |
+      Write exactly three Markdown bullet points for my morning standup,
+      using the data below. Do not call any tools.
+
+      - **Yesterday:** 1–2 sentences summarizing the work
+      - **Today:** 1 sentence describing the top focus
+      - **Blockers:** 1 sentence; say "none" if the list is empty
+
+      Data:
+      {{ .previous.stdout }}

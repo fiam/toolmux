@@ -35,7 +35,6 @@ type mcpAgentStatus struct {
 	Configured bool
 	Enabled    bool
 	Scope      string
-	Scopes     []string
 	Command    string
 	Args       string
 	Transport  string
@@ -245,11 +244,12 @@ func orderMCPAgents(agents []string) []string {
 }
 
 type mcpAgentDefinitionValue struct {
-	command string
+	command         string
+	workflowDefault []string
 }
 
 func supportedMCPAgents() []string {
-	return []string{"codex", "claude", "gemini"}
+	return []string{"codex", "claude"}
 }
 
 func canonicalMCPAgent(name string) (string, bool) {
@@ -258,8 +258,6 @@ func canonicalMCPAgent(name string) (string, bool) {
 		return "codex", true
 	case "claude", "claude-code":
 		return "claude", true
-	case "gemini", "gemini-cli":
-		return "gemini", true
 	default:
 		return "", false
 	}
@@ -268,11 +266,9 @@ func canonicalMCPAgent(name string) (string, bool) {
 func mcpAgentDefinition(agent string) (mcpAgentDefinitionValue, bool) {
 	switch agent {
 	case "codex":
-		return mcpAgentDefinitionValue{command: "codex"}, true
+		return mcpAgentDefinitionValue{command: "codex", workflowDefault: []string{"exec"}}, true
 	case "claude":
-		return mcpAgentDefinitionValue{command: "claude"}, true
-	case "gemini":
-		return mcpAgentDefinitionValue{command: "gemini"}, true
+		return mcpAgentDefinitionValue{command: "claude", workflowDefault: []string{"-p"}}, true
 	default:
 		return mcpAgentDefinitionValue{}, false
 	}
@@ -284,8 +280,6 @@ func mcpAgentDisplayName(agent string) string {
 		return "Codex"
 	case "claude":
 		return "Claude Code"
-	case "gemini":
-		return "Gemini CLI"
 	default:
 		return agent
 	}
@@ -307,8 +301,6 @@ func (status mcpAgentStatus) summary() string {
 	parts := []string{state}
 	if status.Scope != "" {
 		parts = append(parts, status.Scope)
-	} else if len(status.Scopes) > 0 {
-		parts = append(parts, "scopes="+strings.Join(status.Scopes, ","))
 	}
 	if status.Transport != "" {
 		parts = append(parts, "transport="+status.Transport)
@@ -350,21 +342,6 @@ func mcpAgentConfigureCommands(agent, serverName string, configure mcpConfigureO
 				{Name: "claude", Args: append([]string{"mcp", "add", "--scope", scope, "--transport", "stdio", serverName, "--", configure.Command}, serveArgs...)},
 			},
 		}, nil
-	case "gemini":
-		scope, flag := configure.geminiAgentScope()
-		if scope != "user" && scope != "project" {
-			return mcpAgentResult{}, fmt.Errorf("%s must be user or project", flag)
-		}
-		return mcpAgentResult{
-			Agent:      "gemini",
-			ServerName: serverName,
-			Scope:      "scope=" + scope,
-			Commands: []mcpExternalCommand{
-				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
-				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
-				{Name: "gemini", Args: append([]string{"mcp", "add", "--scope", scope, "--transport", "stdio", serverName, configure.Command}, serveArgs...)},
-			},
-		}, nil
 	default:
 		return mcpAgentResult{}, fmt.Errorf("unknown MCP agent %q", agent)
 	}
@@ -391,16 +368,6 @@ func mcpAgentRemoveCommands(agent, serverName string) (mcpAgentResult, error) {
 				{Name: "claude", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
 			},
 		}, nil
-	case "gemini":
-		return mcpAgentResult{
-			Agent:      "gemini",
-			ServerName: serverName,
-			Scope:      "all scopes",
-			Commands: []mcpExternalCommand{
-				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "user", serverName}, IgnoreError: true},
-				{Name: "gemini", Args: []string{"mcp", "remove", "--scope", "project", serverName}, IgnoreError: true},
-			},
-		}, nil
 	default:
 		return mcpAgentResult{}, fmt.Errorf("unknown MCP agent %q", agent)
 	}
@@ -409,13 +376,6 @@ func mcpAgentRemoveCommands(agent, serverName string) (mcpAgentResult, error) {
 func (configure mcpConfigureOptions) claudeAgentScope() (string, string) {
 	if scope := strings.TrimSpace(configure.ClaudeScope); scope != "" {
 		return scope, "--claude-scope"
-	}
-	return configure.commonAgentScope(), "--scope"
-}
-
-func (configure mcpConfigureOptions) geminiAgentScope() (string, string) {
-	if scope := strings.TrimSpace(configure.GeminiScope); scope != "" {
-		return scope, "--gemini-scope"
 	}
 	return configure.commonAgentScope(), "--scope"
 }
@@ -500,8 +460,6 @@ func inspectMCPAgent(ctx context.Context, agent, serverName string, configure mc
 		return inspectCommandMCPAgent(ctx, "codex", []string{"mcp", "get", serverName})
 	case "claude":
 		return inspectCommandMCPAgent(ctx, "claude", []string{"mcp", "get", serverName})
-	case "gemini":
-		return inspectGeminiMCPAgent(serverName)
 	default:
 		return mcpAgentStatus{}
 	}

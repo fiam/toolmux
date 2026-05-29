@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestWorkflowRenderSlackRecapTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"since 8h",
+		"the last 8h0m0s",
 		"channel types: public_channel",
 		"Do not inspect the\nlocal toolmux CLI",
 		"use the available Slack tool descriptions as the source of truth",
@@ -91,14 +92,7 @@ prompt: |
 
 func TestWorkflowRunRequiresAgent(t *testing.T) {
 	env := newWorkflowTestEnv(t)
-	writeWorkflowTestFile(t, env.WorkDir, workflowFile{
-		Version: 1,
-		Name:    "hello",
-		Inputs: map[string]workflowInput{
-			"name": {},
-		},
-		Prompt: "hello {{ .name }}",
-	})
+	installWorkflowFixture(t, env.WorkDir, "hello.yaml")
 
 	_, err := runWorkflowRoot(t, env, "workflow", "run", "hello", "--input", "name=world", "--no-setup")
 	if err == nil || !strings.Contains(err.Error(), "has no agent") {
@@ -106,43 +100,9 @@ func TestWorkflowRunRequiresAgent(t *testing.T) {
 	}
 }
 
-func TestWorkflowRunAppendsPromptWhenAgentDoesNotTemplateIt(t *testing.T) {
-	env := newWorkflowTestEnv(t)
-	writeWorkflowTestFile(t, env.WorkDir, workflowFile{
-		Version: 1,
-		Name:    "echo",
-		Agent: workflowAgentRef{
-			Set: true,
-			Config: workflowAgentConfig{
-				Command: "/bin/sh",
-				Args:    []string{"-c", `printf '%s' "$1"`, "sh"},
-			},
-		},
-		Inputs: map[string]workflowInput{
-			"name": {},
-		},
-		Prompt: "hello {{ .name }}",
-	})
-
-	output, err := runWorkflowRoot(t, env, "workflow", "run", "echo", "--input", "name=world", "--no-setup")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if output != "hello world" {
-		t.Fatalf("expected agent stdout to receive prompt, got %q", output)
-	}
-}
-
 func TestWorkflowRunAgentFlagAcceptsArguments(t *testing.T) {
 	env := newWorkflowTestEnv(t)
-	writeWorkflowTestFile(t, env.WorkDir, workflowFile{
-		Version: 1,
-		Name:    "echo",
-		Inputs: map[string]workflowInput{
-			"name": {},
-		},
-		Prompt: "hello {{ .name }}",
-	})
+	installWorkflowFixture(t, env.WorkDir, "echo.yaml")
 
 	output, err := runWorkflowRoot(t, env,
 		"workflow", "run", "echo",
@@ -155,6 +115,58 @@ func TestWorkflowRunAgentFlagAcceptsArguments(t *testing.T) {
 	}
 	if output != "hello world" {
 		t.Fatalf("expected --agent args to receive prompt, got %q", output)
+	}
+}
+
+func TestWorkflowRunAutoSelectsSingleDiscoveredAgent(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	env.Discoverer = fakeWorkflowAgent(t, `printf 'hello from fake: %s' "$PROMPT"`)
+	installWorkflowFixture(t, env.WorkDir, "auto.yaml")
+
+	output, err := runWorkflowRoot(t, env, "workflow", "run", "auto", "--no-setup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "hello from fake: ping" {
+		t.Fatalf("expected fake agent output, got %q", output)
+	}
+}
+
+func TestWorkflowRunMultiStepBindsPreviousOutputs(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	env.Discoverer = fakeWorkflowAgent(t, `
+case "$TOOLMUX_FAKE_STEP" in
+1) printf 'fetched 3 items\n{"count": 3}\n' ;;
+2) printf 'summary: %s\n' "$PROMPT" ;;
+esac
+`)
+	installWorkflowFixture(t, env.WorkDir, "twostep.yaml")
+
+	output, err := runWorkflowRoot(t, env, "workflow", "run", "twostep", "--no-setup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "items: 3") {
+		t.Fatalf("expected previous.outputs.count to be 3 in summary prompt, got %q", output)
+	}
+}
+
+func TestWorkflowFileRejectsAgentField(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	path := filepath.Join(env.WorkDir, workflowProjectRelDir, "rogue.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`version: 1
+name: rogue
+agent: codex
+prompt: hi
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runWorkflowRoot(t, env, "workflow", "list")
+	if err == nil || !strings.Contains(err.Error(), "`agent:` is no longer supported") {
+		t.Fatalf("expected rejection of agent field, got %v", err)
 	}
 }
 
@@ -175,6 +187,51 @@ func TestWorkflowAgentByNameParsesKnownAgentArgs(t *testing.T) {
 	}
 }
 
+func TestWorkflowAgentByNameInjectsHeadlessDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		want    []string
+		command string
+	}{
+		{name: "claude", command: "claude", want: []string{"-p", "prompt"}},
+		{name: "codex", command: "codex", want: []string{"exec", "prompt"}},
+		{name: "claude-code", command: "claude", want: []string{"-p", "prompt"}},
+	} {
+		agent, err := workflowAgentByName(tc.name, workflowConfig{})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if agent.Command != tc.command {
+			t.Fatalf("%s: expected command %s, got %s", tc.name, tc.command, agent.Command)
+		}
+		_, args, err := workflowAgentCommand(agent, "prompt")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !slices.Equal(args, tc.want) {
+			t.Fatalf("%s: expected args %v, got %v", tc.name, tc.want, args)
+		}
+	}
+}
+
+func TestWorkflowRunAcceptsYAMLPath(t *testing.T) {
+	env := newWorkflowTestEnv(t)
+	path := workflowFixturePath(t, "ad-hoc.yaml")
+
+	output, err := runWorkflowRoot(t, env,
+		"workflow", "run", path,
+		"--input", "name=path",
+		"--agent", `/bin/sh -c 'printf %s "$1"' sh`,
+		"--no-setup",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "hello path" {
+		t.Fatalf("expected agent stdout to receive prompt from file, got %q", output)
+	}
+}
+
 func TestWorkflowConfigSetDefaultAgentRequiresAgentOutsideInteractive(t *testing.T) {
 	env := newWorkflowTestEnv(t)
 	_, err := runWorkflowRoot(t, env, "workflow", "config", "set", "default-agent")
@@ -187,6 +244,7 @@ type workflowTestEnv struct {
 	WorkDir    string
 	Store      *credentials.MemoryStore
 	HTTPClient *http.Client
+	Discoverer func(WorkflowConfigSnapshot) []WorkflowAgentCandidate
 }
 
 func newWorkflowTestEnv(t *testing.T) workflowTestEnv {
@@ -211,12 +269,44 @@ func writeWorkflowTestFile(t *testing.T, workDir string, workflow workflowFile) 
 	}
 }
 
+// installWorkflowFixture copies a YAML file from testdata/workflows into the
+// test env's project workflow directory.
+func installWorkflowFixture(t *testing.T, workDir, fixtureName string) string {
+	t.Helper()
+	src := filepath.Join("testdata", "workflows", fixtureName)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(workDir, workflowProjectRelDir, fixtureName)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dest
+}
+
+// workflowFixturePath returns the absolute path of a testdata workflow
+// without copying it. Use this when a test needs to pass a path directly
+// to `workflow run`.
+func workflowFixturePath(t *testing.T, fixtureName string) string {
+	t.Helper()
+	abs, err := filepath.Abs(filepath.Join("testdata", "workflows", fixtureName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return abs
+}
+
 func runWorkflowRoot(t *testing.T, env workflowTestEnv, args ...string) (string, error) {
 	t.Helper()
 	cmd := NewRootCommandWithDeps(Dependencies{
-		Credentials: env.Store,
-		HTTPClient:  env.HTTPClient,
-		WorkDir:     env.WorkDir,
+		Credentials:             env.Store,
+		HTTPClient:              env.HTTPClient,
+		WorkDir:                 env.WorkDir,
+		WorkflowAgentDiscoverer: env.Discoverer,
 	})
 	var out bytes.Buffer
 	cmd.SetOut(&out)

@@ -85,7 +85,7 @@ flows that store credentials in the OS credential store.
 
 MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
 manual protocol testing and `toolmux mcp configure` to register the server with
-Codex, Claude Code, or Gemini CLI. Interactive no-argument configuration shows
+Codex or Claude Code. Interactive no-argument configuration shows
 detected agents as checkboxes, shows how the target MCP server is currently
 configured, preselects agents where Toolmux MCP is enabled, and removes the
 Toolmux MCP server from agents that are unchecked. Use `toolmux mcp enable`
@@ -108,11 +108,13 @@ hardcoded in Go. Workflow prompts are inline Go `text/template` strings.
 Workflows may declare required toolboxes with compact values such as
 `internal:slack`, `catalog:linear`, or a remote MCP URL. Missing requirements
 should be added automatically during `workflow init` and `workflow run` unless
-the caller passes `--no-setup`. If a workflow run has no selected agent,
-interactive sessions should prompt for a configured or detected local agent;
-non-interactive sessions should fail. The no-agent form of
-`toolmux workflow config set default-agent` should also support an interactive
-selector.
+the caller passes `--no-setup`. Workflow YAML must not declare an `agent:`
+field; the agent is selected via `--agent`, `workflows.default_agent` in
+Toolmux config, or the interactive picker in `workflow run`. If a workflow run
+has no selected agent, interactive sessions should prompt for a configured or
+detected local agent; non-interactive sessions should fail. The no-agent form
+of `toolmux workflow config set default-agent` should also support an
+interactive selector.
 
 Imported MCP servers are stored as `toolboxes` entries, with non-secret server
 definitions in config and cached tool metadata in the user cache directory.

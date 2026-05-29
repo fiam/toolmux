@@ -178,6 +178,5 @@ func addMCPAgentConfigureFlags(cmd *cobra.Command, configure *mcpConfigureOption
 	cmd.Flags().StringVar(&configure.ServerName, "server-name", "", "MCP server name configured in agents")
 	cmd.Flags().StringVar(&configure.AgentScope, "scope", "user", "agent MCP config scope: user or project")
 	cmd.Flags().StringVar(&configure.ClaudeScope, "claude-scope", "", "Claude Code MCP scope override: local, user, or project")
-	cmd.Flags().StringVar(&configure.GeminiScope, "gemini-scope", "", "Gemini CLI MCP scope override: user or project")
 	cmd.Flags().BoolVar(&configure.DryRun, "dry-run", false, "print agent configuration commands without running them")
 }
