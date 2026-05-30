@@ -24,6 +24,7 @@ type mcpServer struct {
 	opts     *options
 	cmd      *cobra.Command
 	selector mcpToolSelector
+	lazy     bool
 }
 
 func (server mcpServer) run(ctx context.Context, r io.Reader, w io.Writer) error {
@@ -161,6 +162,9 @@ func (server mcpServer) initializeResult(params json.RawMessage) map[string]any 
 }
 
 func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
+	if server.lazy {
+		return map[string]any{"tools": []any{lazySearchTool()}}
+	}
 	specs := server.mcpSpecs(ctx)
 	tools := make([]any, 0, len(specs))
 	for _, spec := range specs {
@@ -304,6 +308,9 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: "tool name is required"}
+	}
+	if server.lazy && name == lazySearchToolName {
+		return server.searchTools(ctx, params.Arguments)
 	}
 	spec, ok := server.lookupMCPTool(ctx, name)
 	if !ok {
