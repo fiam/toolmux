@@ -58,6 +58,8 @@ type ToolCallFilter struct {
 	Provider   string // exact match
 	DeniedOnly bool
 	Since      time.Time
+	AfterID    int64 // only rows with id greater than this (for streaming/follow)
+	Ascending  bool  // order by id ascending (oldest first) instead of newest first
 }
 
 const toolCallColumns = "id, ts, source, cwd, profile, server_name, tool_id, provider, resource, action, effect, allowed, rule, reason, arguments, error, duration_ms"
@@ -106,12 +108,20 @@ func (s *Store) QueryToolCalls(ctx context.Context, filter ToolCallFilter) ([]To
 		conditions = append(conditions, "ts >= ?")
 		args = append(args, filter.Since.UTC().Format(time.RFC3339Nano))
 	}
+	if filter.AfterID > 0 {
+		conditions = append(conditions, "id > ?")
+		args = append(args, filter.AfterID)
+	}
 	query := "SELECT " + toolCallColumns + " FROM tool_calls"
 	if len(conditions) > 0 {
 		// #nosec G202 -- conditions are static, parameter-free SQL fragments defined in this file; all user-supplied values are bound via ? placeholders.
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY id DESC"
+	if filter.Ascending {
+		query += " ORDER BY id ASC"
+	} else {
+		query += " ORDER BY id DESC"
+	}
 	if filter.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, filter.Limit)

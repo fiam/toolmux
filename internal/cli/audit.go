@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -19,6 +23,8 @@ func auditCommand(opts *options) *cobra.Command {
 		project, tool, pv string
 		denied            bool
 		since             time.Duration
+		follow            bool
+		interval          time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "audit",
@@ -40,6 +46,15 @@ func auditCommand(opts *options) *cobra.Command {
 			if since > 0 {
 				filter.Since = time.Now().Add(-since)
 			}
+			if follow {
+				if interval <= 0 {
+					interval = time.Second
+				}
+				ctx, stop := signal.NotifyContext(commandContext(cmd), os.Interrupt)
+				defer stop()
+				fmt.Fprintln(cmd.ErrOrStderr(), "following tool calls (Ctrl-C to stop)…")
+				return followAuditCalls(ctx, cmd.OutOrStdout(), humanOutputOptions(cmd, opts), st, filter, interval)
+			}
 			rows, err := st.QueryToolCalls(commandContext(cmd), filter)
 			if err != nil {
 				return err
@@ -55,8 +70,65 @@ func auditCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&pv, "provider", "", "filter by provider")
 	cmd.Flags().BoolVar(&denied, "denied", false, "only show denied calls")
 	cmd.Flags().DurationVar(&since, "since", 0, "only show calls newer than this duration, such as 24h")
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "stream new tool calls as they happen (tail -f style)")
+	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval when following")
 	cmd.AddCommand(auditShowCommand(opts))
 	return cmd
+}
+
+// followAuditCalls prints an initial backlog of recent calls, then polls for
+// new rows and streams them as compact lines until ctx is cancelled. The same
+// filters (project/tool/provider/denied/since) apply to both phases.
+func followAuditCalls(ctx context.Context, w io.Writer, human output.Options, st *store.Store, base store.ToolCallFilter, interval time.Duration) error {
+	backlog := base
+	backlog.Ascending = false // newest first, limited
+	rows, err := st.QueryToolCalls(ctx, backlog)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	var lastID int64
+	for _, row := range slices.Backward(rows) { // print oldest first
+		fmt.Fprintln(w, auditFollowLine(human, row))
+		lastID = max(lastID, row.ID)
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			next := base
+			next.Limit = 0
+			next.AfterID = lastID
+			next.Ascending = true
+			fresh, err := st.QueryToolCalls(ctx, next)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
+			for _, row := range fresh {
+				fmt.Fprintln(w, auditFollowLine(human, row))
+				lastID = max(lastID, row.ID)
+			}
+		}
+	}
+}
+
+func auditFollowLine(human output.Options, row store.ToolCallRow) string {
+	return fmt.Sprintf("%s  %s  %s  %s  %s",
+		row.Time.Local().Format("15:04:05"),
+		output.StatusBadge(human, auditStatus(row)),
+		output.Value(auditProject(row.CWD)),
+		output.ToneText(human, output.ToneInfo, row.ToolID),
+		strconv.FormatInt(row.DurationMS, 10)+"ms",
+	)
 }
 
 func auditShowCommand(opts *options) *cobra.Command {

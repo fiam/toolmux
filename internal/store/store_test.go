@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func openTestStore(t *testing.T) *Store {
 func TestRecordAndGetToolCall(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	id, err := st.RecordToolCall(ctx, ToolCall{
 		Source: "mcp", CWD: "/home/me/project-a", Profile: "default",
 		ToolID: "slack.send_message", Provider: "slack", Resource: "message",
@@ -45,7 +44,7 @@ func TestRecordAndGetToolCall(t *testing.T) {
 func TestQueryToolCallsFilters(t *testing.T) {
 	t.Parallel()
 	st := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	seed := []ToolCall{
 		{Source: "mcp", CWD: "/home/me/project-a", ToolID: "slack.send_message", Provider: "slack", Allowed: true},
 		{Source: "mcp", CWD: "/home/me/project-b", ToolID: "grafana.query_prometheus", Provider: "grafana", Allowed: true},
@@ -95,7 +94,7 @@ func TestReopenSharesData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open1: %v", err)
 	}
-	if _, err := first.RecordToolCall(context.Background(), ToolCall{Source: "mcp", ToolID: "t", Allowed: true}); err != nil {
+	if _, err := first.RecordToolCall(t.Context(), ToolCall{Source: "mcp", ToolID: "t", Allowed: true}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	_ = first.Close()
@@ -105,7 +104,7 @@ func TestReopenSharesData(t *testing.T) {
 		t.Fatalf("open2: %v", err)
 	}
 	defer second.Close()
-	rows, _ := second.QueryToolCalls(context.Background(), ToolCallFilter{})
+	rows, _ := second.QueryToolCalls(t.Context(), ToolCallFilter{})
 	if len(rows) != 1 {
 		t.Fatalf("expected persisted row after reopen, got %d", len(rows))
 	}
