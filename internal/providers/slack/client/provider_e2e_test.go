@@ -71,7 +71,7 @@ func TestSlackAppearsInInternalCatalog(t *testing.T) {
 	deps := slackDeps(t, credentials.NewMemoryStore(), http.DefaultClient, "https://slack.example.test")
 
 	out := toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"slack", "internal", "needs_auth"} {
+	for _, want := range []string{"slack", "internal", "needs auth"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "linear") {

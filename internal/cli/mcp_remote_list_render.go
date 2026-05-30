@@ -41,17 +41,13 @@ func renderMCPRemoteListTable(w io.Writer, cmd *cobra.Command, opts *options, it
 	human := humanOutputOptions(cmd, opts)
 	rows := make([][]string, 0, len(items))
 	for _, item := range items {
-		status := output.ToneText(human, output.ToneWarning, "not synced")
 		tools := "-"
-		if item.Status == "synced" {
-			status = output.ToneText(human, output.ToneSuccess, "synced")
-		}
 		if item.Tools != nil {
 			tools = fmt.Sprintf("%d", *item.Tools)
 		}
 		rows = append(rows, []string{
 			output.ToneText(human, output.ToneInfo, item.Name),
-			status,
+			output.StatusBadge(human, item.Status),
 			mcpRemoteScopesLabel(item.Scopes),
 			tools,
 			mcpRemoteServerSource(mcpRemoteServer{URL: item.URL, Command: item.Command, Transport: item.Transport}),
@@ -61,6 +57,7 @@ func renderMCPRemoteListTable(w io.Writer, cmd *cobra.Command, opts *options, it
 		Headers: []string{"Name", "Status", "Scope", "Tools", "Source"},
 		Rows:    rows,
 		Empty:   "no remote MCP servers registered",
+		Align:   output.RightAlign(5, 3),
 	})
 }
 
@@ -119,10 +116,11 @@ func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items [
 			continue
 		}
 		for toolIndex, tool := range item.Tools {
-			connector := "+--"
+			connector := "├──"
 			if toolIndex == len(item.Tools)-1 {
-				connector = "`--"
+				connector = "└──"
 			}
+			connector = output.ToneText(human, output.ToneMuted, connector)
 			args := mcpRemoteToolArgumentsLabel(tool)
 			if args != "-" {
 				args = " " + output.ToneText(human, output.ToneMuted, "("+args+")")

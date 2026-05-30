@@ -86,6 +86,7 @@ func statusCommand(opts *options) *cobra.Command {
 					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope/Profile", "Tools", "Source"},
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
+					Align:   output.RightAlign(7, 5),
 				})
 			})
 		},

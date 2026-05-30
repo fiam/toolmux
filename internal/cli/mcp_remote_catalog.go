@@ -221,7 +221,7 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 		rows = append(rows, []string{
 			output.ToneText(human, output.ToneInfo, name),
 			entry.Type,
-			toolboxCatalogStatusCell(human, entry.Status),
+			output.StatusBadge(human, entry.Status),
 			output.Value(firstNonEmpty(entry.Command, output.JoinList(entry.RegisteredNames))),
 			mcpRemoteScopesLabel(entry.Scopes),
 			tools,
@@ -232,18 +232,6 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 		Headers: []string{"Name", "Type", "Status", "Command", "Config Scope", "Tools", "URL"},
 		Rows:    rows,
 		Empty:   "no known toolboxes",
+		Align:   output.RightAlign(7, 5),
 	})
-}
-
-func toolboxCatalogStatusCell(human output.Options, status string) string {
-	switch status {
-	case "available":
-		return output.ToneText(human, output.ToneInfo, "available")
-	case "alias_required":
-		return output.ToneText(human, output.ToneWarning, "alias required")
-	case "unavailable":
-		return output.ToneText(human, output.ToneWarning, "unavailable")
-	default:
-		return output.StatusBadge(human, status)
-	}
 }

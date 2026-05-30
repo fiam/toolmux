@@ -244,14 +244,14 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 	}
 
 	treeOutput := runRootForRemoteTest(t, env, "mcp", "ls", "-R")
-	for _, want := range []string{"linear", "+-- calculate", "`-- create_issue"} {
+	for _, want := range []string{"linear", "├── calculate", "└── create_issue"} {
 		if !strings.Contains(treeOutput, want) {
 			t.Fatalf("expected recursive mcp ls output to contain %q, got:\n%s", want, treeOutput)
 		}
 	}
 
 	serverTreeOutput := runRootForRemoteTest(t, env, "mcp", "ls", "-R", "linear")
-	for _, want := range []string{"linear", "+-- calculate", "`-- create_issue"} {
+	for _, want := range []string{"linear", "├── calculate", "└── create_issue"} {
 		if !strings.Contains(serverTreeOutput, want) {
 			t.Fatalf("expected recursive mcp ls linear output to contain %q, got:\n%s", want, serverTreeOutput)
 		}
