@@ -120,6 +120,9 @@ func mcpToolSelectionArgs(selection mcpToolSelection) []string {
 	for _, value := range compactStrings(selection.ExcludeToolRegex) {
 		args = append(args, "--exclude-tool-regex", value)
 	}
+	if selection.Lazy {
+		args = append(args, "--lazy")
+	}
 	return args
 }
 

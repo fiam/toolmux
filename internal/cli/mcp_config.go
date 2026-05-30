@@ -47,6 +47,7 @@ type mcpProfileConfig struct {
 	ToolRegex        []string `json:"tool_regex,omitempty" yaml:"tool_regex,omitempty"`
 	ExcludeTools     []string `json:"exclude_tools,omitempty" yaml:"exclude_tools,omitempty"`
 	ExcludeToolRegex []string `json:"exclude_tool_regex,omitempty" yaml:"exclude_tool_regex,omitempty"`
+	Lazy             bool     `json:"lazy,omitempty" yaml:"lazy,omitempty"`
 }
 
 type workflowConfig struct {
@@ -116,6 +117,7 @@ func resolveMCPToolSelectionFromPaths(selection mcpToolSelection, startDir, glob
 	resolved.ToolRegex = append(resolved.ToolRegex, selection.ToolRegex...)
 	resolved.ExcludeTools = append(resolved.ExcludeTools, selection.ExcludeTools...)
 	resolved.ExcludeToolRegex = append(resolved.ExcludeToolRegex, selection.ExcludeToolRegex...)
+	resolved.Lazy = resolved.Lazy || selection.Lazy
 	return resolved, nil
 }
 
@@ -171,6 +173,7 @@ func (profile mcpProfileConfig) selection(name string) mcpToolSelection {
 		ToolRegex:        append([]string(nil), profile.ToolRegex...),
 		ExcludeTools:     append([]string(nil), profile.ExcludeTools...),
 		ExcludeToolRegex: append([]string(nil), profile.ExcludeToolRegex...),
+		Lazy:             profile.Lazy,
 	}
 }
 
@@ -180,6 +183,7 @@ func mcpProfileConfigFromSelection(selection mcpToolSelection) mcpProfileConfig 
 		ToolRegex:        compactStrings(selection.ToolRegex),
 		ExcludeTools:     compactStrings(selection.ExcludeTools),
 		ExcludeToolRegex: compactStrings(selection.ExcludeToolRegex),
+		Lazy:             selection.Lazy,
 	}
 }
 

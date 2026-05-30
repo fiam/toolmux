@@ -151,6 +151,7 @@ func addMCPToolPatternFlags(cmd *cobra.Command, selection *mcpToolSelection) {
 	cmd.Flags().StringArrayVar(&selection.ToolRegex, "tool-regex", nil, "regular expression for tool IDs to include")
 	cmd.Flags().StringArrayVar(&selection.ExcludeTools, "exclude-tool", nil, "shell-style tool glob to exclude")
 	cmd.Flags().StringArrayVar(&selection.ExcludeToolRegex, "exclude-tool-regex", nil, "regular expression for tool IDs to exclude")
+	cmd.Flags().BoolVar(&selection.Lazy, "lazy", false, "advertise only a search_tools meta-tool and load real tool schemas on demand")
 }
 
 func addMCPProfileScopeFlags(cmd *cobra.Command, scope *mcpProfileScopeOptions) {

@@ -13,6 +13,7 @@ type mcpToolSelection struct {
 	ToolRegex        []string
 	ExcludeTools     []string
 	ExcludeToolRegex []string
+	Lazy             bool
 }
 
 type mcpConfigureOptions struct {

@@ -18,6 +18,7 @@ func mcpCommand(opts *options) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(mcpServeCommand(opts))
+	cmd.AddCommand(mcpSearchCommand(opts))
 	cmd.AddCommand(mcpConfigureCommand(opts))
 	cmd.AddCommand(mcpEnableCommand(opts))
 	cmd.AddCommand(mcpDisableCommand(opts))
@@ -34,7 +35,6 @@ func mcpCommand(opts *options) *cobra.Command {
 
 func mcpServeCommand(opts *options) *cobra.Command {
 	var selection mcpToolSelection
-	var lazy bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve Toolmux tools over MCP stdio",
@@ -52,12 +52,14 @@ func mcpServeCommand(opts *options) *cobra.Command {
 				opts:     opts,
 				cmd:      cmd,
 				selector: selector,
-				lazy:     lazy,
+				lazy:     resolved.Lazy,
+			}
+			if resolved.Lazy {
+				server.logLazyStart()
 			}
 			return server.run(commandContext(cmd), cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 	addMCPToolSelectionFlags(cmd, &selection)
-	cmd.Flags().BoolVar(&lazy, "lazy", false, "advertise only a search_tools meta-tool and load real tool schemas on demand")
 	return cmd
 }

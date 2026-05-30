@@ -76,6 +76,46 @@ func TestRankLazyToolsNoMatch(t *testing.T) {
 	}
 }
 
+func TestRankLazyToolsProviderBoost(t *testing.T) {
+	t.Parallel()
+	got := lazyNames(rankLazyTools(lazyTestUniverse(), "slack", 10))
+	want := []string{"slack.conversations_history", "slack.send_message"}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("provider query got %v, want both slack tools %v", got, want)
+	}
+}
+
+func TestRankLazyToolsSubsequence(t *testing.T) {
+	t.Parallel()
+	got := lazyNames(rankLazyTools(lazyTestUniverse(), "qprom", 10))
+	if !slices.Equal(got, []string{"grafana.query_prometheus"}) {
+		t.Fatalf("subsequence query got %v, want [grafana.query_prometheus]", got)
+	}
+}
+
+func TestLazyProfileRoundTrips(t *testing.T) {
+	t.Parallel()
+	config := mcpProfileConfigFromSelection(mcpToolSelection{Tools: []string{"slack.*"}, Lazy: true})
+	if !config.Lazy {
+		t.Fatalf("expected profile config to persist Lazy")
+	}
+	if got := config.selection("ops"); !got.Lazy {
+		t.Fatalf("expected selection from profile to carry Lazy")
+	}
+}
+
+func TestLazyToolSelectionArgsEmitsFlag(t *testing.T) {
+	t.Parallel()
+	args := mcpToolSelectionArgs(mcpToolSelection{Lazy: true})
+	if !slices.Contains(args, "--lazy") {
+		t.Fatalf("expected --lazy in serve args, got %v", args)
+	}
+	if slices.Contains(mcpToolSelectionArgs(mcpToolSelection{}), "--lazy") {
+		t.Fatalf("did not expect --lazy when Lazy is false")
+	}
+}
+
 func TestLazySearchToolSchema(t *testing.T) {
 	t.Parallel()
 	tool := lazySearchTool()

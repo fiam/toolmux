@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/fiam/toolmux/internal/output"
 )
 
 // Lazy mode keeps the advertised tool surface tiny: instead of listing every
@@ -111,12 +117,52 @@ func (server mcpServer) searchTools(ctx context.Context, raw json.RawMessage) (m
 	if err != nil {
 		return mcpCallToolResult{}, err
 	}
+	server.logLazySearch(query, payloads, universe, len(body))
 	header := fmt.Sprintf("%d of %d tools matched %q. Call any of these by its exact name.\n\n",
 		len(payloads), len(universe), query)
 	return mcpCallToolResult{
 		Content:           []mcpContent{{Type: "text", Text: header + string(body)}},
 		StructuredContent: map[string]any{"tools": payloads},
 	}, nil
+}
+
+// lazyStatsEnabled reports whether lazy-mode telemetry should be written to
+// stderr. It is opt-in so the full tool catalog is not serialized on every
+// search just to measure it.
+func lazyStatsEnabled() bool {
+	return strings.TrimSpace(os.Getenv("TOOLMUX_LAZY_STATS")) != ""
+}
+
+func (server mcpServer) lazyStderr() io.Writer {
+	if server.cmd != nil {
+		return server.cmd.ErrOrStderr()
+	}
+	return os.Stderr
+}
+
+func (server mcpServer) logLazyStart() {
+	if !lazyStatsEnabled() {
+		return
+	}
+	fmt.Fprintln(server.lazyStderr(),
+		"toolmux: lazy MCP mode active — advertising only search_tools; real tool schemas load on demand")
+}
+
+func (server mcpServer) logLazySearch(query string, returned []any, universe []lazyToolEntry, returnedBytes int) {
+	if !lazyStatsEnabled() {
+		return
+	}
+	full := make([]any, 0, len(universe))
+	for _, entry := range universe {
+		full = append(full, entry.payload)
+	}
+	fullBytes := 0
+	if data, err := json.Marshal(map[string]any{"tools": full}); err == nil {
+		fullBytes = len(data)
+	}
+	fmt.Fprintf(server.lazyStderr(),
+		"toolmux: search_tools query=%q matched=%d/%d returned_bytes=%d full_bytes=%d saved_bytes=%d\n",
+		query, len(returned), len(universe), returnedBytes, fullBytes, fullBytes-returnedBytes)
 }
 
 // rankLazyTools selects and orders tools that match a query. A "select:" prefix
@@ -169,12 +215,18 @@ func rankLazyTools(universe []lazyToolEntry, query string, maxResults int) []laz
 			continue
 		}
 		score := len(required) * 5
+		provider := lazyToolProvider(name)
 		for _, term := range terms {
-			if name == term {
+			switch {
+			case name == term:
 				score += 10
-			}
-			if strings.Contains(name, term) {
+			case strings.Contains(name, term):
 				score += 3
+			case len(term) >= 3 && isSubsequence(name, term):
+				score++
+			}
+			if provider == term {
+				score += 4
 			}
 			if strings.Contains(desc, term) {
 				score++
@@ -202,4 +254,90 @@ func rankLazyTools(universe []lazyToolEntry, query string, maxResults int) []laz
 		out[i] = result.entry
 	}
 	return out
+}
+
+// lazyToolProvider returns the provider prefix of a tool name (the part before
+// the first "."), so a query term like "slack" can boost every Slack tool.
+func lazyToolProvider(name string) string {
+	if i := strings.IndexByte(name, '.'); i > 0 {
+		return name[:i]
+	}
+	return ""
+}
+
+// isSubsequence reports whether sub appears in s in order but not necessarily
+// contiguously, giving lightweight tolerance for abbreviations like "qprom"
+// matching "query_prometheus".
+func isSubsequence(s, sub string) bool {
+	i := 0
+	for j := 0; j < len(s) && i < len(sub); j++ {
+		if s[j] == sub[i] {
+			i++
+		}
+	}
+	return i == len(sub)
+}
+
+func mcpSearchCommand(opts *options) *cobra.Command {
+	var selection mcpToolSelection
+	var maxResults int
+	var fullDescriptions bool
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search the MCP tool catalog (what an agent's search_tools would return)",
+		Long: "Search the same native and remote MCP tool catalog that lazy serve mode exposes " +
+			"through search_tools. Use it to preview and tune what an agent would discover for a query.\n\n" +
+			"Query forms:\n" +
+			"  select:linear.create_issue,slack.send_message   fetch exact tools by name\n" +
+			"  create issue                                     keyword search ranked by relevance\n" +
+			"  +slack send                                      require \"slack\" in the tool name",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolved, err := resolveMCPToolSelection(selection)
+			if err != nil {
+				return err
+			}
+			selector, err := newMCPToolSelector(resolved)
+			if err != nil {
+				return err
+			}
+			server := mcpServer{opts: opts, cmd: cmd, selector: selector}
+			universe := server.lazyToolUniverse(commandContext(cmd))
+			query := strings.Join(args, " ")
+			matches := rankLazyTools(universe, query, maxResults)
+			payloads := make([]any, 0, len(matches))
+			for _, match := range matches {
+				payloads = append(payloads, match.payload)
+			}
+			result := map[string]any{
+				"query":   query,
+				"matched": len(matches),
+				"total":   len(universe),
+				"tools":   payloads,
+			}
+			return writeValue(cmd, opts, result, func(w io.Writer) {
+				renderMCPSearchTable(w, cmd, opts, query, matches, len(universe), fullDescriptions)
+			})
+		},
+	}
+	addMCPToolSelectionFlags(cmd, &selection)
+	cmd.Flags().IntVar(&maxResults, "max-results", lazySearchDefaultMaxResults, "maximum number of tools to return")
+	cmd.Flags().BoolVar(&fullDescriptions, "full-descriptions", false, "show full tool descriptions")
+	return cmd
+}
+
+func renderMCPSearchTable(w io.Writer, cmd *cobra.Command, opts *options, query string, matches []lazyToolEntry, total int, fullDescriptions bool) {
+	human := humanOutputOptions(cmd, opts)
+	rows := make([][]string, 0, len(matches))
+	for _, match := range matches {
+		rows = append(rows, []string{
+			output.ToneText(human, output.ToneInfo, match.name),
+			output.Value(mcpRemoteDisplayDescription(cmd, opts, match.description, fullDescriptions)),
+		})
+	}
+	output.RenderTable(w, human, output.Table{
+		Headers: []string{"Tool", "Description"},
+		Rows:    rows,
+		Empty:   fmt.Sprintf("no tools (of %d) matched %q", total, query),
+	})
 }
