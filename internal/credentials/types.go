@@ -146,23 +146,33 @@ func cloneOAuthTokens(tokens OAuthTokens) OAuthTokens {
 	}
 }
 
+// oauthTokensKey derives the credential-store key (the keychain "account"
+// attribute on macOS) for a connection. It favors a short, human-readable form
+// for the common case while staying collision-free: the three key shapes have
+// distinct path-segment counts (1, 2, or 4) and every component is
+// url.PathEscaped so no value can introduce an extra "/".
+//
+//   - default profile, service == provider, account == provider -> "google"
+//   - default profile, service == provider                      -> "google/alice"
+//   - anything else                          -> "work/google/gmail/alice"
 func oauthTokensKey(ref ConnectionRef) (string, error) {
-	normalized, err := NormalizeRef(ref)
+	n, err := NormalizeRef(ref)
 	if err != nil {
 		return "", err
 	}
-	segments := []string{
-		"profile", normalized.Profile,
-		"provider", normalized.Provider,
-		"service", normalized.Service,
-		"account", normalized.AccountID,
-		"oauth",
+	switch {
+	case n.Profile == DefaultProfile && n.Service == n.Provider && n.AccountID == n.Provider:
+		return url.PathEscape(n.Provider), nil
+	case n.Profile == DefaultProfile && n.Service == n.Provider:
+		return url.PathEscape(n.Provider) + "/" + url.PathEscape(n.AccountID), nil
+	default:
+		return strings.Join([]string{
+			url.PathEscape(n.Profile),
+			url.PathEscape(n.Provider),
+			url.PathEscape(n.Service),
+			url.PathEscape(n.AccountID),
+		}, "/"), nil
 	}
-	escaped := make([]string, 0, len(segments))
-	for _, segment := range segments {
-		escaped = append(escaped, url.PathEscape(segment))
-	}
-	return strings.Join(escaped, "/"), nil
 }
 
 func cleanComponent(name, value string, lower bool) (string, error) {

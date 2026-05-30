@@ -73,9 +73,37 @@ func TestOAuthTokensKeyEscapesComponents(t *testing.T) {
 	if strings.Contains(key, "user/example") {
 		t.Fatalf("expected account id to be escaped, got %q", key)
 	}
-	want := "profile/work%20profile/provider/google/service/gmail/account/user%2Fexample@example.com/oauth"
+	want := "work%20profile/google/gmail/user%2Fexample@example.com"
 	if key != want {
 		t.Fatalf("key mismatch:\n got: %q\nwant: %q", key, want)
+	}
+}
+
+func TestOAuthTokensKeyShapes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ref  ConnectionRef
+		want string
+	}{
+		{"canonical", ConnectionRef{Profile: "default", Provider: "google", Service: "google", AccountID: "google"}, "google"},
+		{"account differs", ConnectionRef{Provider: "google", AccountID: "alice"}, "google/alice"},
+		{"non-default profile", ConnectionRef{Profile: "work", Provider: "google", AccountID: "google"}, "work/google/google/google"},
+		{"service differs", ConnectionRef{Provider: "jira", Service: "jira-eu", AccountID: "jira"}, "default/jira/jira-eu/jira"},
+	}
+	seen := map[string]string{}
+	for _, tc := range cases {
+		got, err := oauthTokensKey(tc.ref)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s: got %q want %q", tc.name, got, tc.want)
+		}
+		if prev, dup := seen[got]; dup {
+			t.Fatalf("key collision: %q shared by %q and %q", got, prev, tc.name)
+		}
+		seen[got] = tc.name
 	}
 }
 

@@ -90,7 +90,7 @@ func TestKeyringStoreRoundTripOAuthTokens(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected keyring item at %q", key)
 	}
-	if item.Label != "Toolmux notion OAuth tokens" {
+	if item.Label != "Toolmux notion (workspace-1)" {
 		t.Fatalf("label mismatch: %q", item.Label)
 	}
 

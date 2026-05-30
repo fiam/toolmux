@@ -77,15 +77,42 @@ func (s *KeyringStore) SaveOAuthTokens(ctx context.Context, ref ConnectionRef, t
 	if err != nil {
 		return err
 	}
-	if err := s.ring.Set(keyring.Item{
-		Key:         key,
-		Data:        data,
-		Label:       fmt.Sprintf("Toolmux %s OAuth tokens", normalizedRef.Provider),
-		Description: fmt.Sprintf("OAuth tokens for %s", normalizedRef.Display()),
-	}); err != nil {
+	if err := s.ring.Set(oauthKeyringItem(key, normalizedRef, data)); err != nil {
 		return fmt.Errorf("save OAuth tokens: %w", mapKeyringError(err))
 	}
 	return nil
+}
+
+// oauthKeyringItem builds the keyring item for an OAuth credential.
+func oauthKeyringItem(key string, ref ConnectionRef, data []byte) keyring.Item {
+	return keyring.Item{
+		Key:         key,
+		Data:        data,
+		Label:       oauthItemLabel(ref),
+		Description: fmt.Sprintf("OAuth tokens for %s", ref.Display()),
+	}
+}
+
+// oauthItemLabel is the human-facing name shown in the OS credential store
+// (the "Name" column in Keychain Access). It leads with the connection's
+// service name — which is the meaningful identifier (e.g. the remote MCP server
+// name), not the internal provider — and qualifies with the account and
+// profile only when they add distinguishing information.
+func oauthItemLabel(ref ConnectionRef) string {
+	n, err := NormalizeRef(ref)
+	if err != nil {
+		return "Toolmux credentials"
+	}
+	name := n.Service
+	// account distinguishes multiple accounts of the same service; show it
+	// unless it is just the service name repeated (the single-account default).
+	if n.AccountID != n.Service {
+		name += " (" + n.AccountID + ")"
+	}
+	if n.Profile != DefaultProfile {
+		name += " [" + n.Profile + "]"
+	}
+	return "Toolmux " + name
 }
 
 func (s *KeyringStore) HasOAuthTokens(ctx context.Context, ref ConnectionRef) (bool, error) {
