@@ -54,6 +54,8 @@ func mcpServeCommand(opts *options) *cobra.Command {
 				selector: selector,
 				lazy:     resolved.Lazy,
 			}
+			closeAudit := server.startAudit(cmd)
+			defer closeAudit()
 			if resolved.Lazy {
 				server.logLazyStart()
 			}

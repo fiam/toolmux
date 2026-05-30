@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,6 +39,8 @@ type options struct {
 	mcpToolCallTimeout      time.Duration
 	mcpRemoteConflicts      []mcpRemoteNameConflict
 	workDir                 string
+	dbPath                  string
+	auditEnabled            bool
 	workflowAgentDiscoverer workflowAgentDiscoverer
 }
 
@@ -50,6 +53,7 @@ type Dependencies struct {
 	ProviderAPI             map[string]string
 	ToolmuxdURL             string
 	WorkDir                 string
+	DBPath                  string
 	WorkflowAgentDiscoverer func(config WorkflowConfigSnapshot) []WorkflowAgentCandidate
 }
 
@@ -108,6 +112,13 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	opts.toolmuxdURL = strings.TrimRight(firstNonEmpty(deps.ToolmuxdURL, env("TOOLMUX_TOOLMUXD_URL"), "https://api.toolmux.com"), "/")
 	opts.mcpCacheDir = strings.TrimSpace(env("TOOLMUX_MCP_CACHE_DIR"))
 	opts.workDir = strings.TrimSpace(deps.WorkDir)
+	opts.dbPath = firstNonEmpty(strings.TrimSpace(deps.DBPath), strings.TrimSpace(env("TOOLMUX_DB")))
+	if opts.dbPath == "" {
+		if dir, err := toolmuxHomeDir(); err == nil {
+			opts.dbPath = filepath.Join(dir, "toolmux.db")
+		}
+	}
+	opts.auditEnabled = env("TOOLMUX_AUDIT") != "0"
 	if deps.WorkflowAgentDiscoverer != nil {
 		opts.workflowAgentDiscoverer = adaptWorkflowAgentDiscoverer(deps.WorkflowAgentDiscoverer)
 	}
@@ -146,6 +157,8 @@ func NewRootCommandWithDeps(deps Dependencies) *cobra.Command {
 	root.AddCommand(policyCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(workflowCommand(opts))
+	root.AddCommand(auditCommand(opts))
+	root.AddCommand(whyCommand(opts))
 	registerActionCommands(root, opts)
 	opts.mcpRemoteConflicts = registerCachedMCPRemoteCommands(root, opts)
 

@@ -12,11 +12,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/fiam/toolmux/internal/actions"
+	"github.com/fiam/toolmux/internal/policy"
 	"github.com/fiam/toolmux/internal/providers"
+	"github.com/fiam/toolmux/internal/store"
 	"github.com/fiam/toolmux/internal/version"
 )
 
@@ -25,6 +28,8 @@ type mcpServer struct {
 	cmd      *cobra.Command
 	selector mcpToolSelector
 	lazy     bool
+	audit    *store.Store
+	auditCWD string
 }
 
 func (server mcpServer) run(ctx context.Context, r io.Reader, w io.Writer) error {
@@ -326,8 +331,14 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if err := validateMCPArgs(spec, arguments.args); err != nil {
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: err.Error()}
 	}
-	if err := authorize(server.cmd, server.opts, spec, arguments.args); err != nil {
-		return mcpErrorToolResult(err), nil
+	decision, derr := decisionFor(server.cmd, server.opts, spec, arguments.args)
+	if derr != nil {
+		server.recordToolCall(ctx, spec, arguments, policy.Decision{Reason: derr.Error(), Rule: "error"}, derr, 0)
+		return mcpErrorToolResult(derr), nil
+	}
+	if !decision.Allowed {
+		server.recordToolCall(ctx, spec, arguments, decision, nil, 0)
+		return mcpErrorToolResult(fmt.Errorf("%w: %s", policy.ErrDenied, decision.Reason)), nil
 	}
 	entry, ok, err := lookupNativeToolboxEntry(spec.Provider, server.opts.workDir)
 	if err != nil {
@@ -340,20 +351,22 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if !ok {
 		return mcpErrorToolResult(fmt.Errorf("%s is not implemented", spec.ID)), nil
 	}
-	store, err := server.opts.credentials()
+	credStore, err := server.opts.credentials()
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
-	execCtx := actionExecutionContext(ctx, server.opts, store, entry.Provider, entry.Name)
+	execCtx := actionExecutionContext(ctx, server.opts, credStore, entry.Provider, entry.Name)
 	execCtx.Interactive = false
 	if execCtx.OpenBrowser == nil && spec.Action == string(actions.VerbOpen) {
 		execCtx.OpenBrowser = openURL
 	}
+	started := time.Now()
 	result, err := handler(execCtx, actions.Invocation{
 		Spec:  spec,
 		Args:  arguments.args,
 		Flags: arguments.flags,
 	})
+	server.recordToolCall(ctx, spec, arguments, decision, err, time.Since(started))
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
@@ -371,8 +384,14 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	}
 	arguments = mcpRemoteMergeDefaultArguments(arguments, ref.Entry.Server.DefaultArguments, ref.Tool.InputSchema)
 	spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
-	if err := authorize(server.cmd, server.opts, spec, nil); err != nil {
-		return mcpErrorToolResult(err), nil
+	decision, derr := decisionFor(server.cmd, server.opts, spec, nil)
+	if derr != nil {
+		server.recordToolCall(ctx, spec, arguments, policy.Decision{Reason: derr.Error(), Rule: "error"}, derr, 0)
+		return mcpErrorToolResult(derr), nil
+	}
+	if !decision.Allowed {
+		server.recordToolCall(ctx, spec, arguments, decision, nil, 0)
+		return mcpErrorToolResult(fmt.Errorf("%w: %s", policy.ErrDenied, decision.Reason)), nil
 	}
 	token := ""
 	if ref.Entry.Server.Transport != mcpRemoteTransportStdio {
@@ -382,7 +401,9 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 			return mcpErrorToolResult(err), nil
 		}
 	}
+	started := time.Now()
 	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, mcpRemoteToolCallTimeout(server.opts), nil)
+	server.recordToolCall(ctx, spec, arguments, decision, err, time.Since(started))
 	if err != nil {
 		return mcpErrorToolResult(err), nil
 	}
