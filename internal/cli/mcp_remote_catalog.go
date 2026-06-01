@@ -212,10 +212,16 @@ func nativeToolboxEntriesForProvider(entries []nativeToolboxEntry, providerID st
 func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, entries []toolboxCatalogEntry) {
 	human := humanOutputOptions(cmd, opts)
 	rows := make([][]string, 0, len(entries))
+	connected := 0
+	totalTools := 0
 	for _, entry := range entries {
 		tools := "-"
 		if entry.Tools != nil {
 			tools = fmt.Sprint(*entry.Tools)
+			totalTools += *entry.Tools
+		}
+		if entry.Registered {
+			connected++
 		}
 		name := mcpRemoteCatalogDisplayName(entry.Name, entry.DisplayName)
 		rows = append(rows, []string{
@@ -233,5 +239,22 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 		Rows:    rows,
 		Empty:   "no known toolboxes",
 		Align:   output.RightAlign(7, 5),
+		Summary: toolboxCatalogSummary(len(entries), connected, totalTools),
 	})
+}
+
+// toolboxCatalogSummary renders the muted rollup shown below the catalog table.
+func toolboxCatalogSummary(total, connected, tools int) string {
+	if total == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s · %d connected · %d tools", pluralize(total, "toolbox", "toolboxes"), connected, tools)
+}
+
+// pluralize formats a count with its singular or plural noun.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
 }

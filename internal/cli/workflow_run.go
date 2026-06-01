@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/output"
 )
 
@@ -75,6 +76,7 @@ func (e *workflowExecution) run() error {
 		prompt := workflowStepPromptWithSchema(step, body)
 		e.frame.beginStep(index)
 		started := time.Now()
+		activity := e.frame.startStepActivity(index)
 		stdout, runErr := e.runAgent(prompt)
 		elapsed := time.Since(started)
 		previousOutputs, outputs, parseErr := decodeStepOutputs(step, stdout)
@@ -82,10 +84,12 @@ func (e *workflowExecution) run() error {
 			runErr = parseErr
 		}
 		if runErr != nil {
+			activity.Warn(e.frame.stepLabel(index) + " failed")
 			e.frame.endStep(index, elapsed, runErr)
 			e.frame.summary(index, runErr)
 			return runErr
 		}
+		activity.Done(fmt.Sprintf("%s · %s", e.frame.stepLabel(index), fmtDuration(elapsed)))
 		previous = map[string]any{
 			"outputs":  previousOutputs,
 			"stdout":   stdout,
@@ -286,6 +290,7 @@ type workflowFrame struct {
 	startedAt  time.Time
 	stepIO     bool
 	stepPrefix string
+	ui         *connectUI
 }
 
 func newWorkflowFrame(cmd *cobra.Command, opts *options, workflow workflowFile, steps []workflowStep) *workflowFrame {
@@ -304,10 +309,32 @@ func newWorkflowFrame(cmd *cobra.Command, opts *options, workflow workflowFile, 
 		workflow:   workflow,
 		stepIO:     true,
 		stepPrefix: "  │ ",
+		ui:         newConnectUI(cmd, opts),
 	}
 }
 
 func (f *workflowFrame) showStdio() bool { return f.enabled && f.stepIO }
+
+// startStepActivity animates a spinner while a step runs, but only when the
+// agent's stdio is not streamed (e.g. a single-step workflow). When stdio is
+// visible the live output is the activity indicator, so this returns a no-op.
+func (f *workflowFrame) startStepActivity(index int) actions.ProgressHandle {
+	if f.ui == nil || f.showStdio() {
+		return noopCLIProgressHandle{}
+	}
+	return f.ui.Start("Running " + f.stepLabel(index))
+}
+
+// stepLabel names a step for activity output. A single-step workflow prints no
+// step header, so it falls back to the workflow name for a meaningful spinner
+// label (e.g. "slack-recap" instead of "Step 1").
+func (f *workflowFrame) stepLabel(index int) string {
+	step := f.steps[index]
+	if len(f.steps) == 1 && step.Name == "" && step.ID == "" && strings.TrimSpace(f.workflow.Name) != "" {
+		return f.workflow.Name
+	}
+	return workflowFrameTitle(step, index)
+}
 
 func (f *workflowFrame) start() {
 	f.startedAt = time.Now()

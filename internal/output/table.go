@@ -38,6 +38,9 @@ type Table struct {
 	Rows      [][]string
 	Empty     string
 	FullWidth bool
+	// Summary is an optional muted line rendered below the table, e.g. a
+	// count rollup like "27 toolboxes · 5 connected · 192 tools".
+	Summary string
 	// Align optionally sets per-column alignment (indexed by column).
 	// Columns without an entry default to AlignLeft.
 	Align []Align
@@ -73,6 +76,7 @@ func RenderTable(w io.Writer, opts Options, model Table) {
 			empty = "no results"
 		}
 		fmt.Fprintln(w, ToneText(opts, ToneMuted, empty))
+		renderSummary(w, opts, model.Summary)
 		return
 	}
 	t := newTheme(opts)
@@ -102,6 +106,17 @@ func RenderTable(w io.Writer, opts Options, model Table) {
 		table.Width(opts.Width)
 	}
 	fmt.Fprintln(w, strings.TrimRight(table.String(), "\n"))
+	renderSummary(w, opts, model.Summary)
+}
+
+// renderSummary prints an optional muted rollup line below a table. The table's
+// cells carry one space of left padding, so the summary is indented to match.
+func renderSummary(w io.Writer, opts Options, summary string) {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+	fmt.Fprintln(w, " "+ToneText(opts, ToneMuted, summary))
 }
 
 func StatusBadge(opts Options, status string) string {

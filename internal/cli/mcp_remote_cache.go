@@ -33,6 +33,22 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	return cache, strings.TrimSpace(token) != "", nil
 }
 
+// syncMCPRemoteCacheWithProgress wraps an explicit sync with a spinner for the
+// command paths (`mcp sync`, catalog enable) that perform network work with no
+// other feedback. The add flow uses syncMCPRemoteCacheAfterAdd instead because
+// it drives the spinner through its own OAuth retry messaging.
+func syncMCPRemoteCacheWithProgress(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
+	ui := newConnectUI(cmd, opts)
+	progress := ui.Start(fmt.Sprintf("Syncing %s metadata", entry.Name))
+	cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+	if err != nil {
+		progress.Warn(fmt.Sprintf("%s metadata sync failed", entry.Name))
+		return mcpRemoteCache{}, false, err
+	}
+	progress.Done(fmt.Sprintf("Synced %s: %d tools", entry.Name, len(cache.Tools)))
+	return cache, authRequired, nil
+}
+
 func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
 	ui := newConnectUI(cmd, opts)
 	syncProgress := ui.Start("Syncing MCP server metadata")

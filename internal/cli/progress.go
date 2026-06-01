@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -59,10 +60,23 @@ func newConnectUI(cmd *cobra.Command, opts *options) *connectUI {
 		w:            stderr,
 		output:       terminal,
 		styles:       newConnectStyles(color, palette),
-		spinner:      spinner.Line,
+		spinner:      spinnerStyle(terminal),
 		interactive:  interactive,
 		clearOnWrite: interactive,
 	}
+}
+
+// spinnerStyle prefers the braille MiniDot animation but degrades to the ASCII
+// line spinner on terminals that cannot render Unicode (dumb terminals or an
+// Ascii color profile), matching the glyph fallback used by status badges.
+func spinnerStyle(terminal *termenv.Output) spinner.Spinner {
+	if terminal != nil && terminal.Profile == termenv.Ascii {
+		return spinner.Line
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return spinner.Line
+	}
+	return spinner.MiniDot
 }
 
 func (ui *connectUI) Start(message string) actions.ProgressHandle {
@@ -73,6 +87,7 @@ func (ui *connectUI) Start(message string) actions.ProgressHandle {
 		ui:      ui,
 		message: strings.TrimSpace(message),
 		done:    make(chan struct{}),
+		start:   time.Now(),
 	}
 	ui.mu.Lock()
 	ui.stopLocked()
@@ -153,6 +168,7 @@ type connectProgressHandle struct {
 	ui      *connectUI
 	message string
 	frame   int
+	start   time.Time
 	done    chan struct{}
 	once    sync.Once
 }
@@ -241,7 +257,27 @@ func (handle *connectProgressHandle) renderLocked() {
 	if len(frames) > 0 {
 		frame = frames[handle.frame%len(frames)]
 	}
-	fmt.Fprintf(handle.ui.w, "%s %s", handle.ui.styles.spinner.Render(frame), handle.ui.styles.muted.Render(handle.message))
+	line := handle.ui.styles.muted.Render(handle.message)
+	if elapsed := handle.elapsed(); elapsed != "" {
+		line += " " + handle.ui.styles.muted.Render("("+elapsed+")")
+	}
+	fmt.Fprintf(handle.ui.w, "%s %s", handle.ui.styles.spinner.Render(frame), line)
+}
+
+// elapsed renders a compact, muted runtime suffix once the spinner has been
+// visible long enough to be worth showing, so slow operations feel honest.
+func (handle *connectProgressHandle) elapsed() string {
+	if handle.start.IsZero() {
+		return ""
+	}
+	d := time.Since(handle.start)
+	if d < time.Second {
+		return ""
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func (handle *connectProgressHandle) close() {

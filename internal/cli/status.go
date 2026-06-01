@@ -67,10 +67,16 @@ func statusCommand(opts *options) *cobra.Command {
 			return writeValue(cmd, opts, statuses, func(w io.Writer) {
 				human := humanOutputOptions(cmd, opts)
 				rows := make([][]string, 0, len(statuses))
+				connected := 0
+				totalTools := 0
 				for _, status := range statuses {
 					tools := "-"
 					if status.Tools != nil {
 						tools = fmt.Sprintf("%d", *status.Tools)
+						totalTools += *status.Tools
+					}
+					if status.Status == "connected" {
+						connected++
 					}
 					rows = append(rows, []string{
 						output.ToneText(human, output.ToneInfo, status.Name),
@@ -87,6 +93,7 @@ func statusCommand(opts *options) *cobra.Command {
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
 					Align:   output.RightAlign(7, 5),
+					Summary: toolboxCatalogSummary(len(statuses), connected, totalTools),
 				})
 			})
 		},

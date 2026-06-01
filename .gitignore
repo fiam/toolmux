@@ -10,6 +10,7 @@
 /coverage.out
 /tmp/
 /.toolmux/
+/docs/.demo-home/
 
 *.test
 *.prof

@@ -187,7 +187,7 @@ func applyMCPRemoteCatalogChanges(cmd *cobra.Command, opts *options, scope mcpPr
 	}
 	if syncEnabled {
 		for _, entry := range enabled {
-			cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, []string{entry.Name}, nil)
+			cache, authRequired, err := syncMCPRemoteCacheWithProgress(cmd, opts, entry, []string{entry.Name}, nil)
 			if err != nil {
 				return err
 			}

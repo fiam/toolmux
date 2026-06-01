@@ -28,7 +28,7 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 				return fmt.Errorf("MCP server %q is not registered", name)
 			}
 			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
-			cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
+			cache, authRequired, err := syncMCPRemoteCacheWithProgress(cmd, opts, entry, args, trace)
 			if err != nil {
 				return err
 			}

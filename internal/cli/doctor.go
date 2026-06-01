@@ -38,8 +38,15 @@ func doctorCommand(opts *options) *cobra.Command {
 				})
 				return writeDiagnostics(cmd, opts, diagnostics)
 			}
+			// A single cycling spinner narrates each check (credential store and
+			// per-toolbox cache/auth lookups can stall on the OS keyring). It is
+			// cleared before the canonical diagnostics table is written, so the
+			// table is never duplicated and piped output stays untouched.
+			progress := newConnectUI(cmd, opts).Start("Checking credential store")
+			report := func(message string) { progress.Update(message) }
 			diagnostics = append(diagnostics, credentialStoreDiagnostic(cmd.Context(), store))
-			diagnostics = append(diagnostics, mcpRemoteDoctorDiagnostics(cmd.Context(), opts, store)...)
+			diagnostics = append(diagnostics, mcpRemoteDoctorDiagnostics(cmd.Context(), opts, store, report)...)
+			progress.Stop()
 			return writeDiagnostics(cmd, opts, diagnostics)
 		},
 	}
@@ -95,7 +102,10 @@ func credentialStoreDiagnostic(ctx context.Context, store credentials.Store) pro
 	}
 }
 
-func mcpRemoteDoctorDiagnostics(ctx context.Context, opts *options, store credentials.Store) []providerDiagnostic {
+func mcpRemoteDoctorDiagnostics(ctx context.Context, opts *options, store credentials.Store, report func(string)) []providerDiagnostic {
+	if report == nil {
+		report = func(string) {}
+	}
 	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
 	if err != nil {
 		return []providerDiagnostic{{
@@ -119,6 +129,7 @@ func mcpRemoteDoctorDiagnostics(ctx context.Context, opts *options, store creden
 		Message: fmt.Sprintf("%d registered", len(entries)),
 	}}
 	for _, entry := range entries {
+		report(fmt.Sprintf("Checking %s", entry.Name))
 		diagnostics = append(diagnostics, mcpRemoteCacheDiagnostic(opts, entry))
 		diagnostics = append(diagnostics, mcpRemoteAuthDiagnostic(ctx, opts, store, entry))
 	}
