@@ -46,7 +46,28 @@ func syncMCPRemoteCacheWithProgress(cmd *cobra.Command, opts *options, entry mcp
 		return mcpRemoteCache{}, false, err
 	}
 	progress.Done(fmt.Sprintf("Synced %s: %d tools", entry.Name, len(cache.Tools)))
+	reportMCPRemoteServerNotice(cmd, entry.Name, cache)
 	return cache, authRequired, nil
+}
+
+// reportMCPRemoteServerNotice surfaces the server-provided MCP `instructions`
+// (where servers convey guidance and deprecation notices, e.g. Atlassian's
+// SSE-endpoint sunset) to the user after a sync. Toolmux otherwise drops this
+// field, so it would never be seen.
+func reportMCPRemoteServerNotice(cmd *cobra.Command, name string, cache mcpRemoteCache) {
+	notice := strings.TrimSpace(cache.Instructions)
+	if notice == "" {
+		return
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "notice from MCP server %s:\n%s\n", name, indentMCPRemoteNotice(notice))
+}
+
+func indentMCPRemoteNotice(notice string) string {
+	lines := strings.Split(notice, "\n")
+	for i, line := range lines {
+		lines[i] = "  " + strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, args []string, trace *mcpRemoteHTTPTrace) (mcpRemoteCache, bool, error) {
@@ -55,6 +76,7 @@ func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemo
 	cache, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, args, trace)
 	if err == nil {
 		syncProgress.Done("Synced MCP server metadata")
+		reportMCPRemoteServerNotice(cmd, entry.Name, cache)
 		return cache, authRequired, nil
 	}
 	if !mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
@@ -88,6 +110,7 @@ func syncMCPRemoteCacheAfterAdd(cmd *cobra.Command, opts *options, entry mcpRemo
 		retryProgress.Warn("Authenticated MCP server metadata sync failed")
 	} else {
 		retryProgress.Done("Synced MCP server metadata")
+		reportMCPRemoteServerNotice(cmd, entry.Name, cache)
 	}
 	return cache, true, err
 }
@@ -160,6 +183,7 @@ func mcpRemoteCacheFromSync(entry mcpRemoteServerEntry, initResult, toolsResult 
 	var init struct {
 		ProtocolVersion string         `json:"protocolVersion"`
 		ServerInfo      map[string]any `json:"serverInfo"`
+		Instructions    string         `json:"instructions"`
 	}
 	_ = json.Unmarshal(initResult, &init)
 	for i := range tools {
@@ -182,6 +206,7 @@ func mcpRemoteCacheFromSync(entry mcpRemoteServerEntry, initResult, toolsResult 
 		Transport:       entry.Server.Transport,
 		ProtocolVersion: init.ProtocolVersion,
 		ServerInfo:      init.ServerInfo,
+		Instructions:    strings.TrimSpace(init.Instructions),
 		Tools:           tools,
 		SyncedAt:        time.Now().UTC(),
 		Fingerprint:     fingerprint,

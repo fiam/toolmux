@@ -62,6 +62,7 @@ type mcpRemoteCache struct {
 	Transport       string                     `json:"transport"`
 	ProtocolVersion string                     `json:"protocol_version,omitempty"`
 	ServerInfo      map[string]any             `json:"server_info,omitempty"`
+	Instructions    string                     `json:"instructions,omitempty"`
 	Tools           []mcpRemoteTool            `json:"tools"`
 	SyncedAt        time.Time                  `json:"synced_at"`
 	Fingerprint     string                     `json:"fingerprint,omitempty"`

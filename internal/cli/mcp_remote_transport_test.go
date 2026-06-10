@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // These tests intentionally do not call t.Parallel because they exercise config
@@ -176,6 +178,68 @@ func TestMCPRemoteAddVerbosePrintsHTTPTraceAndUsesLatestClientMetadata(t *testin
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected add verbose output to contain %q, got:\n%s", want, output)
 		}
+	}
+}
+
+func TestSyncMCPRemoteServerCapturesAndReportsInstructions(t *testing.T) {
+	t.Parallel()
+
+	const notice = "Heads up: the SSE endpoint stops working after 30 June 2026; move to streamable HTTP."
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcpRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result: map[string]any{
+					"protocolVersion": mcpRemoteClientProtocolVersion,
+					"serverInfo":      map[string]any{"name": "notes"},
+					"instructions":    notice,
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  map[string]any{"tools": []map[string]any{fakeMCPCreateIssueTool()}},
+			})
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer upstream.Close()
+
+	cache, err := syncMCPRemoteServer(context.Background(), upstream.Client(), mcpRemoteServerEntry{
+		Name:   "notes",
+		Server: mcpRemoteServer{URL: upstream.URL, Transport: mcpRemoteTransportStreamableHTTP},
+	}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cache.Instructions != notice {
+		t.Fatalf("expected captured instructions %q, got %q", notice, cache.Instructions)
+	}
+
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetErr(&buf)
+	reportMCPRemoteServerNotice(cmd, "notes", cache)
+	out := buf.String()
+	if !strings.Contains(out, "notice from MCP server notes") || !strings.Contains(out, "30 June 2026") {
+		t.Fatalf("expected surfaced notice, got %q", out)
+	}
+
+	buf.Reset()
+	reportMCPRemoteServerNotice(cmd, "notes", mcpRemoteCache{})
+	if buf.String() != "" {
+		t.Fatalf("expected no output without instructions, got %q", buf.String())
 	}
 }
 

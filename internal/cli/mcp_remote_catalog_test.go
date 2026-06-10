@@ -46,7 +46,7 @@ func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
 	want := map[string]string{
 		"airtable":     "https://mcp.airtable.com/mcp",
 		"asana":        "https://mcp.asana.com/v2/mcp",
-		"atlassian":    "https://mcp.atlassian.com/v1/mcp/authv2",
+		"atlassian":    "https://mcp.atlassian.com/v1/mcp",
 		"cloudflare":   "https://mcp.cloudflare.com/mcp",
 		"datadog":      "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
 		"excalidraw":   "https://mcp.excalidraw.com/mcp",
