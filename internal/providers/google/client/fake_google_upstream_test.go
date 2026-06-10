@@ -44,6 +44,8 @@ type fakeGoogleUpstream struct {
 	lastUpdateContent    string
 	lastPermissionFileID string
 	lastPermissionBody   map[string]any
+	imageTrashed         bool
+	imageTrashRecorded   bool
 }
 
 func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
@@ -63,8 +65,12 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc-1":
 			upstream.getDocument(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc-img":
+			upstream.getDocumentWithImages(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/documents/doc-1:batchUpdate":
 			upstream.batchUpdate(t, w, r)
+		case r.Method == http.MethodPatch && r.URL.Path == "/drive/v3/files/image-1":
+			upstream.trashImageFile(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files":
 			upstream.listFiles(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1":
@@ -252,6 +258,93 @@ func (s *fakeGoogleUpstream) getDocument(t *testing.T, w http.ResponseWriter, r 
 				},
 			}},
 		},
+	})
+}
+
+func (s *fakeGoogleUpstream) getDocumentWithImages(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	writeGoogleJSON(w, map[string]any{
+		"documentId": "doc-img",
+		"title":      "Doc with images",
+		"revisionId": "rev-img",
+		"body": map[string]any{
+			"content": []map[string]any{{
+				"startIndex": 1,
+				"endIndex":   4,
+				"paragraph": map[string]any{
+					"positionedObjectIds": []string{"kix.pos1"},
+					"elements": []map[string]any{
+						{
+							"startIndex": 1,
+							"endIndex":   2,
+							"textRun":    map[string]any{"content": "A"},
+						},
+						{
+							"startIndex":          2,
+							"endIndex":            3,
+							"inlineObjectElement": map[string]any{"inlineObjectId": "kix.inline1"},
+						},
+					},
+				},
+			}},
+		},
+		"inlineObjects": map[string]any{
+			"kix.inline1": map[string]any{
+				"objectId": "kix.inline1",
+				"inlineObjectProperties": map[string]any{
+					"embeddedObject": map[string]any{
+						"title": "Inline diagram",
+						"imageProperties": map[string]any{
+							"contentUri": "https://lh3.googleusercontent.com/inline1",
+							"sourceUri":  "https://example.com/inline1.png",
+						},
+						"size": map[string]any{
+							"width":  map[string]any{"magnitude": 120, "unit": "PT"},
+							"height": map[string]any{"magnitude": 80, "unit": "PT"},
+						},
+					},
+				},
+			},
+		},
+		"positionedObjects": map[string]any{
+			"kix.pos1": map[string]any{
+				"objectId": "kix.pos1",
+				"positionedObjectProperties": map[string]any{
+					"embeddedObject": map[string]any{
+						"title": "Floating logo",
+						"imageProperties": map[string]any{
+							"contentUri": "https://lh3.googleusercontent.com/pos1",
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func (s *fakeGoogleUpstream) trashImageFile(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		t.Errorf("decode image update body: %v", err)
+		return
+	}
+	trashed, _ := body["trashed"].(bool)
+	s.mu.Lock()
+	s.imageTrashRecorded = true
+	s.imageTrashed = trashed
+	s.mu.Unlock()
+	writeGoogleJSON(w, map[string]any{
+		"id":      "image-1",
+		"name":    "diagram.png",
+		"trashed": trashed,
 	})
 }
 
@@ -656,6 +749,67 @@ func (s *fakeGoogleUpstream) assertDocsInsertImage(t *testing.T, wantURI string,
 	}
 	if gotIndex, _ := location["index"].(float64); int(gotIndex) != wantIndex {
 		t.Fatalf("expected image index %d, got %#v in %#v", wantIndex, location["index"], location)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsReplaceImage(t *testing.T, wantObjectID, wantURI, wantMethod string) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	replaceImage, ok := request["replaceImage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected replaceImage request, got %#v", request)
+	}
+	if got, _ := replaceImage["imageObjectId"].(string); got != wantObjectID {
+		t.Fatalf("expected imageObjectId %q, got %q in %#v", wantObjectID, got, replaceImage)
+	}
+	if got, _ := replaceImage["uri"].(string); got != wantURI {
+		t.Fatalf("expected replace URI %q, got %q in %#v", wantURI, got, replaceImage)
+	}
+	if got, _ := replaceImage["imageReplaceMethod"].(string); got != wantMethod {
+		t.Fatalf("expected imageReplaceMethod %q, got %q in %#v", wantMethod, got, replaceImage)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsDeletePositionedObject(t *testing.T, wantObjectID string) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	deleteObject, ok := request["deletePositionedObject"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected deletePositionedObject request, got %#v", request)
+	}
+	if got, _ := deleteObject["objectId"].(string); got != wantObjectID {
+		t.Fatalf("expected objectId %q, got %q in %#v", wantObjectID, got, deleteObject)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDocsDeleteContentRange(t *testing.T, wantStart, wantEnd int) {
+	t.Helper()
+	request := firstDocsBatchRequest(t, s.lastDocsBatchBody(t))
+	deleteRange, ok := request["deleteContentRange"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected deleteContentRange request, got %#v", request)
+	}
+	assertRange(t, deleteRange["range"], wantStart, wantEnd)
+}
+
+func (s *fakeGoogleUpstream) assertImageTrashed(t *testing.T) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.imageTrashRecorded {
+		t.Fatal("expected uploaded image to be trashed after insertion")
+	}
+	if !s.imageTrashed {
+		t.Fatal("expected image trash request to set trashed=true")
+	}
+}
+
+func (s *fakeGoogleUpstream) assertNoDriveUpload(t *testing.T) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastUploadMetadata != nil {
+		t.Fatalf("expected no Drive upload, got %#v", s.lastUploadMetadata)
 	}
 }
 

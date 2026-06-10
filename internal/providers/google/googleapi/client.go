@@ -48,10 +48,12 @@ type OAuthTokenResponse struct {
 }
 
 type Document struct {
-	DocumentID string       `json:"documentId,omitempty"`
-	Title      string       `json:"title,omitempty"`
-	RevisionID string       `json:"revisionId,omitempty"`
-	Body       DocumentBody `json:"body,omitzero"`
+	DocumentID        string                      `json:"documentId,omitempty"`
+	Title             string                      `json:"title,omitempty"`
+	RevisionID        string                      `json:"revisionId,omitempty"`
+	Body              DocumentBody                `json:"body,omitzero"`
+	InlineObjects     map[string]InlineObject     `json:"inlineObjects,omitempty"`
+	PositionedObjects map[string]PositionedObject `json:"positionedObjects,omitempty"`
 }
 
 type DocumentBody struct {
@@ -66,18 +68,67 @@ type StructuralElement struct {
 }
 
 type Paragraph struct {
-	Elements       []ParagraphElement `json:"elements,omitempty"`
-	ParagraphStyle ParagraphStyle     `json:"paragraphStyle,omitzero"`
+	Elements            []ParagraphElement `json:"elements,omitempty"`
+	ParagraphStyle      ParagraphStyle     `json:"paragraphStyle,omitzero"`
+	PositionedObjectIds []string           `json:"positionedObjectIds,omitempty"`
 }
 
 type ParagraphElement struct {
-	StartIndex int      `json:"startIndex,omitempty"`
-	EndIndex   int      `json:"endIndex,omitempty"`
-	TextRun    *TextRun `json:"textRun,omitempty"`
+	StartIndex          int                  `json:"startIndex,omitempty"`
+	EndIndex            int                  `json:"endIndex,omitempty"`
+	TextRun             *TextRun             `json:"textRun,omitempty"`
+	InlineObjectElement *InlineObjectElement `json:"inlineObjectElement,omitempty"`
+}
+
+type InlineObjectElement struct {
+	InlineObjectID string `json:"inlineObjectId,omitempty"`
 }
 
 type TextRun struct {
 	Content string `json:"content,omitempty"`
+}
+
+// InlineObject and PositionedObject are the document-level entries (keyed by
+// object ID) that hold the actual image data referenced from the body by
+// InlineObjectElement.InlineObjectID and Paragraph.PositionedObjectIds.
+type InlineObject struct {
+	ObjectID               string                 `json:"objectId,omitempty"`
+	InlineObjectProperties InlineObjectProperties `json:"inlineObjectProperties,omitzero"`
+}
+
+type InlineObjectProperties struct {
+	EmbeddedObject EmbeddedObject `json:"embeddedObject,omitzero"`
+}
+
+type PositionedObject struct {
+	ObjectID                   string                     `json:"objectId,omitempty"`
+	PositionedObjectProperties PositionedObjectProperties `json:"positionedObjectProperties,omitzero"`
+}
+
+type PositionedObjectProperties struct {
+	EmbeddedObject EmbeddedObject `json:"embeddedObject,omitzero"`
+}
+
+type EmbeddedObject struct {
+	Title           string           `json:"title,omitempty"`
+	Description     string           `json:"description,omitempty"`
+	ImageProperties *ImageProperties `json:"imageProperties,omitempty"`
+	Size            *Size            `json:"size,omitempty"`
+}
+
+type ImageProperties struct {
+	ContentURI string `json:"contentUri,omitempty"`
+	SourceURI  string `json:"sourceUri,omitempty"`
+}
+
+type Size struct {
+	Height Dimension `json:"height,omitzero"`
+	Width  Dimension `json:"width,omitzero"`
+}
+
+type Dimension struct {
+	Magnitude float64 `json:"magnitude,omitempty"`
+	Unit      string  `json:"unit,omitempty"`
 }
 
 type ParagraphStyle struct {

@@ -47,7 +47,7 @@ func GoogleDescriptor() providers.Provider {
 							actions.Use("find-structure [document-id]"),
 							actions.MaxArgs(1),
 							actions.StringFlag("document-id", "", "Google Docs document ID or URL"),
-							actions.StringFlag("kind", "all", "structure kind: all, heading, paragraph, table, or text"),
+							actions.StringFlag("kind", "all", "structure kind: all, heading, paragraph, table, text, or image"),
 							actions.StringFlag("text", "", "optional text to match"),
 							actions.BoolFlag("match-case", false, "match text case-sensitively"),
 						),
@@ -107,23 +107,38 @@ func GoogleDescriptor() providers.Provider {
 							actions.StringFlag("required-revision-id", "", "only apply when the document is at this revision"),
 							actions.BoolFlag("dry-run", false, "show the Docs batchUpdate request without applying it"),
 						),
-						googleDocsToolWithEffects("docs.insert_image", "insert-image", "Insert an inline image into a Google Docs document", actions.VerbUpdate, actions.EffectWrite, actions.EffectRead,
-							actions.Use("insert-image [document-id]"),
+						googleDocsToolWithEffects("docs.insert_image", "insert-image", "Insert an inline image into a Google Docs document", actions.VerbUpdate, actions.EffectWrite, actions.EffectWrite,
+							append(docsImageSourceOptions(),
+								actions.Use("insert-image [document-id]"),
+								actions.MaxArgs(1),
+								actions.StringFlag("document-id", "", "Google Docs document ID or URL"),
+								actions.IntFlag("index", 0, "insert at this document index; defaults to end of body"),
+								actions.IntFlag("width-pt", 0, "display width in points"),
+								actions.IntFlag("height-pt", 0, "display height in points"),
+								actions.StringFlag("required-revision-id", "", "only apply when the document is at this revision"),
+								actions.BoolFlag("dry-run", false, "show the hosting and Docs batchUpdate requests without applying them"),
+							)...,
+						),
+						googleDocsToolWithEffects("docs.replace_image", "replace-image", "Replace an existing Google Docs image by object ID", actions.VerbUpdate, actions.EffectWrite, actions.EffectWrite,
+							append(docsImageSourceOptions(),
+								actions.Use("replace-image [document-id]"),
+								actions.MaxArgs(1),
+								actions.StringFlag("document-id", "", "Google Docs document ID or URL"),
+								actions.StringFlag("object-id", "", "image object ID to replace (from find-structure --kind image)"),
+								actions.StringFlag("replace-method", "CENTER_CROP", "image replace method: CENTER_CROP or CENTER_INSIDE"),
+								actions.StringFlag("required-revision-id", "", "only apply when the document is at this revision"),
+								actions.BoolFlag("dry-run", false, "show the hosting and Docs batchUpdate requests without applying them"),
+							)...,
+						),
+						googleDocsTool("docs.delete_object", "delete-object", "Delete a Google Docs image by object ID or range", actions.VerbUpdate, actions.EffectWrite,
+							actions.Use("delete-object [document-id]"),
 							actions.MaxArgs(1),
 							actions.StringFlag("document-id", "", "Google Docs document ID or URL"),
-							actions.StringFlag("uri", "", "public image URI to insert"),
-							actions.StringFlag("drive-file-id", "", "Google Drive image file ID or URL to insert via public content URI"),
-							actions.StringFlag("upload-file", "", "local image file to upload to Drive before insertion"),
-							actions.StringFlag("content-base64", "", "base64-encoded image content to upload before insertion"),
-							actions.StringFlag("name", "", "Drive file name when using --upload-file or --content-base64"),
-							actions.StringFlag("mime-type", "", "image MIME type when using --upload-file or --content-base64"),
-							actions.StringFlag("parent-id", "root", "Drive parent folder for uploaded images"),
-							actions.BoolFlag("make-public", false, "create an anyone-reader Drive permission so Docs can fetch the image"),
-							actions.IntFlag("index", 0, "insert at this document index; defaults to end of body"),
-							actions.IntFlag("width-pt", 0, "display width in points"),
-							actions.IntFlag("height-pt", 0, "display height in points"),
+							actions.StringFlag("object-id", "", "positioned image object ID to delete (deletePositionedObject)"),
+							actions.IntFlag("start-index", 0, "inline image range start index (from find-structure --kind image)"),
+							actions.IntFlag("end-index", 0, "inline image range end index"),
 							actions.StringFlag("required-revision-id", "", "only apply when the document is at this revision"),
-							actions.BoolFlag("dry-run", false, "show the Drive upload and Docs batchUpdate requests without applying them"),
+							actions.BoolFlag("dry-run", false, "show the Docs batchUpdate request without applying it"),
 						),
 						googleDocsTool("docs.batch_update", "batch-update", "Apply raw Google Docs batchUpdate requests", actions.VerbUpdate, actions.EffectWrite,
 							actions.Use("batch-update [document-id]"),
@@ -227,6 +242,8 @@ func GoogleDescriptor() providers.Provider {
 			"google.docs.style_ranges":     handleDocsStyleRanges,
 			"google.docs.insert_table":     handleDocsInsertTable,
 			"google.docs.insert_image":     handleDocsInsertImage,
+			"google.docs.replace_image":    handleDocsReplaceImage,
+			"google.docs.delete_object":    handleDocsDeleteObject,
 			"google.docs.batch_update":     handleDocsBatchUpdate,
 			"google.drive.search":          handleDriveSearch,
 			"google.drive.get":             handleDriveGet,
@@ -247,6 +264,26 @@ func GoogleDescriptor() providers.Provider {
 
 func pickerTimeoutFlag() actions.Option {
 	return actions.IntFlag("timeout-seconds", 120, "seconds to wait for Google Picker selection")
+}
+
+// docsImageSourceOptions are the flags shared by docs insert-image and
+// replace-image: the four mutually-exclusive image sources plus the pluggable
+// hosting flags used to make a byte source fetchable by the Docs API.
+func docsImageSourceOptions() []actions.Option {
+	return []actions.Option{
+		actions.StringFlag("uri", "", "public image URI to insert directly"),
+		actions.StringFlag("drive-file-id", "", "Google Drive image file ID or URL to insert via public content URI"),
+		actions.StringFlag("upload-file", "", "local image file to host before insertion"),
+		actions.StringFlag("content-base64", "", "base64-encoded image content to host before insertion"),
+		actions.StringFlag("name", "", "Drive file name when hosting via --image-host drive"),
+		actions.StringFlag("mime-type", "", "image MIME type when using --upload-file or --content-base64"),
+		actions.StringFlag("image-host", "drive", "host for byte sources so Docs can fetch them: drive or command"),
+		actions.StringFlag("parent-id", "root", "Drive parent folder for uploaded images (--image-host drive)"),
+		actions.BoolFlag("make-public", false, "create an anyone-reader Drive permission so Docs can fetch the image (--image-host drive)"),
+		actions.BoolFlag("trash-after-insert", true, "trash the uploaded Drive file after Docs copies the image (--image-host drive)"),
+		actions.StringFlag("publish-command", "", "shell command that publishes the image (path as $1, bytes on stdin) and prints a public URL (--image-host command)"),
+		actions.StringFlag("publish-cleanup-command", "", "shell command run with the published URL as $1 after insertion (--image-host command)"),
+	}
 }
 
 func googleDriveTool(localID, segment, short string, verb actions.Verb, remote actions.Effect, opts ...actions.Option) actions.Spec {
@@ -296,13 +333,15 @@ func driveToolDescription(name, fallback string) string {
 func docsToolDescription(name, fallback string) string {
 	descriptions := map[string]string{
 		"docs.get":              "Read a Google Docs document by document ID or Docs URL and return its title, revision ID, and plain text. Toolmux uses the non-sensitive drive.file scope, so the document must be created by or explicitly opened/shared with the Toolmux Google app.",
-		"docs.find_structure":   "Read a Google Docs document and return exact Docs ranges for headings, paragraphs, tables, or matching text. Docs indexes are UTF-16 code unit indexes from the Google Docs API.",
+		"docs.find_structure":   "Read a Google Docs document and return exact Docs ranges for headings, paragraphs, tables, matching text, or images. Use --kind image to list inline and positioned images with their object IDs, body ranges, and content URIs (feed these to replace-image or delete-object). Docs indexes are UTF-16 code unit indexes from the Google Docs API.",
 		"docs.export":           "Export a Google Docs document through Drive files.export. Use --format markdown, txt, pdf, docx, odt, rtf, html, or epub, or pass --mime-type for a custom Drive export MIME type.",
 		"docs.append":           "Append text to the end of a Google Docs document using Docs batchUpdate. Pass --document-id or a Docs URL and --text. Use --required-revision-id to guard against concurrent edits, and --dry-run to inspect the request.",
 		"docs.replace_all_text": "Replace all matching text in a Google Docs document using Docs batchUpdate replaceAllText. Pass --text and --replace-text. Use --match-case for case-sensitive matching, --required-revision-id to guard against concurrent edits, and --dry-run to inspect the request.",
 		"docs.style_ranges":     "Apply higher-level Google Docs styling by exact range, text match, or paragraph named style. Supports text style, paragraph named style, alignment, and bullet creation, while generating Docs batchUpdate requests.",
 		"docs.insert_table":     "Insert a table into a Google Docs document using Docs batchUpdate insertTable. Use --index for a specific insertion point or omit it to insert at the end of the body.",
-		"docs.insert_image":     "Insert an inline image into a Google Docs document using Docs batchUpdate insertInlineImage. Pass a public --uri, an already public --drive-file-id, or upload content with --upload-file or --content-base64 plus --make-public so Docs can fetch the image URL.",
+		"docs.insert_image":     "Insert an inline image into a Google Docs document using Docs batchUpdate insertInlineImage. The Docs API can only fetch images from a public URL, so byte sources must be hosted first. Pass a public --uri, an already public --drive-file-id, or byte content with --upload-file or --content-base64. Choose hosting with --image-host drive (uploads to Drive with --make-public, trashed afterwards unless --trash-after-insert=false) or --image-host command (runs --publish-command to host off Drive for orgs that block public sharing).",
+		"docs.replace_image":    "Replace an existing Google Docs image in place using Docs batchUpdate replaceImage. Pass --object-id (from find-structure --kind image) and a new image via the same source/hosting flags as insert-image. Use --replace-method CENTER_CROP or CENTER_INSIDE.",
+		"docs.delete_object":    "Delete a Google Docs image. Pass --object-id for a positioned image (deletePositionedObject) or --start-index/--end-index for an inline image range (deleteContentRange); both come from find-structure --kind image.",
 		"docs.batch_update":     "Apply a raw Google Docs batchUpdate request. Pass --json as either the full request object, a requests array that Toolmux wraps as {\"requests\": ...}, or @path. Use --required-revision-id to merge writeControl.requiredRevisionId.",
 	}
 	return firstNonEmpty(descriptions[name], fallback)

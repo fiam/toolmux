@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,12 +59,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "20"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "22"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "20"} {
+	for _, want := range []string{"google", "internal", "connected", "22"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -208,6 +209,104 @@ func TestGoogleDriveUploadAndDocsInsertUploadedImage(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "image-1")
 	upstream.assertDriveUpload(t, "inline.png", "image/png", "base64 png")
 	upstream.assertDocsInsertImage(t, "https://drive.google.com/uc?export=view&id=image-1", 3)
+}
+
+func TestGoogleDocsSurfacesImageObjects(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	deps := googleDriveTokenDeps(t, upstream)
+
+	out := toolmuxtest.Run(t, deps, "google", "docs", "find-structure", "doc-img", "--kind", "image")
+	for _, want := range []string{"inline_image", "kix.inline1", "Inline diagram", "positioned_image", "kix.pos1", "Floating logo"} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "find-structure", "doc-img", "--kind", "image", "--text", "pos1")
+	toolmuxtest.AssertContains(t, out, "kix.pos1")
+	if strings.Contains(out, "kix.inline1") {
+		t.Fatalf("expected text filter to exclude the inline image, got:\n%s", out)
+	}
+
+	out = toolmuxtest.Run(t, deps, "--output", "json", "google", "docs", "get", "doc-img")
+	for _, want := range []string{"\"images\"", "kix.inline1", "content_uri", "googleusercontent.com/inline1", "kix.pos1"} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+}
+
+func TestGoogleDocsReplaceAndDeleteImage(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	deps := googleDriveTokenDeps(t, upstream)
+
+	out := toolmuxtest.Run(t, deps, "google", "docs", "replace-image", "doc-1", "--object-id", "kix.inline1", "--uri", "https://example.com/new.png", "--replace-method", "CENTER_INSIDE")
+	toolmuxtest.AssertContains(t, out, "kix.inline1")
+	upstream.assertDocsReplaceImage(t, "kix.inline1", "https://example.com/new.png", "CENTER_INSIDE")
+
+	out = toolmuxtest.Run(t, deps, "google", "docs", "delete-object", "doc-1", "--object-id", "kix.pos1")
+	toolmuxtest.AssertContains(t, out, "doc-1")
+	upstream.assertDocsDeletePositionedObject(t, "kix.pos1")
+
+	toolmuxtest.Run(t, deps, "google", "docs", "delete-object", "doc-1", "--start-index", "2", "--end-index", "3")
+	upstream.assertDocsDeleteContentRange(t, 2, 3)
+
+	result := toolmuxtest.RunResult(t, deps, "google", "docs", "delete-object", "doc-1", "--object-id", "kix.pos1", "--start-index", "2", "--end-index", "3")
+	if result.Err == nil {
+		t.Fatalf("expected delete-object to reject both object-id and range, output:\n%s", result.Output)
+	}
+}
+
+func TestGoogleDocsInsertImageWithoutDriveViaPublishCommand(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	deps := googleDriveTokenDeps(t, upstream)
+
+	received := filepath.Join(t.TempDir(), "received.png")
+	cleanupMarker := filepath.Join(t.TempDir(), "cleanup.txt")
+	publishCmd := fmt.Sprintf("cp \"$1\" %q; printf '%%s' https://cdn.example/published.png", received)
+	cleanupCmd := fmt.Sprintf("printf '%%s' \"$1\" > %q", cleanupMarker)
+	encoded := base64.StdEncoding.EncodeToString([]byte("png-bytes"))
+
+	out := toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1",
+		"--content-base64", encoded, "--name", "x.png", "--mime-type", "image/png",
+		"--image-host", "command", "--publish-command", publishCmd, "--publish-cleanup-command", cleanupCmd,
+		"--index", "2",
+	)
+	toolmuxtest.AssertContains(t, out, "https://cdn.example/published.png")
+	upstream.assertDocsInsertImage(t, "https://cdn.example/published.png", 2)
+	upstream.assertNoDriveUpload(t)
+
+	if data, err := os.ReadFile(received); err != nil || string(data) != "png-bytes" {
+		t.Fatalf("expected publish command to receive image bytes, got %q (err %v)", string(data), err)
+	}
+	if data, err := os.ReadFile(cleanupMarker); err != nil || string(data) != "https://cdn.example/published.png" {
+		t.Fatalf("expected cleanup command to receive published URL, got %q (err %v)", string(data), err)
+	}
+}
+
+func TestGoogleDocsInsertImageTrashesDriveTempFile(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	deps := googleDriveTokenDeps(t, upstream)
+
+	imagePath := filepath.Join(t.TempDir(), "diagram.png")
+	if err := os.WriteFile(imagePath, []byte("fake png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--upload-file", imagePath, "--mime-type", "image/png", "--make-public", "--index", "2")
+	toolmuxtest.AssertContains(t, out, "https://drive.google.com/uc?export=view&id=image-1")
+	upstream.assertDriveUpload(t, "diagram.png", "image/png", "fake png")
+	upstream.assertAnyoneReaderPermission(t, "image-1")
+	upstream.assertDocsInsertImage(t, "https://drive.google.com/uc?export=view&id=image-1", 2)
+	upstream.assertImageTrashed(t)
+
+	result := toolmuxtest.RunResult(t, deps, "google", "docs", "insert-image", "doc-1", "--upload-file", imagePath, "--mime-type", "image/png")
+	if result.Err == nil {
+		t.Fatalf("expected --image-host drive to require --make-public, output:\n%s", result.Output)
+	}
+	if !strings.Contains(result.Err.Error(), "make-public") {
+		t.Fatalf("expected make-public error, got %v", result.Err)
+	}
 }
 
 func TestGoogleDriveReportsMissingScopeAfterDocsSensitiveOverride(t *testing.T) {
@@ -383,6 +482,8 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 		"google.docs.style_ranges",
 		"google.docs.insert_table",
 		"google.docs.insert_image",
+		"google.docs.replace_image",
+		"google.docs.delete_object",
 		"google.docs.batch_update",
 		"google.drive.selected.add",
 		"google.drive.selected.list",

@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,24 @@ import (
 	"github.com/fiam/toolmux/internal/server"
 	"github.com/fiam/toolmux/internal/testutil/toolmuxdtest"
 )
+
+// googleDriveTokenDeps wires deps with a stored brokered drive.file token, the
+// common setup for the Docs/Drive e2e tests that do not exercise the OAuth flow.
+func googleDriveTokenDeps(t testing.TB, upstream *fakeGoogleUpstream) cli.Dependencies {
+	t.Helper()
+	store := credentials.NewMemoryStore()
+	ref := credentials.ConnectionRef{Profile: "default", Provider: "google", AccountID: "google"}
+	if err := store.SaveOAuthTokens(context.Background(), ref, credentials.OAuthTokens{
+		AccessToken:  "ya29.drive",
+		RefreshToken: "refresh-google",
+		TokenType:    "Bearer",
+		Scopes:       []string{googleapi.ScopeDriveFile},
+		Extra:        map[string]string{"auth_type": "oauth_broker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return googleDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
+}
 
 func googleBrokerDeps(t testing.TB, store credentials.Store, upstream *fakeGoogleUpstream) cli.Dependencies {
 	t.Helper()

@@ -97,59 +97,35 @@ func handleDocsInsertImage(exec actions.Context, inv actions.Invocation) (any, e
 	if err != nil {
 		return nil, err
 	}
-	image, err := docsImageSource(exec, inv)
+	in, err := resolveImageInput(exec, inv)
 	if err != nil {
 		return nil, err
 	}
 	if inv.Bool("dry-run") {
-		uri := image.URI
-		if image.Upload != nil {
-			uri = "https://drive.google.com/uc?export=view&id=<uploaded-file-id>"
-		}
-		request := docsBatchRequest([]map[string]any{docsInsertImageRequest(inv, uri)}, docsWriteControl(inv))
+		request := docsBatchRequest([]map[string]any{docsInsertImageRequest(inv, dryRunImageURI(inv, in))}, docsWriteControl(inv))
 		return actions.NewDryRun(inv.Spec.ID, map[string]any{
 			"batchUpdate": request,
-			"image":       image,
+			"image":       in,
 		}), nil
 	}
 	client, err := googleClient(exec, inv, defaultDriveScopes)
 	if err != nil {
 		return nil, err
 	}
-	requests := []map[string]any{docsInsertImageRequest(inv, image.URI)}
-	request := docsBatchRequest(requests, docsWriteControl(inv))
-	if image.Upload != nil {
-		file, err := client.UploadDriveFile(exec.Context, *image.Upload)
-		if err != nil {
-			return nil, err
-		}
-		image.UploadedFile = &file
-		image.URI = googleDrivePublicImageURI(file.ID)
-		requests[0] = docsInsertImageRequest(inv, image.URI)
-		request = docsBatchRequest(requests, docsWriteControl(inv))
-		if inv.Bool("make-public") {
-			permission, err := client.CreateAnyoneReaderPermission(exec.Context, file.ID)
-			if err != nil {
-				return nil, err
-			}
-			image.Permission = &permission
-		}
-	} else if image.DriveFileID != "" && inv.Bool("make-public") {
-		permission, err := client.CreateAnyoneReaderPermission(exec.Context, image.DriveFileID)
-		if err != nil {
-			return nil, err
-		}
-		image.Permission = &permission
+	uri, meta, cleanup, err := publishImage(exec, inv, client, in)
+	if err != nil {
+		return nil, err
 	}
+	request := docsBatchRequest([]map[string]any{docsInsertImageRequest(inv, uri)}, docsWriteControl(inv))
 	response, err := client.BatchUpdateDocumentRaw(exec.Context, documentID, request)
 	if err != nil {
 		return nil, err
 	}
+	runImageCleanup(exec, cleanup, meta)
 	return docsInsertImageResult{
 		DocumentID:      response.DocumentID,
-		ImageURI:        image.URI,
-		UploadedFile:    image.UploadedFile,
-		Permission:      image.Permission,
+		ImageURI:        uri,
+		Publish:         meta,
 		WriteControl:    response.WriteControl,
 		AppliedRequests: response.AppliedRequests,
 	}, nil
@@ -349,81 +325,6 @@ func docsInsertTableRequests(inv actions.Invocation, rows, columns int) ([]map[s
 	return requests, nil
 }
 
-type docsImage struct {
-	URI          string                            `json:"uri,omitempty" yaml:"uri,omitempty"`
-	DriveFileID  string                            `json:"drive_file_id,omitempty" yaml:"drive_file_id,omitempty"`
-	Upload       *googleapi.UploadDriveFileOptions `json:"-" yaml:"-"`
-	UploadedFile *googleapi.DriveFile              `json:"uploaded_file,omitempty" yaml:"uploaded_file,omitempty"`
-	Permission   *googleapi.DrivePermission        `json:"permission,omitempty" yaml:"permission,omitempty"`
-}
-
-func docsImageSource(exec actions.Context, inv actions.Invocation) (docsImage, error) {
-	uri := strings.TrimSpace(inv.String("uri"))
-	driveFileID := strings.TrimSpace(inv.String("drive-file-id"))
-	uploadFile := strings.TrimSpace(inv.String("upload-file"))
-	contentBase64 := strings.TrimSpace(inv.String("content-base64"))
-	sources := 0
-	for _, value := range []string{uri, driveFileID, uploadFile, contentBase64} {
-		if value != "" {
-			sources++
-		}
-	}
-	if sources != 1 {
-		return docsImage{}, fmt.Errorf("pass exactly one of --uri, --drive-file-id, --upload-file, or --content-base64")
-	}
-	switch {
-	case uri != "":
-		return docsImage{URI: uri}, nil
-	case driveFileID != "":
-		fileID, err := googleDriveFileID(driveFileID)
-		if err != nil {
-			return docsImage{}, err
-		}
-		return docsImage{DriveFileID: fileID, URI: googleDrivePublicImageURI(fileID)}, nil
-	case uploadFile != "":
-		content, err := readLocalFile(exec, uploadFile)
-		if err != nil {
-			return docsImage{}, err
-		}
-		mimeType := uploadMIMEType(inv.String("mime-type"), uploadFile, content)
-		if !isDocsInlineImageMIME(mimeType) {
-			return docsImage{}, fmt.Errorf("docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
-		}
-		if !inv.Bool("make-public") {
-			return docsImage{}, fmt.Errorf("--make-public is required when using --upload-file because Docs fetches images from public URLs")
-		}
-		return docsImage{
-			Upload: &googleapi.UploadDriveFileOptions{
-				Name:     firstNonEmpty(inv.String("name"), filepathBase(uploadFile)),
-				ParentID: strings.TrimSpace(inv.String("parent-id")),
-				MIMEType: mimeType,
-				Content:  content,
-			},
-		}, nil
-	default:
-		content, err := decodeBase64Content(contentBase64)
-		if err != nil {
-			return docsImage{}, err
-		}
-		name := firstNonEmpty(inv.String("name"), "image")
-		mimeType := uploadMIMEType(inv.String("mime-type"), name, content)
-		if !isDocsInlineImageMIME(mimeType) {
-			return docsImage{}, fmt.Errorf("docs inline images must be PNG, JPEG, or GIF; detected %s", mimeType)
-		}
-		if !inv.Bool("make-public") {
-			return docsImage{}, fmt.Errorf("--make-public is required when using --content-base64 because Docs fetches images from public URLs")
-		}
-		return docsImage{
-			Upload: &googleapi.UploadDriveFileOptions{
-				Name:     name,
-				ParentID: strings.TrimSpace(inv.String("parent-id")),
-				MIMEType: mimeType,
-				Content:  content,
-			},
-		}, nil
-	}
-}
-
 func docsInsertImageRequest(inv actions.Invocation, uri string) map[string]any {
 	insert := map[string]any{"uri": uri}
 	if index := inv.Int("index"); index > 0 {
@@ -488,9 +389,12 @@ func findDocumentStructure(document googleapi.Document, kind, query string, matc
 		kind = "all"
 	}
 	switch kind {
-	case "all", "paragraph", "paragraphs", "heading", "headings", "table", "tables", "text":
+	case "all", "paragraph", "paragraphs", "heading", "headings", "table", "tables", "text", "image", "images":
 	default:
 		return nil, fmt.Errorf("unsupported structure kind %q", kind)
+	}
+	if kind == "image" || kind == "images" {
+		return filterImageMatches(documentImages(document), query, matchCase), nil
 	}
 	if kind == "text" && query == "" {
 		return textRuns(document.Body.Content), nil
@@ -527,6 +431,9 @@ func findDocumentStructure(document googleapi.Document, kind, query string, matc
 			}
 		}
 	})
+	if kind == "all" {
+		matches = append(matches, documentImages(document)...)
+	}
 	if query == "" {
 		return matches, nil
 	}
@@ -537,6 +444,80 @@ func findDocumentStructure(document googleapi.Document, kind, query string, matc
 		}
 	}
 	return filtered, nil
+}
+
+// documentImages returns one match per image in the document: inline images
+// (with the body range deleteContentRange needs) and positioned images (with
+// their paragraph anchor), each carrying the object ID and looked-up image
+// properties from the document-level inlineObjects/positionedObjects maps.
+func documentImages(document googleapi.Document) []docsStructureMatch {
+	matches := []docsStructureMatch{}
+	walkStructuralElements(document.Body.Content, func(element googleapi.StructuralElement) {
+		if element.Paragraph == nil {
+			return
+		}
+		for _, child := range element.Paragraph.Elements {
+			if child.InlineObjectElement == nil || child.InlineObjectElement.InlineObjectID == "" {
+				continue
+			}
+			id := child.InlineObjectElement.InlineObjectID
+			match := docsStructureMatch{
+				Kind:       "inline_image",
+				StartIndex: child.StartIndex,
+				EndIndex:   child.EndIndex,
+				ObjectID:   id,
+			}
+			if object, ok := document.InlineObjects[id]; ok {
+				applyEmbeddedObject(&match, object.InlineObjectProperties.EmbeddedObject)
+			}
+			matches = append(matches, match)
+		}
+		for _, id := range element.Paragraph.PositionedObjectIds {
+			match := docsStructureMatch{
+				Kind:       "positioned_image",
+				StartIndex: element.StartIndex,
+				EndIndex:   element.EndIndex,
+				ObjectID:   id,
+			}
+			if object, ok := document.PositionedObjects[id]; ok {
+				applyEmbeddedObject(&match, object.PositionedObjectProperties.EmbeddedObject)
+			}
+			matches = append(matches, match)
+		}
+	})
+	return matches
+}
+
+func applyEmbeddedObject(match *docsStructureMatch, object googleapi.EmbeddedObject) {
+	match.Title = object.Title
+	match.Description = object.Description
+	if object.ImageProperties != nil {
+		match.ContentURI = object.ImageProperties.ContentURI
+		match.SourceURI = object.ImageProperties.SourceURI
+	}
+	if object.Size != nil {
+		match.WidthPt = object.Size.Width.Magnitude
+		match.HeightPt = object.Size.Height.Magnitude
+	}
+}
+
+// filterImageMatches keeps images whose object ID, title, description, or
+// source/content URI contains the query (no query returns everything).
+func filterImageMatches(images []docsStructureMatch, query string, matchCase bool) []docsStructureMatch {
+	if strings.TrimSpace(query) == "" {
+		return images
+	}
+	filtered := make([]docsStructureMatch, 0, len(images))
+	for _, image := range images {
+		if textContains(image.ObjectID, query, matchCase) ||
+			textContains(image.Title, query, matchCase) ||
+			textContains(image.Description, query, matchCase) ||
+			textContains(image.SourceURI, query, matchCase) ||
+			textContains(image.ContentURI, query, matchCase) {
+			filtered = append(filtered, image)
+		}
+	}
+	return filtered
 }
 
 func textMatches(elements []googleapi.StructuralElement, query string, matchCase bool) []docsStructureMatch {
