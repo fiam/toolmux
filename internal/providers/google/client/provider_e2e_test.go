@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fiam/toolmux/internal/actions"
 	"github.com/fiam/toolmux/internal/credentials"
 	"github.com/fiam/toolmux/internal/providers"
 	_ "github.com/fiam/toolmux/internal/providers/google/broker"
@@ -59,12 +60,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "22"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "23"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "22"} {
+	for _, want := range []string{"google", "internal", "connected", "23"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -159,6 +160,41 @@ func TestGoogleDocsCommandsReadAndUpdateAccessibleDocument(t *testing.T) {
 	out = toolmuxtest.Run(t, deps, "google", "docs", "insert-image", "doc-1", "--uri", imageURI, "--index", "2", "--width-pt", "50")
 	toolmuxtest.AssertContains(t, out, imageURI)
 	upstream.assertDocsInsertImage(t, imageURI, 2)
+}
+
+func TestGoogleDriveCommentsListAccessibleFile(t *testing.T) {
+	t.Parallel()
+	upstream := newFakeGoogleUpstream(t)
+	deps := googleDriveTokenDeps(t, upstream)
+
+	out := toolmuxtest.Run(t, deps,
+		"google", "drive", "comments", "list", "https://docs.google.com/document/d/doc-1/edit",
+		"--page-size", "5",
+		"--page-token", "comments-page",
+		"--include-deleted",
+		"--start-modified-time", "2026-05-20T00:00:00Z",
+	)
+	for _, want := range []string{
+		"comment-1",
+		"Ada Reviewer",
+		"Original sentence",
+		"Please tighten this section.",
+		"comments-next",
+	} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
+	upstream.assertDriveCommentsRequest(t, "doc-1", "5", "comments-page", "true", "2026-05-20T00:00:00Z")
+
+	out = toolmuxtest.Run(t, deps, "--output", "json", "google", "drive", "comments", "list", "--file", "doc-1")
+	for _, want := range []string{
+		`"file_id": "doc-1"`,
+		`"id": "reply-1"`,
+		`"content": "Updated in draft."`,
+		`"deleted": true`,
+		`"next_page_token": "comments-next"`,
+	} {
+		toolmuxtest.AssertContains(t, out, want)
+	}
 }
 
 func TestGoogleDriveUploadAndDocsInsertUploadedImage(t *testing.T) {
@@ -470,8 +506,10 @@ func TestGoogleDriveFilesUpdateUpdatesAccessibleFile(t *testing.T) {
 func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 	t.Parallel()
 	seen := map[string]bool{}
+	specs := map[string]actions.Spec{}
 	for _, spec := range providers.CommandSpecs() {
 		seen[spec.ID] = true
+		specs[spec.ID] = spec
 	}
 	for _, want := range []string{
 		"google.docs.get",
@@ -485,6 +523,7 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 		"google.docs.replace_image",
 		"google.docs.delete_object",
 		"google.docs.batch_update",
+		"google.drive.comments.list",
 		"google.drive.selected.add",
 		"google.drive.selected.list",
 		"google.drive.files.copy",
@@ -506,5 +545,12 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 	}
 	if seen["google.drive.accessible"] {
 		t.Fatal("google.drive.accessible should remain a CLI alias, not an MCP tool")
+	}
+	comments := specs["google.drive.comments.list"]
+	if comments.Resource != "comment" || comments.Action != "list" || comments.RemoteEffect != "read" || comments.LocalEffect != "none" {
+		t.Fatalf("unexpected comments action metadata: %#v", comments)
+	}
+	if !hasScopes(comments.Scopes, googleapi.ScopeDriveFile) {
+		t.Fatalf("expected comments action to require drive.file, got %#v", comments.Scopes)
 	}
 }

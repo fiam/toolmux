@@ -248,6 +248,7 @@ toolmux google drive pick
 toolmux google drive available
 toolmux google drive search --query "mimeType='application/vnd.google-apps.document'"
 toolmux google drive get --file-id 1abc...
+toolmux google drive comments list 1abc...
 toolmux status google
 ```
 
@@ -273,6 +274,10 @@ URL. `find-structure` returns Google Docs UTF-16 indexes for targeted edits.
 `batch-update` accepts a full Docs API batchUpdate object, a requests array, or
 `@path`; use `--required-revision-id` when an edit should only apply to a known
 revision.
+`toolmux google drive comments list` reads Drive comments and inline replies
+for an accessible file with the same selected/opened-file boundary. It returns
+plain comment text, author display names, quoted file content, resolved/deleted
+state, replies, and pagination.
 
 `toolmux google drive selected add` and `toolmux google drive pick` create a
 short-lived Picker session in `toolmuxd`, open Google Picker in the browser,

@@ -32,6 +32,8 @@ type fakeGoogleUpstream struct {
 	refreshCalled        bool
 	lastDriveAPIToken    string
 	lastBatchBody        map[string]any
+	lastCommentsFileID   string
+	lastCommentsQuery    url.Values
 	lastCopySourceID     string
 	lastCopyBody         map[string]any
 	lastCopyParentID     string
@@ -75,6 +77,8 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 			upstream.listFiles(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1":
 			upstream.getFile(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1/comments":
+			upstream.listComments(t, w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1/export":
 			upstream.exportFile(t, w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/doc-1/copy":
@@ -404,6 +408,64 @@ func (s *fakeGoogleUpstream) getFile(t *testing.T, w http.ResponseWriter, r *htt
 	})
 }
 
+func (s *fakeGoogleUpstream) listComments(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("fields")) == "" {
+		http.Error(w, "missing fields", http.StatusBadRequest)
+		t.Error("Drive comments.list requires an explicit fields projection")
+		return
+	}
+	s.mu.Lock()
+	s.lastDriveAPIToken = bearerToken(r)
+	s.lastCommentsFileID = "doc-1"
+	s.lastCommentsQuery = cloneURLValues(r.URL.Query())
+	s.mu.Unlock()
+	writeGoogleJSON(w, map[string]any{
+		"nextPageToken": "comments-next",
+		"comments": []map[string]any{
+			{
+				"id":           "comment-1",
+				"createdTime":  "2026-05-20T09:00:00Z",
+				"modifiedTime": "2026-05-20T09:30:00Z",
+				"resolved":     false,
+				"anchor":       "kix.anchor.1",
+				"author": map[string]any{
+					"displayName": "Ada Reviewer",
+				},
+				"htmlContent": "<p>Please tighten this section.</p>",
+				"content":     "Please tighten this section.",
+				"quotedFileContent": map[string]any{
+					"mimeType": "text/plain",
+					"value":    "Original sentence",
+				},
+				"mentionedEmailAddresses": []string{"writer@example.com"},
+				"replies": []map[string]any{{
+					"id":           "reply-1",
+					"createdTime":  "2026-05-20T10:00:00Z",
+					"modifiedTime": "2026-05-20T10:00:00Z",
+					"author": map[string]any{
+						"displayName": "Al Writer",
+					},
+					"content": "Updated in draft.",
+				}},
+			},
+			{
+				"id":           "comment-2",
+				"modifiedTime": "2026-05-21T11:00:00Z",
+				"resolved":     true,
+				"deleted":      true,
+				"author": map[string]any{
+					"displayName": "Deleted Reviewer",
+				},
+				"content": "Resolved note",
+			},
+		},
+	})
+}
+
 func (s *fakeGoogleUpstream) copyFile(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	t.Helper()
 	if !s.authorizeAPI(t, w, r) {
@@ -632,6 +694,33 @@ func (s *fakeGoogleUpstream) assertCopyRequest(t *testing.T, wantSourceID, wantN
 	}
 	if s.lastCopyParentID != wantParentID {
 		t.Fatalf("expected copy parent %q, got %q in %#v", wantParentID, s.lastCopyParentID, s.lastCopyBody)
+	}
+}
+
+func (s *fakeGoogleUpstream) assertDriveCommentsRequest(t *testing.T, wantFileID, wantPageSize, wantPageToken, wantIncludeDeleted, wantStartModifiedTime string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastCommentsFileID != wantFileID {
+		t.Fatalf("expected comments file %q, got %q", wantFileID, s.lastCommentsFileID)
+	}
+	if s.lastCommentsQuery.Get("pageSize") != wantPageSize {
+		t.Fatalf("expected comments pageSize %q, got query %#v", wantPageSize, s.lastCommentsQuery)
+	}
+	if s.lastCommentsQuery.Get("pageToken") != wantPageToken {
+		t.Fatalf("expected comments pageToken %q, got query %#v", wantPageToken, s.lastCommentsQuery)
+	}
+	if s.lastCommentsQuery.Get("includeDeleted") != wantIncludeDeleted {
+		t.Fatalf("expected comments includeDeleted %q, got query %#v", wantIncludeDeleted, s.lastCommentsQuery)
+	}
+	if s.lastCommentsQuery.Get("startModifiedTime") != wantStartModifiedTime {
+		t.Fatalf("expected comments startModifiedTime %q, got query %#v", wantStartModifiedTime, s.lastCommentsQuery)
+	}
+	fields := s.lastCommentsQuery.Get("fields")
+	for _, want := range []string{"nextPageToken", "comments(", "quotedFileContent", "replies(", "author(displayName)"} {
+		if !strings.Contains(fields, want) {
+			t.Fatalf("expected comments fields to contain %q, got %q", want, fields)
+		}
 	}
 }
 
@@ -985,6 +1074,14 @@ func bearerToken(r *http.Request) string {
 		return token
 	}
 	return ""
+}
+
+func cloneURLValues(values url.Values) url.Values {
+	clone := url.Values{}
+	for key, vals := range values {
+		clone[key] = append([]string(nil), vals...)
+	}
+	return clone
 }
 
 func hasScopes(scopes []string, wants ...string) bool {

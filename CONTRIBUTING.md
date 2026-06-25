@@ -368,7 +368,8 @@ against fake upstream servers. Google tests must cover the Docs commands
 `style-ranges`, `insert-table`, `insert-image`, and `batch-update`;
 `toolmux google drive selected add/list/remove`;
 `toolmux google drive files copy/upload/update/trash`;
-`toolmux google drive pick`; and `toolmux google drive available` through fake
+`toolmux google drive comments list`; `toolmux google drive pick`; and
+`toolmux google drive available` through fake
 brokered Picker flows without using live Google. Brokered Picker tests must
 assert `trigger_onepick=true`, a
 single `drive.file` scope, returned `picked_file_ids`, token exchange in

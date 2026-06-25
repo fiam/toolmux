@@ -27,6 +27,10 @@ func requiredString(inv actions.Invocation, name string) (string, error) {
 }
 
 func driveCopySource(inv actions.Invocation) (string, error) {
+	return driveFileSource(inv)
+}
+
+func driveFileSource(inv actions.Invocation) (string, error) {
 	flagValue := strings.TrimSpace(inv.String("file"))
 	argValue := ""
 	if len(inv.Args) > 0 {

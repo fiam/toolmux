@@ -228,7 +228,8 @@ the Docs commands `get`, `find-structure`, `export`, `append`,
 `replace-all-text`, `style-ranges`, `insert-table`, `insert-image`, and
 `batch-update`; `toolmux google drive selected add/list/remove`,
 `toolmux google drive files copy/upload/update/trash`,
-`toolmux google drive pick`, and `toolmux google drive available` through fake
+`toolmux google drive comments list`, `toolmux google drive pick`, and
+`toolmux google drive available` through fake
 brokered Picker flows without using live Google. The brokered Picker flow must
 use Google's
 `trigger_onepick=true` flow, request only `drive.file`, and keep hosted Google

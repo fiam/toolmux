@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const driveCommentsListFields = "nextPageToken,comments(id,createdTime,modifiedTime,resolved,anchor,author(displayName),deleted,htmlContent,content,quotedFileContent(mimeType,value),assigneeEmailAddress,mentionedEmailAddresses,replies(id,createdTime,modifiedTime,action,author(displayName),deleted,htmlContent,content,assigneeEmailAddress,mentionedEmailAddresses))"
+
 func (c Client) ListDriveFiles(ctx context.Context, query string, pageSize int, pageToken string) (DriveFilesResponse, error) {
 	values := url.Values{}
 	if strings.TrimSpace(query) != "" {
@@ -22,6 +24,28 @@ func (c Client) ListDriveFiles(ctx context.Context, query string, pageSize int, 
 	var out DriveFilesResponse
 	if err := c.get(ctx, "/drive/v3/files", values, &out); err != nil {
 		return DriveFilesResponse{}, err
+	}
+	return out, nil
+}
+
+func (c Client) ListDriveComments(ctx context.Context, fileID string, options ListDriveCommentsOptions) (DriveCommentsResponse, error) {
+	values := url.Values{}
+	values.Set("fields", driveCommentsListFields)
+	if options.PageSize > 0 {
+		values.Set("pageSize", strconv.Itoa(options.PageSize))
+	}
+	if strings.TrimSpace(options.PageToken) != "" {
+		values.Set("pageToken", strings.TrimSpace(options.PageToken))
+	}
+	if options.IncludeDeleted {
+		values.Set("includeDeleted", "true")
+	}
+	if strings.TrimSpace(options.StartModifiedTime) != "" {
+		values.Set("startModifiedTime", strings.TrimSpace(options.StartModifiedTime))
+	}
+	var out DriveCommentsResponse
+	if err := c.get(ctx, "/drive/v3/files/"+url.PathEscape(strings.TrimSpace(fileID))+"/comments", values, &out); err != nil {
+		return DriveCommentsResponse{}, err
 	}
 	return out, nil
 }

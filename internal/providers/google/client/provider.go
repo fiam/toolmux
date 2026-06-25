@@ -165,6 +165,20 @@ func GoogleDescriptor() providers.Provider {
 							actions.StringFlag("mime-type", "", "file MIME type filter"),
 							pickerTimeoutFlag(),
 						),
+						actions.Group("comments",
+							actions.Short("List Google Drive file comments"),
+							actions.Children(
+								googleDriveCommentTool("drive.comments.list", "list", "List comments and replies on an accessible Google Drive file", actions.VerbList, actions.EffectRead,
+									actions.Use("list [file-id-or-url]"),
+									actions.MaxArgs(1),
+									actions.StringFlag("file", "", "Google Drive file ID or URL to list comments for"),
+									actions.IntFlag("page-size", 20, "maximum comments to return"),
+									actions.StringFlag("page-token", "", "Drive comments pagination token"),
+									actions.BoolFlag("include-deleted", false, "include deleted comments and replies"),
+									actions.StringFlag("start-modified-time", "", "only return comments modified after this RFC3339 timestamp"),
+								),
+							),
+						),
 						actions.Group("selected",
 							actions.Short("Manage Google Drive files selected for Toolmux"),
 							actions.Children(
@@ -247,6 +261,7 @@ func GoogleDescriptor() providers.Provider {
 			"google.docs.batch_update":     handleDocsBatchUpdate,
 			"google.drive.search":          handleDriveSearch,
 			"google.drive.get":             handleDriveGet,
+			"google.drive.comments.list":   handleDriveCommentsList,
 			"google.drive.pick":            handleDrivePick,
 			"google.drive.selected.add":    handleDriveSelectedAdd,
 			"google.drive.selected.list":   handleDriveSelectedList,
@@ -301,6 +316,17 @@ func googleDriveToolWithEffects(localID, segment, short string, verb actions.Ver
 	return actions.Command(actions.LocalName(localID), segment, base...)
 }
 
+func googleDriveCommentTool(localID, segment, short string, verb actions.Verb, remote actions.Effect, opts ...actions.Option) actions.Spec {
+	base := []actions.Option{
+		actions.Short(short),
+		actions.Description(commentToolDescription(localID, short)),
+		actions.RBAC(actions.ResourceName("comment"), verb, remote),
+		actions.Scopes(defaultDriveScopes...),
+	}
+	base = append(base, opts...)
+	return actions.Command(actions.LocalName(localID), segment, base...)
+}
+
 func googleDocsTool(localID, segment, short string, verb actions.Verb, remote actions.Effect, opts ...actions.Option) actions.Spec {
 	return googleDocsToolWithEffects(localID, segment, short, verb, remote, actions.EffectNone, opts...)
 }
@@ -326,6 +352,13 @@ func driveToolDescription(name, fallback string) string {
 		"update":    "Update a Google Drive file that is already visible to Toolmux using Drive files.update. Pass a raw file ID or Docs/Drive URL, then use --name for metadata, --trashed or --untrash for trash state, and --upload-file, --content-base64, or a second positional path to replace content. Use --target-mime-type with a Google Workspace MIME type to request conversion when replacing content.",
 		"trash":     "Move a Google Drive file that is already visible to Toolmux to trash using Drive files.update with trashed=true. With the default drive.file scope, the file must have been created by or explicitly opened/shared with Toolmux.",
 		"available": "List Google Drive files currently available to Toolmux through the default non-sensitive drive.file scope. This is not a full Drive listing; with drive.file it only returns files created by Toolmux or explicitly opened/shared with the app.",
+	}
+	return firstNonEmpty(descriptions[name], fallback)
+}
+
+func commentToolDescription(name, fallback string) string {
+	descriptions := map[string]string{
+		"drive.comments.list": "List Google Drive comments and replies for a file by file ID, Google Drive URL, or Google Docs URL. Toolmux uses the non-sensitive drive.file scope, so the file must be created by or explicitly opened/shared with the Toolmux Google app. Returns plain comment text, HTML content, quoted file content, author display names, resolved/deleted state, replies, and pagination.",
 	}
 	return firstNonEmpty(descriptions[name], fallback)
 }

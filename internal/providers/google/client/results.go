@@ -85,6 +85,36 @@ func (result driveFilesResult) Table(output.Options) output.Table {
 	}
 }
 
+type driveCommentsResult struct {
+	FileID        string                   `json:"file_id" yaml:"file_id"`
+	Comments      []googleapi.DriveComment `json:"comments,omitempty" yaml:"comments,omitempty"`
+	NextPageToken string                   `json:"next_page_token,omitempty" yaml:"next_page_token,omitempty"`
+}
+
+func (result driveCommentsResult) Table(output.Options) output.Table {
+	rows := make([][]string, 0, len(result.Comments))
+	for _, comment := range result.Comments {
+		rows = append(rows, []string{
+			comment.ID,
+			strconv.FormatBool(comment.Resolved),
+			strconv.FormatBool(comment.Deleted),
+			comment.Author.DisplayName,
+			comment.ModifiedTime,
+			compactPlainText(comment.QuotedFileContent.Value),
+			compactPlainText(firstNonEmpty(comment.Content, comment.HTMLContent)),
+			strconv.Itoa(len(comment.Replies)),
+		})
+	}
+	if result.NextPageToken != "" {
+		rows = append(rows, []string{"next page", "", "", "", "", "", result.NextPageToken, ""})
+	}
+	return output.Table{
+		Headers: []string{"ID", "Resolved", "Deleted", "Author", "Modified", "Quote", "Comment", "Replies"},
+		Rows:    rows,
+		Empty:   "no comments",
+	}
+}
+
 type docsDocumentResult struct {
 	DocumentID string                  `json:"document_id" yaml:"document_id"`
 	Title      string                  `json:"title" yaml:"title"`
@@ -288,6 +318,7 @@ func appendPublishRows(rows [][]string, publish *docsPublishMeta) [][]string {
 
 var _ actions.TableRenderable = driveFileResult{}
 var _ actions.TableRenderable = driveFilesResult{}
+var _ actions.TableRenderable = driveCommentsResult{}
 var _ actions.TableRenderable = driveUploadResult{}
 var _ actions.TableRenderable = docsDocumentResult{}
 var _ actions.TableRenderable = docsBatchUpdateResult{}

@@ -292,6 +292,7 @@ Build or install the CLI, then select a Drive file or Docs document:
 toolmux google drive selected add
 toolmux google drive selected list
 toolmux google drive available
+toolmux google drive comments list <file-id-or-url>
 toolmux google drive files copy <file-id-or-url> \
   --target-mime-type application/vnd.google-apps.document
 toolmux google drive files upload --content-base64 "$DOCX_BASE64" \
@@ -343,6 +344,9 @@ change its trash state, or replace content. `toolmux google drive files trash`
 moves an accessible file to Drive trash. Removing a cached ID is a Toolmux-local
 operation; users should revoke app access from their Google account when they
 need Google to forget the app-level grant.
+`toolmux google drive comments list <file-id-or-url>` reads comments and inline
+replies for an accessible file through the Drive API using the same `drive.file`
+boundary and supports pagination plus deleted-comment filtering flags.
 
 ### Google Docs
 
@@ -406,6 +410,7 @@ toolmux google drive files update --file <file-id-or-url> \
   --target-mime-type application/vnd.google-apps.document \
   --dry-run
 toolmux google drive files trash <file-id-or-url> --dry-run
+toolmux google drive comments list <file-id-or-url>
 toolmux google drive pick
 toolmux google drive available
 ```

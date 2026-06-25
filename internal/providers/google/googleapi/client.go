@@ -243,8 +243,58 @@ type DriveFilesResponse struct {
 	NextPageToken string      `json:"nextPageToken,omitempty"`
 }
 
+type DriveCommentsResponse struct {
+	Comments      []DriveComment `json:"comments,omitempty"`
+	NextPageToken string         `json:"nextPageToken,omitempty"`
+}
+
+type DriveComment struct {
+	ID                      string                 `json:"id,omitempty"`
+	CreatedTime             string                 `json:"createdTime,omitempty"`
+	ModifiedTime            string                 `json:"modifiedTime,omitempty"`
+	Resolved                bool                   `json:"resolved,omitempty"`
+	Anchor                  string                 `json:"anchor,omitempty"`
+	Author                  DriveUser              `json:"author,omitzero"`
+	Deleted                 bool                   `json:"deleted,omitempty"`
+	HTMLContent             string                 `json:"htmlContent,omitempty"`
+	Content                 string                 `json:"content,omitempty"`
+	QuotedFileContent       DriveQuotedFileContent `json:"quotedFileContent,omitzero"`
+	AssigneeEmailAddress    string                 `json:"assigneeEmailAddress,omitempty"`
+	MentionedEmailAddresses []string               `json:"mentionedEmailAddresses,omitempty"`
+	Replies                 []DriveCommentReply    `json:"replies,omitempty"`
+}
+
+type DriveCommentReply struct {
+	ID                      string    `json:"id,omitempty"`
+	CreatedTime             string    `json:"createdTime,omitempty"`
+	ModifiedTime            string    `json:"modifiedTime,omitempty"`
+	Action                  string    `json:"action,omitempty"`
+	Author                  DriveUser `json:"author,omitzero"`
+	Deleted                 bool      `json:"deleted,omitempty"`
+	HTMLContent             string    `json:"htmlContent,omitempty"`
+	Content                 string    `json:"content,omitempty"`
+	AssigneeEmailAddress    string    `json:"assigneeEmailAddress,omitempty"`
+	MentionedEmailAddresses []string  `json:"mentionedEmailAddresses,omitempty"`
+}
+
+type DriveUser struct {
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+type DriveQuotedFileContent struct {
+	MIMEType string `json:"mimeType,omitempty"`
+	Value    string `json:"value,omitempty"`
+}
+
 type DrivePermission struct {
 	ID   string `json:"id,omitempty"`
 	Type string `json:"type,omitempty"`
 	Role string `json:"role,omitempty"`
+}
+
+type ListDriveCommentsOptions struct {
+	PageSize          int
+	PageToken         string
+	IncludeDeleted    bool
+	StartModifiedTime string
 }
