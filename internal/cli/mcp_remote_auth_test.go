@@ -51,7 +51,7 @@ func TestMCPRemoteOAuthCallbackPageSuccess(t *testing.T) {
 	text := string(body)
 	for _, want := range []string{
 		"Notion is connected",
-		"toolmux mcp auth login notion-work",
+		"toolmux auth login notion-work",
 		"OK</span> oauth callback received",
 		"OK</span> MCP server link established",
 		"return to your terminal",

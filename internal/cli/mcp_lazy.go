@@ -72,6 +72,14 @@ type lazyToolEntry struct {
 
 func (server mcpServer) lazyToolUniverse(ctx context.Context) []lazyToolEntry {
 	var entries []lazyToolEntry
+	for _, spec := range server.managementMCPSpecs(ctx) {
+		tool := mcpToolFromSpec(spec)
+		entries = append(entries, lazyToolEntry{
+			name:        tool.Name,
+			description: tool.Description,
+			payload:     tool,
+		})
+	}
 	for _, spec := range server.mcpSpecs(ctx) {
 		tool := mcpToolFromSpec(spec)
 		entries = append(entries, lazyToolEntry{

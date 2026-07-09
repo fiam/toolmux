@@ -17,6 +17,12 @@ import (
 
 func newFakeMCPRemoteOAuthServer(t *testing.T, called *map[string]any) *httptest.Server {
 	t.Helper()
+	server, _ := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, called, true)
+	return server
+}
+
+func newFakeMCPRemoteOAuthServerWithRefreshExpectation(t *testing.T, called *map[string]any, expectRefresh bool) (*httptest.Server, *fakeMCPRemoteOAuthServer) {
+	t.Helper()
 	fixture := &fakeMCPRemoteOAuthServer{
 		t:      t,
 		called: called,
@@ -28,12 +34,14 @@ func newFakeMCPRemoteOAuthServer(t *testing.T, called *map[string]any) *httptest
 	}
 	server := httptest.NewServer(fixture)
 	fixture.serverURL = server.URL
-	t.Cleanup(func() {
-		if fixture.refreshCount == 0 {
-			t.Error("expected OAuth refresh token flow to be exercised")
-		}
-	})
-	return server
+	if expectRefresh {
+		t.Cleanup(func() {
+			if fixture.refreshCount == 0 {
+				t.Error("expected OAuth refresh token flow to be exercised")
+			}
+		})
+	}
+	return server, fixture
 }
 
 type fakeMCPRemoteOAuthCode struct {

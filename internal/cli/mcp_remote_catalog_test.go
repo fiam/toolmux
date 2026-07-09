@@ -265,7 +265,7 @@ func TestStatusTableShowsRemoteMCPToolboxesAndAuth(t *testing.T) {
 	defer upstream.Close()
 
 	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
-	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
+	runRootForRemoteTestWithInput(t, env, "secret-token", "auth", "set", "linear", "--bearer-token-stdin")
 	runRootForRemoteTest(t, env, "mcp", "sync", "linear")
 
 	rendered := runRootForRemoteTest(t, env, "status", "linear")

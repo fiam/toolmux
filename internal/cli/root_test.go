@@ -82,6 +82,81 @@ func registeredGoogleWorkDir(t *testing.T) string {
 	return workDir
 }
 
+func TestRootAuthCommandIsPublicAndMCPAuthIsHidden(t *testing.T) {
+	t.Parallel()
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"auth", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Manage stored auth for toolboxes") || !strings.Contains(out.String(), "refresh") {
+		t.Fatalf("expected root auth help, got %q", out.String())
+	}
+
+	cmd = NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
+	out.Reset()
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"mcp", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\n  auth ") {
+		t.Fatalf("expected mcp auth to be hidden from help, got %q", out.String())
+	}
+}
+
+func TestRootAuthStatusAndRefreshIncludeNativeToolboxes(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"slack": {Type: toolboxTypeInternal, Provider: "slack"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := credentials.NewMemoryStore()
+	if err := store.SaveOAuthTokens(context.Background(), credentials.ConnectionRef{
+		Profile:   "default",
+		Provider:  "slack",
+		AccountID: "slack",
+	}, credentials.OAuthTokens{
+		AccessToken: "xoxb-test",
+		TokenType:   "Bearer",
+		Extra:       map[string]string{"auth_type": "oauth_broker"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewRootCommandWithDeps(Dependencies{Credentials: store, WorkDir: workDir})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"auth", "status", "slack"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "slack") || !strings.Contains(out.String(), "brokered-oauth") {
+		t.Fatalf("expected native auth status, got %q", out.String())
+	}
+
+	cmd = NewRootCommandWithDeps(Dependencies{Credentials: store, WorkDir: workDir})
+	out.Reset()
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"auth", "refresh", "slack"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "provider commands refresh it on use") {
+		t.Fatalf("expected native auth refresh guidance, got %q", out.String())
+	}
+}
+
 func TestUnimplementedProviderCommandsDoNotAppearInHelp(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{

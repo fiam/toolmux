@@ -334,8 +334,8 @@ defaults to 60 seconds and is controlled by the top-level
 `--mcp-tool-call-timeout` flag for both CLI remote commands and
 `toolmux mcp serve`.
 Root MCP management commands such as `mcp ls`, `mcp show`, `mcp sync`,
-`mcp auth`, `mcp defaults`, and `mcp schema` are CLI maintenance surfaces and
-do not need policy metadata because they are not tools.
+`mcp defaults`, and `mcp schema` are CLI maintenance surfaces and do not need
+policy metadata because they are not tools.
 Command-backed MCP servers use the `stdio` transport and are added with
 `toolmux add <command> [args...]` when the input is not a URL, catalog entry,
 or native toolbox. Use `--name` to choose the registered namespace/account,
@@ -347,15 +347,28 @@ not use Toolmux-managed MCP OAuth or bearer tokens, and must run policy before
 the configured process is started. Treat stdio tool calls as both remote-write
 and local-write for policy because the configured command can touch local files,
 caches, containers, browsers, or network services.
-`toolmux mcp auth login` must use MCP protected-resource metadata discovery,
-authorization-server metadata, PKCE, the OAuth `resource` parameter, and dynamic
-client registration when advertised; keep `--client-id` available for servers
-without registration. Top-level `toolmux add` registers native toolboxes,
+Use root `toolmux auth` commands for stored toolbox auth across native and
+remote MCP toolboxes. `toolmux auth login` must use MCP protected-resource
+metadata discovery, authorization-server metadata, PKCE, the OAuth `resource`
+parameter, and dynamic client registration when advertised for remote MCP
+OAuth; keep `--client-id` available for servers without registration. Top-level
+`toolmux add` registers native toolboxes,
 remote MCP toolboxes from a built-in catalog name or MCP URL, and syncs remote
 tools by default. `--name` is the only user-facing account selector. When the
 first remote sync returns an auth-required response and no auth is stored, it
 must start MCP OAuth, store auth, retry sync, and only then write the server
 config.
+`toolmux auth refresh [name...]` probes stored auth and refreshes OAuth tokens
+that are expired locally or rejected by the remote server. With no names, it
+should operate on all registered toolboxes with stored auth. If a remote MCP
+OAuth token is missing refresh metadata, the interactive CLI refresh may re-run
+OAuth login for that toolbox. It must not print token material. Non-interactive
+repairs such as `doctor --fix` and `toolmux.auth_refresh` must not initiate
+OAuth login, prompt, open browsers, or create new auth. `toolmux mcp sync`,
+top-level remote MCP commands, and proxied remote MCP calls through
+`toolmux mcp serve` should refresh stored OAuth preventively when local expiry
+metadata shows the token is due for refresh, then retry once when the remote
+server returns `401`.
 Failed or cancelled OAuth must not leave a registered server behind. Keep
 `--no-sync` available for registration without auth or sync. Custom URL adds
 must use `toolmux add <url>` with `--name` when the derived name is not desired
@@ -363,8 +376,8 @@ or would collide. Top-level `toolmux remove` and `rm` remove registered
 toolboxes and must delete stored auth for removed remote MCP server names in
 the active Toolmux profile. `toolmux add`, `toolmux mcp sync`, and
 remote tool commands must support `-v`/`--verbose` redacted HTTP tracing for
-debugging. `toolmux mcp auth remove` must still delete matching stored auth
-after the server entry has already been removed.
+debugging. Hidden `toolmux mcp auth remove` must still delete matching stored
+auth after the server entry has already been removed.
 Stale remote caches should refresh
 opportunistically after about 24 hours without making existing cached
 commands unusable when a refresh attempt fails. `toolmux list` must list
@@ -404,6 +417,9 @@ not need policy metadata.
 Diagnostics are owned by the root `doctor` command. Do not add
 provider-specific `doctor` subcommands. `doctor` should run active core and
 remote MCP diagnostics with actionable remediation as CLI-only management.
+`doctor --fix` may perform safe non-interactive repairs such as remote MCP OAuth
+refresh and stale cache sync, but must not start OAuth login, open browsers,
+prompt, or create new auth.
 
 When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
@@ -420,7 +436,7 @@ explicit browser-session setup through `toolmux add slack --workspace` or
 `--from-browser`, which must validate with `auth.test` before storing
 credentials. If Toolmux needs to support a local or self-hosted MCP server that
 accepts tokens, require explicit user-supplied credentials through the OS
-credential store, `mcp auth set`, OAuth, or the server's own documented setup
+credential store, `toolmux auth set`, OAuth, or the server's own documented setup
 flow.
 
 ## Hosted Broker
@@ -476,8 +492,9 @@ actions and synthetic remote MCP tool commands. For provider commands, add
 data-driven action specs with both `remote_effect` and `local_effect`; do not
 register placeholder specs for providers that are not implemented yet.
 
-Remote MCP management commands do not need policy metadata. Synthetic remote
-MCP tool commands do need policy metadata. Imported remote MCP server names
+Remote MCP CLI management commands do not need policy metadata. Synthetic remote
+MCP tool commands and agent-callable Toolmux management tools such as
+`toolmux.auth_refresh` do need policy metadata. Imported remote MCP server names
 must not collide with native top-level commands or aliases. If a newly added
 native command collides with an existing imported MCP server, startup must fail
 with an actionable error that prints `toolmux mcp rename <old-name> <new-name>`.

@@ -80,7 +80,7 @@ scraping, or provider-policy bypasses to make an MCP server easier to use. The
 only current exception is Slack's explicit browser-session setup through
 `toolmux add slack --workspace` or `--from-browser`, which must validate with
 `auth.test` before storing credentials. For local or self-hosted MCP servers,
-prefer OAuth, documented provider tokens, or explicit `toolmux mcp auth set`
+prefer OAuth, documented provider tokens, or explicit `toolmux auth set`
 flows that store credentials in the OS credential store.
 
 MCP support is served by the CLI over stdio. Use `toolmux mcp serve` for
@@ -135,12 +135,24 @@ known. Native toolbox help and MCP `tools/list` output should include only
 native providers registered in the merged Toolmux config. Stdio MCP
 toolboxes do not use Toolmux-managed MCP OAuth or bearer-token
 auth; configure auth through the command environment or command arguments. Use
-`toolmux mcp auth login` for MCP OAuth with PKCE and dynamic client
-registration, and `toolmux mcp auth set` for externally issued bearer tokens.
+root `toolmux auth` commands for stored toolbox auth across native and remote
+MCP toolboxes. `toolmux auth login` must use MCP protected-resource metadata,
+authorization-server metadata, PKCE, dynamic client registration, and the OAuth
+`resource` parameter for remote MCP OAuth; `toolmux auth set` stores externally
+issued bearer tokens for remote MCP toolboxes or provider-specific explicit
+native auth. Use `toolmux auth refresh [name...]` to probe stored auth and
+refresh OAuth tokens that are expired locally or rejected by the remote server.
+With no names, the command should operate on all registered toolboxes that have
+stored auth. If a remote MCP OAuth token is missing refresh metadata, interactive
+`toolmux auth refresh` may re-run OAuth login for that toolbox. It must not
+print token material. `toolmux mcp sync`, top-level remote MCP commands, and
+proxied remote MCP calls through `toolmux mcp serve` should refresh stored OAuth
+preventively when local expiry metadata shows the token is due for refresh, then
+retry once when the remote server returns `401`.
 `toolmux remove` and its `rm` alias should accept one or more toolbox names.
 Removing a remote MCP toolbox should also delete stored auth for that server
 name in the active Toolmux profile.
-`toolmux mcp auth remove` should still delete matching stored auth when the
+Hidden `toolmux mcp auth remove` should still delete matching stored auth when the
 server entry has already been removed.
 `toolmux mcp ls` should use the shared table renderer for human output,
 display only `project` or `global` scope labels, support `mcp ls <name>` for
@@ -433,7 +445,9 @@ Use these commands while developing:
 Provider command metadata is data-driven. Root `status [toolbox...]` reports
 registered toolbox state and auth, while root `doctor` runs core Toolmux and
 remote MCP diagnostics. Do not add provider-specific status or doctor
-subcommands.
+subcommands. `doctor --fix` may perform safe non-interactive repairs such as
+remote MCP OAuth refresh and stale cache sync, but must not start OAuth login,
+open browsers, prompt, or create new auth.
 
 Provider command paths, args, flags, group help, aliases, and leaf help belong
 in a provider-owned `actions.Spec` tree. Use one spec type for both groups and

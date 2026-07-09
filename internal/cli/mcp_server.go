@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"sort"
 	"strconv"
@@ -172,6 +173,9 @@ func (server mcpServer) toolsListResult(ctx context.Context) map[string]any {
 	}
 	specs := server.mcpSpecs(ctx)
 	tools := make([]any, 0, len(specs))
+	for _, spec := range server.managementMCPSpecs(ctx) {
+		tools = append(tools, mcpToolFromSpec(spec))
+	}
 	for _, spec := range specs {
 		tools = append(tools, mcpToolFromSpec(spec))
 	}
@@ -317,6 +321,9 @@ func (server mcpServer) callTool(ctx context.Context, params mcpCallToolParams) 
 	if server.lazy && name == lazySearchToolName {
 		return server.searchTools(ctx, params.Arguments)
 	}
+	if spec, ok := server.lookupMCPManagementTool(ctx, name); ok {
+		return server.callManagementTool(ctx, spec, params.Arguments)
+	}
 	spec, ok := server.lookupMCPTool(ctx, name)
 	if !ok {
 		if ref, ok := server.lookupRemoteMCPTool(ctx, name); ok {
@@ -403,6 +410,14 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 	}
 	started := time.Now()
 	result, err := callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, token, mcpRemoteToolCallTimeout(server.opts), nil)
+	if err != nil && ref.Entry.Server.Transport != mcpRemoteTransportStdio && mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
+		refreshedToken, refreshed, refreshErr := refreshMCPRemoteAccessTokenAfterUnauthorized(ctx, server.opts, ref.Entry)
+		if refreshErr != nil {
+			err = fmt.Errorf("%s; OAuth refresh failed for MCP server %s: %w; call toolmux.auth_refresh or run `toolmux auth login %s` if the refresh token is no longer valid", err.Error(), ref.Entry.Name, refreshErr, ref.Entry.Name)
+		} else if refreshed {
+			result, err = callMCPRemoteTool(ctx, server.opts.httpClient, ref.Entry, ref.Tool, arguments, refreshedToken, mcpRemoteToolCallTimeout(server.opts), nil)
+		}
+	}
 	server.recordToolCall(ctx, spec, arguments, decision, err, time.Since(started))
 	if err != nil {
 		return mcpErrorToolResult(err), nil

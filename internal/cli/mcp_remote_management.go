@@ -3,6 +3,7 @@ package cli
 import (
 	_ "embed"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -331,11 +332,13 @@ func planMCPRemoteRemovals(names []string, scope mcpProfileScopeOptions) ([]mcpR
 
 func mcpRemoteAuthCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "auth",
-		Short: "Manage stored auth for imported remote MCP servers",
+		Use:    "auth",
+		Short:  "Manage stored auth for imported remote MCP servers",
+		Hidden: true,
 	}
 	cmd.AddCommand(mcpRemoteAuthLoginCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthSetCommand(opts))
+	cmd.AddCommand(mcpRemoteAuthRefreshCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthRemoveCommand(opts))
 	cmd.AddCommand(mcpRemoteAuthStatusCommand(opts))
 	return cmd
@@ -385,6 +388,45 @@ func mcpRemoteAuthSetCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&bearerToken, "bearer-token", "", "bearer token to store")
 	cmd.Flags().StringVar(&bearerTokenEnv, "bearer-token-env", "", "environment variable containing the bearer token")
 	cmd.Flags().BoolVar(&bearerTokenStdin, "bearer-token-stdin", false, "read bearer token from stdin")
+	return cmd
+}
+
+func mcpRemoteAuthRefreshCommand(opts *options) *cobra.Command {
+	var noProbe bool
+	var verboseHTTP bool
+	login := mcpRemoteAuthLoginOptions{Timeout: 2 * time.Minute}
+	cmd := &cobra.Command{
+		Use:   "refresh [name...]",
+		Short: "Probe and refresh stored auth for remote MCP servers",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := opts.credentials()
+			if err != nil {
+				return err
+			}
+			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
+			report, err := refreshMCPRemoteAuth(commandContext(cmd), opts, store, args, mcpRemoteAuthRefreshOptions{
+				Probe: !noProbe,
+				Trace: trace,
+				ReauthWhenMissing: func(entry mcpRemoteServerEntry) error {
+					return runMCPRemoteAuthLogin(cmd, opts, entry, login, "MCP server")
+				},
+			})
+			if err != nil {
+				return err
+			}
+			return writeActionResult(cmd, opts, actions.Context{}, report)
+		},
+	}
+	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "refresh only locally expired OAuth tokens without probing remote MCP servers")
+	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
+	cmd.Flags().BoolVar(&login.NoBrowser, "no-browser", false, "print OAuth authorization URLs without opening a browser when re-auth is needed")
+	cmd.Flags().DurationVar(&login.Timeout, "timeout", 2*time.Minute, "OAuth callback wait timeout when re-auth is needed")
+	cmd.Flags().StringVar(&login.ClientID, "client-id", "", "OAuth client ID to use when re-auth is needed")
+	cmd.Flags().StringVar(&login.ClientSecret, "client-secret", "", "OAuth client secret to use when re-auth is needed")
+	cmd.Flags().StringArrayVar(&login.Scopes, "scope", nil, "OAuth scope to request when re-auth is needed; repeatable and comma-separated values are accepted")
+	cmd.Flags().StringVar(&login.AuthServer, "auth-server", "", "authorization server issuer to use when re-auth is needed")
+	cmd.Flags().IntVar(&login.RedirectPort, "redirect-port", 0, "loopback redirect port when re-auth is needed; 0 chooses a free port")
 	return cmd
 }
 

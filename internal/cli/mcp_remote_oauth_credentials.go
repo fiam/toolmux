@@ -23,11 +23,8 @@ func loadMCPRemoteAccessToken(ctx context.Context, opts *options, entry mcpRemot
 		return "", err
 	}
 	if mcpRemoteOAuthTokenNeedsRefresh(tokens, time.Now().UTC()) {
-		refreshed, err := refreshMCPRemoteOAuthToken(ctx, opts.httpClient, tokens)
+		refreshed, err := refreshAndSaveMCPRemoteOAuthToken(ctx, opts, store, ref, tokens)
 		if err != nil {
-			return "", err
-		}
-		if err := store.SaveOAuthTokens(ctx, ref, refreshed); err != nil {
 			return "", err
 		}
 		tokens = refreshed

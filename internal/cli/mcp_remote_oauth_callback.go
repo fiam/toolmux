@@ -435,12 +435,12 @@ var mcpRemoteOAuthCallbackTemplate = template.Must(template.New("mcp-remote-oaut
         {{end}}
       </div>
       <div>
-        <p class="eyebrow">toolmux mcp auth</p>
+        <p class="eyebrow">toolmux auth</p>
         <h1>{{.Page.DisplayName}} {{if .Success}}is connected{{else}}authorization failed{{end}}</h1>
       </div>
     </header>
     <section class="terminal" aria-live="polite">
-      <div><span class="prompt">$</span> toolmux mcp auth login {{.Page.ServerName}}</div>
+      <div><span class="prompt">$</span> toolmux auth login {{.Page.ServerName}}</div>
       {{if .Success}}
       <div><span class="ok">OK</span> oauth callback received</div>
       <div><span class="ok">OK</span> MCP server link established</div>

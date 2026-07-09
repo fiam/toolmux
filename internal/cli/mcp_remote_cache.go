@@ -18,13 +18,28 @@ func syncMCPRemoteCacheExplicit(cmd *cobra.Command, opts *options, entry mcpRemo
 	token := ""
 	if entry.Server.Transport != mcpRemoteTransportStdio {
 		var err error
-		token, err = loadMCPRemoteAccessToken(commandContext(cmd), opts, entry)
+		token, err = loadMCPRemoteAccessTokenForCommand(cmd, opts, entry)
 		if err != nil {
 			return mcpRemoteCache{}, false, err
 		}
 	}
 	cache, err := syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, token, trace)
 	if err != nil {
+		if entry.Server.Transport != mcpRemoteTransportStdio && mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
+			refreshedToken, refreshed, refreshErr := refreshMCPRemoteAccessTokenAfterUnauthorizedForCommand(cmd, opts, entry)
+			if refreshErr != nil {
+				return mcpRemoteCache{}, strings.TrimSpace(token) != "", fmt.Errorf("%s; OAuth refresh failed for MCP server %s: %w; run `toolmux auth login %s` if the refresh token is no longer valid", err.Error(), entry.Name, refreshErr, entry.Name)
+			}
+			if refreshed {
+				cache, err = syncMCPRemoteServer(commandContext(cmd), opts.httpClient, entry, refreshedToken, trace)
+				if err == nil {
+					if err := writeMCPRemoteCache(opts.mcpCacheDir, entry.Name, cache); err != nil {
+						return mcpRemoteCache{}, false, err
+					}
+					return cache, true, nil
+				}
+			}
+		}
 		return mcpRemoteCache{}, false, err
 	}
 	if err := writeMCPRemoteCache(opts.mcpCacheDir, entry.Name, cache); err != nil {

@@ -320,7 +320,7 @@ Add from the built-in catalog:
 ```bash
 toolmux list
 toolmux add notion
-toolmux mcp auth login notion
+toolmux auth login notion
 toolmux mcp sync notion
 toolmux notion
 ```
@@ -329,10 +329,32 @@ Register a custom MCP endpoint:
 
 ```bash
 toolmux add https://mcp.linear.app/mcp --name linear-work --no-sync
-toolmux mcp auth login linear-work
+toolmux auth login linear-work
 toolmux mcp sync linear-work
 toolmux linear-work
 ```
+
+Toolmux checks stored remote MCP OAuth expiry metadata before sync and tool
+calls. When refresh metadata is available, it refreshes locally expired tokens
+before contacting the remote server. You can also refresh stored auth manually:
+
+```bash
+toolmux auth refresh linear-work
+toolmux auth refresh
+```
+
+Passing names refreshes only those toolboxes. With no names, Toolmux probes all
+registered remote HTTP MCP toolboxes that have stored auth and refreshes OAuth
+tokens as needed. If a stored OAuth token cannot be refreshed because it is
+missing refresh metadata, `toolmux auth refresh` falls back to the OAuth login
+flow for that toolbox. `toolmux mcp sync <name>`, remote toolbox commands, and
+proxied MCP tool calls also retry once after an OAuth refresh when the remote
+server returns `401`.
+
+Agents connected through `toolmux mcp serve` can call `toolmux.auth_refresh` to
+perform the same non-interactive repair. `toolmux doctor --fix` also runs safe
+non-interactive remote MCP auth refreshes and repairs missing or stale MCP tool
+caches before reporting diagnostics.
 
 Register a command-backed MCP server over stdio:
 

@@ -123,9 +123,9 @@ func StatusBadge(opts Options, status string) string {
 	normalized := strings.ToLower(strings.TrimSpace(status))
 	tone := ToneInfo
 	switch normalized {
-	case "ok", "active", "allowed", "complete", "connected", "synced":
+	case "ok", "active", "allowed", "complete", "connected", "synced", "valid", "refreshed":
 		tone = ToneSuccess
-	case "warn", "warning", "pending", "disconnected", "needs_auth", "not_synced", "trashed", "alias_required", "unavailable":
+	case "warn", "warning", "pending", "disconnected", "needs_auth", "not_synced", "trashed", "alias_required", "unavailable", "skipped":
 		tone = ToneWarning
 	case "fail", "failed", "error", "denied":
 		tone = ToneDanger

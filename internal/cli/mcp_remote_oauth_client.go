@@ -106,12 +106,12 @@ func refreshMCPRemoteOAuthToken(ctx context.Context, client *http.Client, tokens
 	if client == nil {
 		client = http.DefaultClient
 	}
+	if mcpRemoteOAuthTokenMissingRefreshMetadata(tokens) {
+		return credentials.OAuthTokens{}, fmt.Errorf("stored MCP OAuth token is missing refresh metadata")
+	}
 	endpoint := strings.TrimSpace(tokens.Extra["token_endpoint"])
 	clientID := strings.TrimSpace(tokens.Extra["client_id"])
 	refreshToken := strings.TrimSpace(tokens.RefreshToken)
-	if endpoint == "" || clientID == "" || refreshToken == "" {
-		return credentials.OAuthTokens{}, fmt.Errorf("stored MCP OAuth token is missing refresh metadata")
-	}
 	values := url.Values{}
 	values.Set("grant_type", "refresh_token")
 	values.Set("refresh_token", refreshToken)
@@ -132,6 +132,12 @@ func refreshMCPRemoteOAuthToken(ctx context.Context, client *http.Client, tokens
 	}
 	refreshed.Extra = cloneMCPRemoteStringMap(tokens.Extra)
 	return refreshed, nil
+}
+
+func mcpRemoteOAuthTokenMissingRefreshMetadata(tokens credentials.OAuthTokens) bool {
+	return strings.TrimSpace(tokens.Extra["token_endpoint"]) == "" ||
+		strings.TrimSpace(tokens.Extra["client_id"]) == "" ||
+		strings.TrimSpace(tokens.RefreshToken) == ""
 }
 
 func postMCPRemoteOAuthToken(ctx context.Context, client *http.Client, endpoint string, values url.Values) (mcpRemoteOAuthTokenResponse, error) {

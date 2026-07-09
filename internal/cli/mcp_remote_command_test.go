@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -603,14 +604,21 @@ func TestMCPRemoteServerExposesCachedToolsOverMCPServe(t *testing.T) {
 	if err := json.Unmarshal(response.Result, &list); err != nil {
 		t.Fatal(err)
 	}
-	var found bool
+	var foundRemote bool
+	var foundRefresh bool
 	for _, tool := range list.Tools {
 		if tool.Name == "linear.create_issue" {
-			found = true
+			foundRemote = true
+		}
+		if tool.Name == "toolmux.auth_refresh" {
+			foundRefresh = true
 		}
 	}
-	if !found {
+	if !foundRemote {
 		t.Fatalf("expected linear.create_issue in tools/list, got %+v", list.Tools)
+	}
+	if !foundRefresh {
+		t.Fatalf("expected toolmux.auth_refresh in tools/list, got %+v", list.Tools)
 	}
 
 	callOutput := runRootForRemoteTestWithInput(t, env,
@@ -623,6 +631,94 @@ func TestMCPRemoteServerExposesCachedToolsOverMCPServe(t *testing.T) {
 	}
 }
 
+func TestMCPServeAuthRefreshToolRefreshesStoredOAuth(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteOAuthServer(t, &called)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTestWithInput(t, env,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"toolmux.auth_refresh","arguments":{"toolbox":"linear"}}}`,
+		"mcp", "serve",
+	)
+	result := decodeMCPCallResult(t, output)
+	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "refreshed") {
+		t.Fatalf("unexpected auth refresh tool result: %+v", result)
+	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured content map, got %#v", result.StructuredContent)
+	}
+	items, ok := structured["results"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one structured auth refresh result, got %#v", structured)
+	}
+	tokens, err = env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "oauth-access-2" {
+		t.Fatalf("expected refreshed access token to be stored, got %q", tokens.AccessToken)
+	}
+}
+
+func TestMCPServeRemoteToolRefreshesOAuthAfterUnauthorized(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream, fixture := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, &called, true)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	fixture.accessTokens["oauth-access-1"] = false
+
+	output := runRootForRemoteTestWithInput(t, env,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linear.create_issue","arguments":{"title":"Retried"}}}`,
+		"mcp", "serve",
+	)
+	result := decodeMCPCallResult(t, output)
+	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "Retried") {
+		t.Fatalf("unexpected remote MCP retry result: %+v", result)
+	}
+	if called["title"] != "Retried" {
+		t.Fatalf("unexpected remote arguments after retry: %#v", called)
+	}
+}
+
+func TestMCPServeAuthRefreshToolHonorsReadOnlyPolicy(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	output := runRootForRemoteTestWithInput(t, env,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"toolmux.auth_refresh","arguments":{}}}`,
+		"--read-only", "mcp", "serve",
+	)
+	result := decodeMCPCallResult(t, output)
+	if !result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "read-only mode blocks command toolmux.auth_refresh") {
+		t.Fatalf("expected read-only denial, got %+v", result)
+	}
+}
+
+func TestMCPServeLazySearchFindsAuthRefreshTool(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	output := runRootForRemoteTestWithInput(t, env,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_tools","arguments":{"query":"auth refresh"}}}`,
+		"mcp", "serve", "--lazy",
+	)
+	result := decodeMCPCallResult(t, output)
+	if result.IsError || len(result.Content) != 1 || !strings.Contains(result.Content[0].Text, "toolmux.auth_refresh") {
+		t.Fatalf("expected lazy search to find auth refresh tool, got %+v", result)
+	}
+}
+
 func TestMCPRemoteServerUsesStoredBearerToken(t *testing.T) {
 	env := newMCPRemoteTestEnv(t)
 	var called map[string]any
@@ -630,9 +726,9 @@ func TestMCPRemoteServerUsesStoredBearerToken(t *testing.T) {
 	defer upstream.Close()
 
 	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
-	runRootForRemoteTestWithInput(t, env, "secret-token", "mcp", "auth", "set", "linear", "--bearer-token-stdin")
-	authStatus := runRootForRemoteTest(t, env, "mcp", "auth", "status", "linear")
-	if !strings.Contains(authStatus, "stored bearer token") {
+	runRootForRemoteTestWithInput(t, env, "secret-token", "auth", "set", "linear", "--bearer-token-stdin")
+	authStatus := runRootForRemoteTest(t, env, "auth", "status", "linear")
+	if !strings.Contains(authStatus, "bearer auth stored") {
 		t.Fatalf("expected stored auth status, got %q", authStatus)
 	}
 	runRootForRemoteTest(t, env, "mcp", "sync", "linear")

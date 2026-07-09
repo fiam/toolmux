@@ -17,7 +17,7 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	upstream := newFakeMCPRemoteOAuthServer(t, &called)
 	defer upstream.Close()
 
-	_, policyErr := runRootForRemoteTestError(t, env, "policy", "check", "--command", "mcp auth login linear")
+	_, policyErr := runRootForRemoteTestError(t, env, "policy", "check", "--command", "auth login linear")
 	if policyErr == nil || !strings.Contains(policyErr.Error(), "no command spec found") {
 		t.Fatalf("expected OAuth auth command outside policy, got %v", policyErr)
 	}
@@ -32,8 +32,8 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 			t.Fatalf("expected OAuth add output to contain %q, got:\n%s", want, addOutput)
 		}
 	}
-	authStatus := runRootForRemoteTest(t, env, "mcp", "auth", "status", "linear")
-	if !strings.Contains(authStatus, "stored OAuth token") {
+	authStatus := runRootForRemoteTest(t, env, "auth", "status", "linear")
+	if !strings.Contains(authStatus, "OAuth auth stored") {
 		t.Fatalf("expected stored OAuth status, got %q", authStatus)
 	}
 	config, err := readToolmuxConfigFile(env.Config)
@@ -67,6 +67,192 @@ func TestMCPRemoteServerOAuthLoginAndRefresh(t *testing.T) {
 	}
 	if called["title"] != "Refreshed" {
 		t.Fatalf("unexpected remote arguments: %#v", called)
+	}
+}
+
+func TestMCPRemoteAuthRefreshCommandRefreshesExpiredOAuth(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteOAuthServer(t, &called)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTest(t, env, "auth", "refresh", "linear")
+	for _, want := range []string{"linear", "refreshed", "OAuth token refreshed and validated"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected refresh output to contain %q, got:\n%s", want, output)
+		}
+	}
+	tokens, err = env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "oauth-access-2" {
+		t.Fatalf("expected refreshed access token to be stored, got %q", tokens.AccessToken)
+	}
+}
+
+func TestMCPRemoteAuthRefreshReauthsWhenRefreshMetadataMissing(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream, fixture := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, &called, false)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	tokens.RefreshToken = ""
+	delete(tokens.Extra, "token_endpoint")
+	delete(tokens.Extra, "client_id")
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteOAuthTest(t, env, upstream.Client(), "auth", "refresh", "linear")
+	if !strings.Contains(output, "OAuth re-authorized because stored OAuth token is missing refresh metadata") {
+		t.Fatalf("expected refresh to re-authorize missing metadata, got:\n%s", output)
+	}
+	if fixture.refreshCount != 0 {
+		t.Fatalf("expected re-auth without refresh-token flow, got %d refreshes", fixture.refreshCount)
+	}
+	tokens, err = env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.RefreshToken == "" || tokens.Extra["token_endpoint"] == "" || tokens.Extra["client_id"] == "" {
+		t.Fatalf("expected re-auth to store refresh metadata, got %#v", tokens)
+	}
+}
+
+func TestMCPRemoteCommandDoesNotImplicitlyReauthWithoutInteractiveTerminal(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream, fixture := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, &called, false)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	tokens.RefreshToken = ""
+	delete(tokens.Extra, "token_endpoint")
+	delete(tokens.Extra, "client_id")
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := runRootForRemoteTestError(t, env, "linear", "create_issue", "--title", "Reauthed")
+	if err == nil {
+		t.Fatalf("expected non-interactive command to require explicit auth login, got output:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "stored OAuth token for toolbox linear is expired and missing refresh metadata") {
+		t.Fatalf("expected missing metadata error, got %v", err)
+	}
+	if fixture.refreshCount != 0 {
+		t.Fatalf("expected no refresh-token flow, got %d refreshes", fixture.refreshCount)
+	}
+	if called != nil {
+		t.Fatalf("expected remote tool not to be called, got %#v", called)
+	}
+}
+
+func TestMCPRemoteSyncRefreshesStoredOAuthAfterUnauthorized(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream, fixture := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, &called, true)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	fixture.accessTokens["oauth-access-1"] = false
+
+	output := runRootForRemoteTest(t, env, "mcp", "sync", "linear")
+	if !strings.Contains(output, "synced MCP server linear: 1 tools") {
+		t.Fatalf("expected sync to refresh OAuth and succeed, got:\n%s", output)
+	}
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), mcpRemoteCredentialRef(&options{profile: "default"}, "linear"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "oauth-access-2" {
+		t.Fatalf("expected refreshed access token to be stored, got %q", tokens.AccessToken)
+	}
+}
+
+func TestDoctorFixRefreshesOAuthAndRepairsMissingCache(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream := newFakeMCPRemoteOAuthServer(t, &called)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeMCPRemoteCache(env.CacheDir, "linear"); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTest(t, env, "doctor", "--fix")
+	for _, want := range []string{"linear", "toolbox-cache", "1 cached tools", "OAuth auth stored"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected doctor --fix output to contain %q, got:\n%s", want, output)
+		}
+	}
+	tokens, err = env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "oauth-access-2" {
+		t.Fatalf("expected doctor --fix to store refreshed access token, got %q", tokens.AccessToken)
+	}
+}
+
+func TestDoctorDoesNotRefreshOAuthWithoutFix(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	var called map[string]any
+	upstream, fixture := newFakeMCPRemoteOAuthServerWithRefreshExpectation(t, &called, false)
+	defer upstream.Close()
+
+	runRootForRemoteOAuthTest(t, env, upstream.Client(), "add", upstream.URL+"/mcp", "--name", "linear", "--global")
+	ref := mcpRemoteCredentialRef(&options{profile: "default"}, "linear")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens.ExpiresAt = time.Now().Add(-time.Hour)
+	if err := env.Store.SaveOAuthTokens(context.Background(), ref, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTest(t, env, "doctor")
+	if !strings.Contains(output, "OAuth auth stored") {
+		t.Fatalf("expected doctor output to show stored OAuth, got:\n%s", output)
+	}
+	if fixture.refreshCount != 0 {
+		t.Fatalf("expected doctor without --fix not to refresh OAuth, got %d refreshes", fixture.refreshCount)
 	}
 }
 

@@ -43,6 +43,7 @@ func writeCatalog(cmd *cobra.Command, opts *options) error {
 
 func allPolicyCommandSpecs(opts *options) []policy.CommandSpec {
 	specs := nativePolicyCommandSpecs(opts)
+	specs = append(specs, mcpRemoteAuthRefreshSpecs()...)
 	specs = append(specs, cachedMCPRemoteCommandSpecs(opts)...)
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
@@ -85,15 +86,30 @@ func decisionFor(cmd *cobra.Command, opts *options, spec policy.CommandSpec, arg
 
 func specForCommand(opts *options, commandLine string) (policy.CommandSpec, bool) {
 	parts := strings.Fields(commandLine)
+	for _, spec := range mcpRemoteAuthRefreshSpecs() {
+		if commandMatchesPolicySpec(parts, spec) {
+			return spec, true
+		}
+	}
 	if spec, ok := mcpRemoteSpecForCommandParts(opts, parts); ok {
 		return spec, true
 	}
 	for _, spec := range nativePolicyCommandSpecs(opts) {
-		if len(parts) >= len(spec.Path) && equalStrings(parts[:len(spec.Path)], spec.Path) {
+		if commandMatchesPolicySpec(parts, spec) {
 			return spec, true
 		}
 	}
 	return policy.CommandSpec{}, false
+}
+
+func commandMatchesPolicySpec(parts []string, spec policy.CommandSpec) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	if len(parts) == 1 && parts[0] == spec.ID {
+		return true
+	}
+	return len(parts) >= len(spec.Path) && equalStrings(parts[:len(spec.Path)], spec.Path)
 }
 
 func nativePolicyCommandSpecs(opts *options) []policy.CommandSpec {

@@ -19,7 +19,8 @@ import (
 type providerDiagnostic = actions.Diagnostic
 
 func doctorCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var fix bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check Toolmux setup",
 		Args:  cobra.NoArgs,
@@ -38,6 +39,14 @@ func doctorCommand(opts *options) *cobra.Command {
 				})
 				return writeDiagnostics(cmd, opts, diagnostics)
 			}
+			var fixDiagnostics []providerDiagnostic
+			if fix {
+				progress := newConnectUI(cmd, opts).Start("Repairing remote MCP toolboxes")
+				fixDiagnostics = mcpRemoteDoctorFix(commandContext(cmd), cmd, opts, store, func(message string) {
+					progress.Update(message)
+				})
+				progress.Stop()
+			}
 			// A single cycling spinner narrates each check (credential store and
 			// per-toolbox cache/auth lookups can stall on the OS keyring). It is
 			// cleared before the canonical diagnostics table is written, so the
@@ -46,10 +55,13 @@ func doctorCommand(opts *options) *cobra.Command {
 			report := func(message string) { progress.Update(message) }
 			diagnostics = append(diagnostics, credentialStoreDiagnostic(cmd.Context(), store))
 			diagnostics = append(diagnostics, mcpRemoteDoctorDiagnostics(cmd.Context(), opts, store, report)...)
+			diagnostics = append(diagnostics, fixDiagnostics...)
 			progress.Stop()
 			return writeDiagnostics(cmd, opts, diagnostics)
 		},
 	}
+	cmd.Flags().BoolVar(&fix, "fix", false, "run safe non-interactive repairs before reporting diagnostics")
+	return cmd
 }
 
 func diagnosticsHaveFailure(diagnostics []providerDiagnostic) bool {
@@ -185,7 +197,7 @@ func mcpRemoteAuthDiagnostic(ctx context.Context, opts *options, store credentia
 		if entry.Server.AuthRequired != nil && *entry.Server.AuthRequired {
 			diagnostic.Status = "warn"
 			diagnostic.Message = "auth required but not stored"
-			diagnostic.Remediation = "Run `toolmux mcp auth login " + entry.Name + "` or `toolmux mcp auth set " + entry.Name + "`."
+			diagnostic.Remediation = "Run `toolmux auth login " + entry.Name + "` or `toolmux auth set " + entry.Name + "`."
 			return diagnostic
 		}
 		if entry.Server.AuthRequired == nil {
@@ -201,6 +213,81 @@ func mcpRemoteAuthDiagnostic(ctx context.Context, opts *options, store credentia
 	}
 	diagnostic.Message = "bearer auth stored"
 	return diagnostic
+}
+
+func mcpRemoteDoctorFix(ctx context.Context, cmd *cobra.Command, opts *options, store credentials.Store, report func(string)) []providerDiagnostic {
+	if report == nil {
+		report = func(string) {}
+	}
+	entries, err := effectiveMCPRemoteServerEntries(opts.workDir)
+	if err != nil {
+		return []providerDiagnostic{{
+			Check:       "doctor-fix",
+			Status:      "fail",
+			Message:     err.Error(),
+			Remediation: "Fix Toolmux MCP config or remove invalid MCP server entries.",
+		}}
+	}
+	var diagnostics []providerDiagnostic
+	for _, entry := range entries {
+		if normalizeMCPRemoteServer(entry.Server).Transport == mcpRemoteTransportStdio {
+			continue
+		}
+		report(fmt.Sprintf("Repairing %s auth", entry.Name))
+		authResult, include := refreshMCPRemoteAuthForEntry(ctx, opts, store, entry, mcpRemoteAuthRefreshOptions{
+			Probe: true,
+		})
+		authFailed := include && authResult.Status == mcpRemoteAuthRefreshStatusFailed
+		if authFailed {
+			diagnostics = append(diagnostics, providerDiagnostic{
+				Provider:    entry.Name,
+				Check:       "toolbox-auth-fix",
+				Status:      "fail",
+				Message:     authResult.Message,
+				Remediation: "Run `toolmux auth login " + entry.Name + "` or `toolmux auth set " + entry.Name + "`.",
+			})
+		}
+		if authFailed {
+			continue
+		}
+		cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
+		if err != nil {
+			diagnostics = append(diagnostics, providerDiagnostic{
+				Provider:    entry.Name,
+				Check:       "toolbox-cache-fix",
+				Status:      "fail",
+				Message:     err.Error(),
+				Remediation: "Remove the corrupt cache or run `toolmux mcp sync " + entry.Name + "`.",
+			})
+			continue
+		}
+		if ok && mcpRemoteCacheFresh(cache, time.Now().UTC()) {
+			continue
+		}
+		report(fmt.Sprintf("Syncing %s metadata", entry.Name))
+		_, authRequired, err := syncMCPRemoteCacheExplicit(cmd, opts, entry, nil, nil)
+		if err != nil {
+			diagnostics = append(diagnostics, providerDiagnostic{
+				Provider:    entry.Name,
+				Check:       "toolbox-cache-fix",
+				Status:      "fail",
+				Message:     err.Error(),
+				Remediation: "Run `toolmux mcp sync " + entry.Name + "` after fixing auth.",
+			})
+			continue
+		}
+		if err := writeMCPRemoteAuthRequired(entry, authRequired); err != nil {
+			diagnostics = append(diagnostics, providerDiagnostic{
+				Provider:    entry.Name,
+				Check:       "toolbox-cache-fix",
+				Status:      "fail",
+				Message:     err.Error(),
+				Remediation: "Check Toolmux MCP config permissions.",
+			})
+			continue
+		}
+	}
+	return diagnostics
 }
 
 func writeDiagnostics(cmd *cobra.Command, opts *options, diagnostics []providerDiagnostic) error {
