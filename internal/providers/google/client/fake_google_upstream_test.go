@@ -50,6 +50,8 @@ type fakeGoogleUpstream struct {
 	imageTrashRecorded   bool
 }
 
+type fakeGoogleHandler func(*testing.T, http.ResponseWriter, *http.Request)
+
 func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 	t.Helper()
 	upstream := &fakeGoogleUpstream{
@@ -57,46 +59,38 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 		pickerCodes:    map[string]bool{},
 		codeChallenges: map[string]string{},
 	}
-	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/oauth/authorize":
-			upstream.authorize(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/token":
-			upstream.token(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/revoke":
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc-1":
-			upstream.getDocument(t, w, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc-img":
-			upstream.getDocumentWithImages(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/documents/doc-1:batchUpdate":
-			upstream.batchUpdate(t, w, r)
-		case r.Method == http.MethodPatch && r.URL.Path == "/drive/v3/files/image-1":
-			upstream.trashImageFile(t, w, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files":
-			upstream.listFiles(t, w, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1":
-			upstream.getFile(t, w, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1/comments":
-			upstream.listComments(t, w, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc-1/export":
-			upstream.exportFile(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/doc-1/copy":
-			upstream.copyFile(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/upload/drive/v3/files":
-			upstream.uploadFile(t, w, r)
-		case r.Method == http.MethodPatch && r.URL.Path == "/drive/v3/files/doc-1":
-			upstream.updateFile(t, w, r)
-		case r.Method == http.MethodPatch && r.URL.Path == "/upload/drive/v3/files/doc-1":
-			upstream.updateFileUpload(t, w, r)
-		case r.Method == http.MethodPost && r.URL.Path == "/drive/v3/files/image-1/permissions":
-			upstream.createPermission(t, w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	mux := http.NewServeMux()
+	registerFakeGoogleHandler(mux, t, "GET /oauth/authorize", upstream.authorize)
+	registerFakeGoogleHandler(mux, t, "POST /token", upstream.token)
+	registerFakeGoogleHandler(mux, t, "POST /revoke", upstream.revoke)
+	registerFakeGoogleHandler(mux, t, "GET /v1/documents/doc-1", upstream.getDocument)
+	registerFakeGoogleHandler(mux, t, "GET /v1/documents/doc-img", upstream.getDocumentWithImages)
+	registerFakeGoogleHandler(mux, t, "POST /v1/documents/doc-1:batchUpdate", upstream.batchUpdate)
+	registerFakeGoogleHandler(mux, t, "PATCH /drive/v3/files/image-1", upstream.trashImageFile)
+	registerFakeGoogleHandler(mux, t, "GET /drive/v3/files", upstream.listFiles)
+	registerFakeGoogleHandler(mux, t, "GET /drive/v3/files/doc-1", upstream.getFile)
+	registerFakeGoogleHandler(mux, t, "GET /drive/v3/files/doc-1/comments", upstream.listComments)
+	registerFakeGoogleHandler(mux, t, "GET /drive/v3/files/doc-1/export", upstream.exportFile)
+	registerFakeGoogleHandler(mux, t, "POST /drive/v3/files/doc-1/copy", upstream.copyFile)
+	registerFakeGoogleHandler(mux, t, "POST /upload/drive/v3/files", upstream.uploadFile)
+	registerFakeGoogleHandler(mux, t, "PATCH /drive/v3/files/doc-1", upstream.updateFile)
+	registerFakeGoogleHandler(mux, t, "PATCH /upload/drive/v3/files/doc-1", upstream.updateFileUpload)
+	registerFakeGoogleHandler(mux, t, "POST /drive/v3/files/image-1/permissions", upstream.createPermission)
+	upstream.Server = httptest.NewServer(mux)
 	t.Cleanup(upstream.Server.Close)
 	return upstream
+}
+
+func registerFakeGoogleHandler(mux *http.ServeMux, t *testing.T, pattern string, handler fakeGoogleHandler) {
+	t.Helper()
+	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+		handler(t, w, r)
+	})
+}
+
+func (s *fakeGoogleUpstream) revoke(t *testing.T, w http.ResponseWriter, _ *http.Request) {
+	t.Helper()
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *fakeGoogleUpstream) authorize(t *testing.T, w http.ResponseWriter, r *http.Request) {

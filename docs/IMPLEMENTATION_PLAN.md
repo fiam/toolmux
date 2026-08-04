@@ -1,6 +1,6 @@
 # Toolmux MCP-First Implementation Plan
 
-Last updated: 2026-05-18
+Last updated: 2026-08-04
 
 ## Technical Direction
 
@@ -17,8 +17,8 @@ not scrape browser cookies, local browser storage, session tokens, or
 provider-owned client credentials except for Slack's explicit browser-session
 setup through `toolmux add slack`.
 
-Use the latest stable Go release. As of 2026-05-07, `govulncheck` reports Go
-1.26.3 as the security-fix patch release for the Go 1.26 line. Set the module
+Use the latest stable Go release. As of 2026-08-04, `govulncheck` requires Go
+1.26.5 as the security-fix patch release for the Go 1.26 line. Set the module
 to Go 1.26, pin CI to the latest Go 1.26 patch, and update `AGENTS.md`
 whenever the project intentionally changes Go versions or toolchain
 expectations.
