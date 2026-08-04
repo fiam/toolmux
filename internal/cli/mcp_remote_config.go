@@ -206,6 +206,7 @@ func effectiveMCPRemoteServerEntriesFromPaths(startDir, globalPath string) ([]mc
 			}
 			byName[name] = mcpRemoteServerEntry{
 				Name:   name,
+				Label:  strings.TrimSpace(source.config.Toolboxes[name].Label),
 				Scope:  source.Scope,
 				Scopes: scopes,
 				Path:   source.Path,
@@ -316,22 +317,19 @@ func writeMCPRemoteCache(configuredDir, name string, cache mcpRemoteCache) error
 	return os.WriteFile(path, data, 0o644)
 }
 
-func renameMCPRemoteCache(configuredDir, oldName, newName string) error {
-	oldPath, err := mcpRemoteCachePath(configuredDir, oldName)
-	if err != nil {
+func moveMCPRemoteCache(configuredDir, oldName, newName string, keepOld bool) error {
+	cache, ok, err := readMCPRemoteCacheIfExists(configuredDir, oldName)
+	if err != nil || !ok {
 		return err
 	}
-	newPath, err := mcpRemoteCachePath(configuredDir, newName)
-	if err != nil {
+	cache.Name = newName
+	if err := writeMCPRemoteCache(configuredDir, newName, cache); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o750); err != nil {
-		return err
+	if keepOld {
+		return nil
 	}
-	if err := os.Rename(oldPath, newPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
+	return removeMCPRemoteCache(configuredDir, oldName)
 }
 
 func removeMCPRemoteCache(configuredDir, name string) error {

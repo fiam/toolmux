@@ -133,6 +133,9 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	if len(linear.RegisteredNames) != 1 || linear.RegisteredNames[0] != "linear" {
 		t.Fatalf("expected linear registered name, got %#v", linear.RegisteredNames)
 	}
+	if len(linear.Registrations) != 1 || linear.Registrations[0].Name != "linear" || linear.Registrations[0].Path == "" {
+		t.Fatalf("expected structured linear registration, got %#v", linear.Registrations)
+	}
 
 	disableOutput := runRootForRemoteTest(t, env, "list", "--disable", "linear")
 	if !strings.Contains(disableOutput, "disabled MCP server linear") {
@@ -142,12 +145,17 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	if !strings.Contains(output, "linear") || !strings.Contains(output, "available") {
 		t.Fatalf("expected linear to be available after disable, got:\n%s", output)
 	}
+}
+
+func TestCatalogTogglesNotionAndFiltersManagementCommands(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
 
 	notionOutput := runRootForRemoteTest(t, env, "list", "--enable", "notion", "--global")
 	if !strings.Contains(notionOutput, "enabled global MCP server notion") {
 		t.Fatalf("expected Notion MCP enable output, got %q", notionOutput)
 	}
-	jsonOutput = runRootForRemoteTest(t, env, "--output", "json", "list", "--mcp")
+	jsonOutput := runRootForRemoteTest(t, env, "--output", "json", "list", "--mcp")
+	var entries []toolboxCatalogEntry
 	if err := json.Unmarshal([]byte(jsonOutput), &entries); err != nil {
 		t.Fatalf("decode catalog output: %v\n%s", err, jsonOutput)
 	}
@@ -160,7 +168,7 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 	if !notion.Registered || notion.Status != "not_synced" || len(notion.RegisteredNames) != 1 || notion.RegisteredNames[0] != "notion" {
 		t.Fatalf("expected notion registered directly, got %#v", notion)
 	}
-	disableOutput = runRootForRemoteTest(t, env, "list", "--disable", "notion")
+	disableOutput := runRootForRemoteTest(t, env, "list", "--disable", "notion")
 	if !strings.Contains(disableOutput, "disabled MCP server notion") {
 		t.Fatalf("expected disable by catalog name, got %q", disableOutput)
 	}
@@ -214,7 +222,7 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 		t.Fatalf("expected no-auth server to record auth_required false, got %#v", server)
 	}
 
-	listOutput := runRootForRemoteTest(t, env, "--color", "always", "mcp", "ls")
+	listOutput := runRootForRemoteTest(t, env, "--color", "always", "mcp", "list")
 	for _, want := range []string{"linear", "synced", "global", "2"} {
 		if !strings.Contains(listOutput, want) {
 			t.Fatalf("expected mcp ls output to contain %q, got:\n%s", want, listOutput)
@@ -227,7 +235,7 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 		t.Fatalf("expected mcp ls output to include color when forced, got:\n%s", listOutput)
 	}
 
-	jsonOutput := runRootForRemoteTest(t, env, "-o", "json", "mcp", "ls")
+	jsonOutput := runRootForRemoteTest(t, env, "-o", "json", "mcp", "list")
 	var listItems []mcpRemoteListItem
 	if err := json.Unmarshal([]byte(jsonOutput), &listItems); err != nil {
 		t.Fatalf("decode mcp ls json output: %v\n%s", err, jsonOutput)
@@ -236,22 +244,22 @@ func TestMCPRemoteListShowsToolsAndTree(t *testing.T) {
 		t.Fatalf("unexpected mcp ls json output: %+v", listItems)
 	}
 
-	toolOutput := runRootForRemoteTest(t, env, "mcp", "ls", "linear")
-	for _, want := range []string{"create_issue", "calculate", "a*, b*, operation*", "title"} {
+	toolOutput := runRootForRemoteTest(t, env, "mcp", "list", "linear")
+	for _, want := range []string{"create-issue", "calculate", "a*, b*, operation*", "title"} {
 		if !strings.Contains(toolOutput, want) {
 			t.Fatalf("expected mcp ls linear output to contain %q, got:\n%s", want, toolOutput)
 		}
 	}
 
-	treeOutput := runRootForRemoteTest(t, env, "mcp", "ls", "-R")
-	for _, want := range []string{"linear", "├── calculate", "└── create_issue"} {
+	treeOutput := runRootForRemoteTest(t, env, "mcp", "list", "-R")
+	for _, want := range []string{"linear", "├── calculate", "└── create-issue"} {
 		if !strings.Contains(treeOutput, want) {
 			t.Fatalf("expected recursive mcp ls output to contain %q, got:\n%s", want, treeOutput)
 		}
 	}
 
 	serverTreeOutput := runRootForRemoteTest(t, env, "mcp", "ls", "-R", "linear")
-	for _, want := range []string{"linear", "├── calculate", "└── create_issue"} {
+	for _, want := range []string{"linear", "├── calculate", "└── create-issue"} {
 		if !strings.Contains(serverTreeOutput, want) {
 			t.Fatalf("expected recursive mcp ls linear output to contain %q, got:\n%s", want, serverTreeOutput)
 		}
@@ -264,12 +272,12 @@ func TestStatusTableShowsRemoteMCPToolboxesAndAuth(t *testing.T) {
 	upstream := newFakeMCPRemoteServerWithBearer(t, &called, "secret-token")
 	defer upstream.Close()
 
-	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global", "--no-sync")
+	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--label", "Work issues", "--global", "--no-sync")
 	runRootForRemoteTestWithInput(t, env, "secret-token", "auth", "set", "linear", "--bearer-token-stdin")
 	runRootForRemoteTest(t, env, "mcp", "sync", "linear")
 
 	rendered := runRootForRemoteTest(t, env, "status", "linear")
-	for _, want := range []string{"Toolbox", "remote-mcp", "connected", "bearer", "linear", "2"} {
+	for _, want := range []string{"Toolbox", "Account", "Work issues", "remote-mcp", "connected", "bearer", "linear", "2"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected status table to contain %q, got:\n%s", want, rendered)
 		}
@@ -283,7 +291,22 @@ func TestStatusTableShowsRemoteMCPToolboxesAndAuth(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOutput), &statuses); err != nil {
 		t.Fatalf("decode status json output: %v\n%s", err, jsonOutput)
 	}
-	if len(statuses) != 1 || statuses[0].Name != "linear" || statuses[0].Auth != "bearer" || statuses[0].Status != "connected" {
+	if len(statuses) != 1 || statuses[0].Name != "linear" || statuses[0].Label != "Work issues" || statuses[0].Auth != "bearer" || statuses[0].Status != "connected" {
 		t.Fatalf("unexpected status json output: %+v", statuses)
+	}
+}
+
+func TestMCPRemoteIdentityToolUsesFirstAvailableCatalogProbe(t *testing.T) {
+	t.Parallel()
+	entry := mcpRemoteServerEntry{Name: "notion-work", Server: mcpBuiltinRemoteServers()["notion"]}
+	cache := mcpRemoteCache{Tools: []mcpRemoteTool{
+		{Name: "notion-get-users", InputSchema: map[string]any{"type": "object"}},
+	}}
+	tool, arguments, ok := mcpRemoteIdentityTool(entry, cache)
+	if !ok || tool.Name != "notion-get-users" || arguments["user_id"] != "self" {
+		t.Fatalf("unexpected Notion identity probe: tool=%#v arguments=%#v ok=%v", tool, arguments, ok)
+	}
+	if spec := mcpRemoteActionSpecForEntry(entry, tool); spec.RemoteEffect != "read" || spec.LocalEffect != "none" {
+		t.Fatalf("unexpected Notion identity policy effects: %#v", spec)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 type nativeToolboxEntry struct {
 	Name     string             `json:"name" yaml:"name"`
+	Label    string             `json:"label,omitempty" yaml:"label,omitempty"`
 	Scope    string             `json:"scope" yaml:"scope"`
 	Scopes   []string           `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path     string             `json:"path" yaml:"path"`
@@ -82,28 +83,19 @@ func setConfigMCPRemoteServer(config *toolmuxConfigFile, name string, server mcp
 		config.Toolboxes = map[string]toolboxConfig{}
 	}
 	catalog := ""
+	label := ""
 	if existing, ok := config.Toolboxes[name]; ok && existing.Type == toolboxTypeMCP {
 		catalog = existing.Catalog
+		label = existing.Label
 	}
 	config.Toolboxes[name] = toolboxConfigFromMCPRemoteServer(server, catalog)
+	config.Toolboxes[name] = withToolboxLabel(config.Toolboxes[name], label)
 	delete(config.MCP.Servers, name)
 }
 
 func deleteConfigMCPRemoteServer(config *toolmuxConfigFile, name string) {
 	delete(config.Toolboxes, name)
 	delete(config.MCP.Servers, name)
-}
-
-func renameConfigMCPRemoteServer(config *toolmuxConfigFile, oldName, newName string, server mcpRemoteServer) {
-	catalog := ""
-	if existing, ok := config.Toolboxes[oldName]; ok && existing.Type == toolboxTypeMCP {
-		catalog = existing.Catalog
-	}
-	deleteConfigMCPRemoteServer(config, oldName)
-	if config.Toolboxes == nil {
-		config.Toolboxes = map[string]toolboxConfig{}
-	}
-	config.Toolboxes[newName] = toolboxConfigFromMCPRemoteServer(server, catalog)
 }
 
 func setConfigNativeToolbox(config *toolmuxConfigFile, name string, provider providers.Provider) {
@@ -114,6 +106,19 @@ func setConfigNativeToolbox(config *toolmuxConfigFile, name string, provider pro
 		Type:     toolboxTypeInternal,
 		Provider: provider.ID,
 	}
+}
+
+func setConfigToolboxLabel(config *toolmuxConfigFile, name, label string) {
+	toolbox, ok := config.Toolboxes[name]
+	if !ok {
+		return
+	}
+	config.Toolboxes[name] = withToolboxLabel(toolbox, label)
+}
+
+func withToolboxLabel(toolbox toolboxConfig, label string) toolboxConfig {
+	toolbox.Label = strings.TrimSpace(label)
+	return toolbox
 }
 
 func effectiveNativeToolboxEntries(startDir string) ([]nativeToolboxEntry, error) {
@@ -164,6 +169,7 @@ func effectiveNativeToolboxEntriesFromPaths(startDir, globalPath string) ([]nati
 			}
 			byName[cleanName] = nativeToolboxEntry{
 				Name:     cleanName,
+				Label:    strings.TrimSpace(toolbox.Label),
 				Scope:    source.Scope,
 				Scopes:   scopes,
 				Path:     source.Path,

@@ -19,6 +19,7 @@ import (
 
 type toolboxStatusItem struct {
 	Name         string     `json:"name" yaml:"name"`
+	Label        string     `json:"label,omitempty" yaml:"label,omitempty"`
 	Kind         string     `json:"kind" yaml:"kind"`
 	Status       string     `json:"status" yaml:"status"`
 	Auth         string     `json:"auth" yaml:"auth"`
@@ -80,6 +81,7 @@ func statusCommand(opts *options) *cobra.Command {
 					}
 					rows = append(rows, []string{
 						output.ToneText(human, output.ToneInfo, status.Name),
+						output.Value(status.Label),
 						status.Kind,
 						output.StatusBadge(human, status.Status),
 						output.Value(status.Auth),
@@ -89,10 +91,10 @@ func statusCommand(opts *options) *cobra.Command {
 					})
 				}
 				output.RenderTable(w, human, output.Table{
-					Headers: []string{"Toolbox", "Kind", "Status", "Auth", "Scope/Profile", "Tools", "Source"},
+					Headers: []string{"Toolbox", "Account", "Kind", "Status", "Auth", "Scope/Profile", "Tools", "Source"},
 					Rows:    rows,
 					Empty:   "no toolboxes registered",
-					Align:   output.RightAlign(7, 5),
+					Align:   output.RightAlign(8, 6),
 					Summary: toolboxCatalogSummary(len(statuses), connected, totalTools),
 				})
 			})
@@ -157,6 +159,7 @@ func findNativeToolboxEntry(entries []nativeToolboxEntry, name string) (nativeTo
 func readNativeToolboxStatus(ctx context.Context, opts *options, store credentials.Store, entry nativeToolboxEntry) (toolboxStatusItem, error) {
 	item := toolboxStatusItem{
 		Name:      entry.Name,
+		Label:     entry.Label,
 		Kind:      "native",
 		Status:    "needs_auth",
 		Auth:      "missing",
@@ -219,6 +222,7 @@ func readMCPRemoteToolboxStatus(ctx context.Context, opts *options, store creden
 	}
 	item := toolboxStatusItem{
 		Name:         entry.Name,
+		Label:        entry.Label,
 		Kind:         mcpRemoteKind(entry.Server),
 		Status:       "not_synced",
 		Auth:         mcpRemoteAuthLabel(false, credentials.OAuthTokens{}, authRequired),

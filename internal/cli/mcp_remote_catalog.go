@@ -99,6 +99,7 @@ func toolboxCatalogEntries(ctx context.Context, root *cobra.Command, opts *optio
 				Status:                  entry.Status,
 				Registered:              entry.Registered,
 				RegisteredNames:         entry.RegisteredNames,
+				Registrations:           entry.Registrations,
 				Scope:                   entry.Scope,
 				Scopes:                  entry.Scopes,
 				Path:                    entry.Path,
@@ -172,9 +173,17 @@ func internalCatalogEntries(ctx context.Context, opts *options, store credential
 			}
 		}
 		registeredNames := make([]string, 0, len(matches))
+		registrations := make([]toolboxRegistration, 0, len(matches))
 		scopes := []string{}
 		for _, match := range matches {
 			registeredNames = append(registeredNames, match.Name)
+			registrations = append(registrations, toolboxRegistration{
+				Name:   match.Name,
+				Label:  match.Label,
+				Scope:  match.Scope,
+				Scopes: append([]string(nil), match.Scopes...),
+				Path:   match.Path,
+			})
 			for _, scope := range match.Scopes {
 				scopes = appendScope(scopes, scope)
 			}
@@ -188,6 +197,7 @@ func internalCatalogEntries(ctx context.Context, opts *options, store credential
 			Status:          status.Status,
 			Registered:      len(matches) > 0,
 			RegisteredNames: registeredNames,
+			Registrations:   registrations,
 			Command:         output.JoinList(registeredNames),
 			Scope:           status.Scope,
 			Scopes:          scopes,
@@ -228,19 +238,34 @@ func renderToolboxCatalogTable(w io.Writer, cmd *cobra.Command, opts *options, e
 			output.ToneText(human, output.ToneInfo, name),
 			entry.Type,
 			output.StatusBadge(human, entry.Status),
-			output.Value(firstNonEmpty(entry.Command, output.JoinList(entry.RegisteredNames))),
+			output.Value(firstNonEmpty(toolboxRegistrationLabels(entry.Registrations), entry.Command, output.JoinList(entry.RegisteredNames))),
 			mcpRemoteScopesLabel(entry.Scopes),
 			tools,
 			output.Value(entry.URL),
 		})
 	}
 	output.RenderTable(w, human, output.Table{
-		Headers: []string{"Name", "Type", "Status", "Command", "Config Scope", "Tools", "URL"},
+		Headers: []string{"Name", "Type", "Status", "Registered as", "Config Scope", "Tools", "URL"},
 		Rows:    rows,
 		Empty:   "no known toolboxes",
 		Align:   output.RightAlign(7, 5),
 		Summary: toolboxCatalogSummary(len(entries), connected, totalTools),
 	})
+}
+
+func toolboxRegistrationLabels(registrations []toolboxRegistration) string {
+	if len(registrations) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(registrations))
+	for _, registration := range registrations {
+		label := registration.Name
+		if registration.Label != "" {
+			label += " (" + registration.Label + ")"
+		}
+		labels = append(labels, label)
+	}
+	return output.JoinList(labels)
 }
 
 // toolboxCatalogSummary renders the muted rollup shown below the catalog table.

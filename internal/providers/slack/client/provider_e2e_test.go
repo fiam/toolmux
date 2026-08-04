@@ -86,7 +86,11 @@ func TestSlackAuthTestReturnsCurrentUser(t *testing.T) {
 	deps := slackDeps(t, store, upstream.Server.Client(), upstream.Server.URL)
 	toolmuxtest.Run(t, deps, "add", "slack", "--token", "xoxc-direct", "--cookie", "xoxd")
 
-	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "auth_test")
+	out := toolmuxtest.Run(t, deps, "--output", "json", "slack", "auth-test")
+	toolmuxtest.AssertContains(t, out, `"user_id": "U123"`)
+	toolmuxtest.AssertContains(t, out, `"user": "toolmux"`)
+
+	out = toolmuxtest.Run(t, deps, "--output", "json", "auth", "whoami", "slack")
 	toolmuxtest.AssertContains(t, out, `"user_id": "U123"`)
 	toolmuxtest.AssertContains(t, out, `"user": "toolmux"`)
 }

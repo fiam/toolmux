@@ -124,7 +124,7 @@ from a catalog name or URL, or command-backed stdio toolboxes with
 namespace/account, `--stdio` only to disambiguate a command name that matches a
 catalog or native toolbox, and `--` before command-owned flags; use
 `toolmux mcp sync`,
-`toolmux mcp rename`, `toolmux mcp ls`, `toolmux mcp show`,
+`toolmux rename`, `toolmux mcp list`, `toolmux mcp show`,
 `toolmux list`, and `toolmux mcp defaults` for MCP-specific server
 maintenance. Default arguments are non-secret config values applied only
 to remote tool schemas with matching top-level properties; explicit tool
@@ -149,21 +149,27 @@ print token material. `toolmux mcp sync`, top-level remote MCP commands, and
 proxied remote MCP calls through `toolmux mcp serve` should refresh stored OAuth
 preventively when local expiry metadata shows the token is due for refresh, then
 retry once when the remote server returns `401`.
+Use `--label` for a non-secret human account/workspace label and
+`toolmux auth whoami <name>` for provider-verified identity when a provider or
+catalog entry declares a read-only connection identity action. `toolmux rename`
+must move the config entry, cached remote metadata, and matching
+credential-store entry as one operation; `toolmux mcp rename` remains a
+compatibility path for remote servers.
 `toolmux remove` and its `rm` alias should accept one or more toolbox names.
 Removing a remote MCP toolbox should also delete stored auth for that server
 name in the active Toolmux profile.
 Hidden `toolmux mcp auth remove` should still delete matching stored auth when the
 server entry has already been removed.
-`toolmux mcp ls` should use the shared table renderer for human output,
-display only `project` or `global` scope labels, support `mcp ls <name>` for
-cached tools on one server, and support `mcp ls -R` for a tree of registered
+`toolmux mcp list` should use the shared table renderer for human output,
+display only `project` or `global` scope labels, support `mcp list <name>` for
+cached tools on one server, and support `mcp list -R` for a tree of registered
 servers and cached tools. Running a registered remote namespace such as
 `toolmux linear` without a tool should show help with available cached tools.
 Interactive human output should compact remote MCP tool descriptions and may
 use shared color tones for command names, arguments, and secondary text. Keep
 full upstream descriptions available through non-interactive output,
 JSON/YAML, `toolmux <server> --full-help`, and the `--full-descriptions` flag
-on `toolmux mcp ls`.
+on `toolmux mcp list`. Keep `ls` as a compatibility alias.
 Do not store bearer tokens, OAuth tokens, refresh tokens, dynamic client
 secrets, client secrets, auth codes, or authorization headers in YAML config or
 test fixtures. Remote Streamable HTTP support must handle both JSON and
@@ -438,8 +444,8 @@ Use these commands while developing:
 ```bash
 ./bin/toolmux policy catalog
 ./bin/toolmux policy check --command "google drive available"
-./bin/toolmux policy check --command "linear create_issue"
-./bin/toolmux policy doctor
+./bin/toolmux policy check --command "linear create-issue"
+./bin/toolmux doctor
 ```
 
 Provider command metadata is data-driven. Root `status [toolbox...]` reports
@@ -453,6 +459,12 @@ Provider command paths, args, flags, group help, aliases, and leaf help belong
 in a provider-owned `actions.Spec` tree. Use one spec type for both groups and
 leaf actions, then let the Cobra, MCP, REST, policy, and catalog layers walk
 that tree instead of maintaining separate command models.
+
+Human CLI command and flag names use kebab-case. Preserve provider-native and
+upstream spellings in stable action IDs, MCP tool names, structured argument
+keys, and remote calls. When exposing an older snake_case or camelCase name as
+kebab-case, keep the old spelling as a CLI compatibility alias and add tests
+that prove both spellings reach the same stable action or argument key.
 
 Provider command execution belongs with the provider too. Add client action
 handlers under `internal/providers/<provider>/client`, expose them through the

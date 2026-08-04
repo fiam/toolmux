@@ -46,41 +46,41 @@ func policyCommand(opts *options) *cobra.Command {
 		},
 	})
 
-	for _, name := range []string{"check", "explain"} {
-		var commandLine string
-		sub := &cobra.Command{
-			Use:   name,
-			Short: "Evaluate a tool command against local policy",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				if commandLine == "" {
-					return fmt.Errorf("--command is required")
-				}
-				spec, ok := specForCommand(opts, commandLine)
-				if !ok {
-					return fmt.Errorf("no command spec found for %q", commandLine)
-				}
-				decision, err := decisionFor(cmd, opts, spec, nil)
-				if err != nil {
-					return err
-				}
-				if opts.output == "json" {
-					return json.NewEncoder(cmd.OutOrStdout()).Encode(decision)
-				}
-				if decision.Allowed {
-					fmt.Fprintf(cmd.OutOrStdout(), "allowed: %s\n", decision.Reason)
-					return nil
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "denied: %s\n", decision.Reason)
-				return policy.ErrDenied
-			},
-		}
-		sub.Flags().StringVar(&commandLine, "command", "", "command to evaluate")
-		cmd.AddCommand(sub)
+	var commandLine string
+	check := &cobra.Command{
+		Use:     "check",
+		Aliases: []string{"explain"},
+		Short:   "Evaluate a tool command against local policy",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandLine == "" {
+				return fmt.Errorf("--command is required")
+			}
+			spec, ok := specForCommand(opts, commandLine)
+			if !ok {
+				return fmt.Errorf("no command spec found for %q", commandLine)
+			}
+			decision, err := decisionFor(cmd, opts, spec, nil)
+			if err != nil {
+				return err
+			}
+			if opts.output == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(decision)
+			}
+			if decision.Allowed {
+				fmt.Fprintf(cmd.OutOrStdout(), "allowed: %s\n", decision.Reason)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "denied: %s\n", decision.Reason)
+			return policy.ErrDenied
+		},
 	}
+	check.Flags().StringVar(&commandLine, "command", "", "command to evaluate")
+	cmd.AddCommand(check)
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "doctor",
-		Short: "Check policy discovery and parsing",
+		Use:    "doctor",
+		Short:  "Check policy discovery and parsing",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, paths, err := policy.LoadDiscovered(opts.policy, "")
 			if err != nil {

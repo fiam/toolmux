@@ -70,6 +70,10 @@ func cloneMCPRemoteCatalog(src map[string]mcpRemoteCatalogDefinition) map[string
 		definition.Server.Args = slices.Clone(definition.Server.Args)
 		definition.Server.DefaultArguments = maps.Clone(definition.Server.DefaultArguments)
 		definition.DefaultArgumentHints = slices.Clone(definition.DefaultArgumentHints)
+		definition.Identity = slices.Clone(definition.Identity)
+		for i := range definition.Identity {
+			definition.Identity[i].Arguments = maps.Clone(definition.Identity[i].Arguments)
+		}
 		dst[name] = definition
 	}
 	return dst

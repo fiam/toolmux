@@ -122,9 +122,9 @@ Policy commands:
 ```bash
 toolmux policy init
 toolmux policy catalog
-toolmux policy check --command "mcp ls"
-toolmux policy explain --command "linear issue create --title Draft"
-toolmux policy doctor
+toolmux policy check --command "linear create-issue"
+toolmux why linear.create_issue
+toolmux doctor
 ```
 
 Each command must declare metadata that the policy engine can evaluate:
@@ -264,11 +264,11 @@ Terminal presentation contract:
 Human-oriented examples:
 
 ```bash
-toolmux slack channels_list
-toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
+toolmux slack channels-list
+toolmux slack conversations-search-messages --search-query "from:@alice roadmap"
 toolmux add notion
 toolmux notion
-toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
+toolmux slack conversations-add-message --channel-id C123456 --text "Build is green" --dry-run
 ```
 
 Discovery commands:
@@ -448,19 +448,20 @@ toolmux add slack --workspace acme
 toolmux add slack --token-env SLACK_TOKEN --cookie-env SLACK_COOKIE
 toolmux add slack --auth oauth --client-id "$SLACK_CLIENT_ID"
 toolmux add slack --auth broker
-toolmux slack channels_list
-toolmux slack conversations_history --channel_id C123456 --oldest 1710000000.000000
-toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
-toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
+toolmux slack channels-list
+toolmux slack conversations-history --channel-id C123456 --oldest 1710000000.000000
+toolmux slack conversations-search-messages --search-query "from:@alice roadmap"
+toolmux slack conversations-add-message --channel-id C123456 --text "Build is green"
 ```
 
-Slack native command names use Slack MCP-style and Slack Web API method names:
-`auth_test`, `conversations_history`, `conversations_replies`,
-`conversations_add_message`, `reactions_add`, `reactions_remove`,
-`attachment_get_data`, `conversations_search_messages`,
-`conversations_unreads`, `conversations_mark`, `channels_list`,
-`usergroups_list`, `usergroups_me`, `usergroups_create`,
-`usergroups_update`, `usergroups_users_update`, and `users_search`.
+Slack native human CLI names use kebab-case, including `auth-test`,
+`conversations-history`, `conversations-replies`,
+`conversations-add-message`, `reactions-add`, `reactions-remove`,
+`attachment-get-data`, `conversations-search-messages`,
+`conversations-unreads`, `conversations-mark`, `channels-list`,
+`usergroups-list`, `usergroups-me`, `usergroups-create`,
+`usergroups-update`, `usergroups-users-update`, and `users-search`. Stable
+action IDs retain their Slack MCP-style snake_case names.
 
 Out of scope for MVP:
 
@@ -510,12 +511,14 @@ All provider-like toolboxes must support:
 4. Remote revocation where supported.
 5. Structured errors with provider error code, HTTP status, and retry hint.
 6. `--output table|json|yaml`.
-7. `--profile <name>` for multiple identities.
+7. Distinct registered `--name` values for multiple identities, with an
+   optional non-secret `--label` for the human account or workspace name.
 8. Command metadata for policy evaluation.
 9. Local policy enforcement before token access and provider API calls.
 10. TTY-aware behavior: interactive prompts, spinners, browser opens, and paging only happen in interactive contexts or when explicitly requested.
-11. `status` output must show registered toolbox state, backend kind, stored
-    auth type, tool count, and source URL when available.
+11. `status` output must show registered toolbox name, optional account label,
+    state, backend kind, stored auth type, tool count, and source URL when
+    available.
 12. `doctor` output must run core diagnostics plus remote MCP checks and include
     remediation when a check fails or warns.
 13. Human-friendly table output and stable JSON/YAML output for the same command.
@@ -527,9 +530,17 @@ All provider-like toolboxes must support:
     JSON/YAML and non-interactive output remain undecorated and stable.
 16. Stable JSON/YAML schemas for automation, even when human table columns are
     provider-specific or optimized for terminal width.
-17. Preview or dry-run support for risky writes where the provider API allows safe preview.
-18. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
-19. Open-in-browser support for commands that return provider URLs.
+17. `auth whoami <toolbox>` for provider-verified identity when a provider or
+    catalog entry declares a read-only connection identity action.
+18. `rename <old-name> <new-name>` must move config, cached remote metadata,
+    and matching stored credentials without changing stable provider/MCP tool
+    IDs.
+19. Kebab-case human CLI commands and flags, with prior snake_case or camelCase
+    spellings retained as compatibility aliases and upstream argument keys
+    preserved in structured data and calls.
+20. Preview or dry-run support for risky writes where the provider API allows safe preview.
+21. Shell completion hooks for commands, providers, profiles, aliases, and provider-specific ids where feasible.
+22. Open-in-browser support for commands that return provider URLs.
 
 ## Security Requirements
 

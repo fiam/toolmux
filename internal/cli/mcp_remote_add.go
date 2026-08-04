@@ -18,6 +18,7 @@ import (
 func toolboxAddCommand(opts *options) *cobra.Command {
 	var scope mcpProfileScopeOptions
 	var nameFlag string
+	var labelFlag string
 	var transport string
 	var stdio bool
 	var noSync bool
@@ -33,6 +34,7 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 			add := mcpRemoteToolboxAddOptions{
 				Scope:       scope,
 				Name:        nameFlag,
+				Label:       labelFlag,
 				Transport:   transport,
 				Stdio:       stdio,
 				CommandArgs: commandArgs,
@@ -41,6 +43,7 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 			}
 			native.Scope = scope
 			native.Name = nameFlag
+			native.Label = labelFlag
 			if !add.ExplicitStdio() && len(commandArgs) == 0 {
 				if handled, err := addNativeToolbox(cmd, opts, target, native, args); handled || err != nil {
 					return err
@@ -50,6 +53,7 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&nameFlag, "name", "", "registered toolbox name")
+	cmd.Flags().StringVar(&labelFlag, "label", "", "human-readable account or workspace label")
 	cmd.Flags().StringVar(&transport, "transport", "", "MCP transport: streamable-http or stdio")
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "register a command-backed MCP server over stdio")
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "register without immediately syncing tools")
@@ -62,6 +66,7 @@ func toolboxAddCommand(opts *options) *cobra.Command {
 type mcpRemoteToolboxAddOptions struct {
 	Scope       mcpProfileScopeOptions
 	Name        string
+	Label       string
 	Transport   string
 	Stdio       bool
 	CommandArgs []string
@@ -76,6 +81,7 @@ func (add mcpRemoteToolboxAddOptions) ExplicitStdio() bool {
 type nativeToolboxAddOptions struct {
 	Scope           mcpProfileScopeOptions
 	Name            string
+	Label           string
 	Auth            string
 	Token           string
 	TokenEnv        string
@@ -184,6 +190,7 @@ func addNativeToolbox(cmd *cobra.Command, opts *options, target string, native n
 		}
 		config.Version = 1
 		setConfigNativeToolbox(&config, name, provider)
+		setConfigToolboxLabel(&config, name, native.Label)
 		if err := writeToolmuxConfigFile(configPath, config); err != nil {
 			return true, err
 		}
@@ -214,7 +221,7 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 	if _, exists, err := lookupMCPRemoteServer(name, opts.workDir); err != nil {
 		return err
 	} else if exists {
-		return fmt.Errorf("MCP server %q is already registered; use `toolmux mcp rename %s <new-name>` first", name, name)
+		return fmt.Errorf("MCP server %q is already registered; use `toolmux rename %s <new-name>` first", name, name)
 	}
 	if err := ensureMCPRemoteNameAvailable(cmd.Root(), name); err != nil {
 		return err
@@ -229,6 +236,7 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 	register := func() error {
 		config.Version = 1
 		setConfigMCPRemoteServer(&config, name, server)
+		setConfigToolboxLabel(&config, name, add.Label)
 		if err := writeToolmuxConfigFile(configPath, config); err != nil {
 			return err
 		}
@@ -241,6 +249,7 @@ func addMCPRemoteToolbox(cmd *cobra.Command, opts *options, target string, add m
 	}
 	entry := mcpRemoteServerEntry{
 		Name:   name,
+		Label:  strings.TrimSpace(add.Label),
 		Scope:  scopeName,
 		Scopes: []string{scopeName},
 		Path:   configPath,

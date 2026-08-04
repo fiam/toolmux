@@ -26,7 +26,120 @@ func authCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(authRefreshCommand(opts))
 	cmd.AddCommand(authRemoveCommand(opts))
 	cmd.AddCommand(authStatusCommand(opts))
+	cmd.AddCommand(authWhoamiCommand(opts))
 	return cmd
+}
+
+func authWhoamiCommand(opts *options) *cobra.Command {
+	var verboseHTTP bool
+	cmd := &cobra.Command{
+		Use:   "whoami <toolbox>",
+		Short: "Show the provider identity authorized for a toolbox",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := cleanMCPRemoteName(args[0])
+			if err != nil {
+				return err
+			}
+			if entry, ok, err := lookupNativeToolboxEntry(name, opts.workDir); err != nil {
+				return err
+			} else if ok {
+				return runNativeToolboxWhoami(cmd, opts, entry)
+			}
+			entry, ok, err := lookupMCPRemoteServer(name, opts.workDir)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("toolbox %q is not registered", name)
+			}
+			cache, ok, err := readMCPRemoteCacheIfExists(opts.mcpCacheDir, entry.Name)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("toolbox %q has no cached tools; run `toolmux mcp sync %s`", name, name)
+			}
+			tool, arguments, ok := mcpRemoteIdentityTool(entry, cache)
+			if !ok {
+				return fmt.Errorf("toolbox %q does not advertise a supported identity probe; use `toolmux mcp list %s` to inspect its read-only tools", name, name)
+			}
+			arguments = mcpRemoteMergeDefaultArguments(arguments, entry.Server.DefaultArguments, tool.InputSchema)
+			if err := validateMCPRemoteRequiredArguments(arguments, tool.InputSchema); err != nil {
+				return err
+			}
+			cliName := mcpRemoteToolCLINames(entry, cache.Tools)[tool.Name]
+			if err := authorize(cmd, opts, mcpRemoteActionSpecForEntry(entry, tool, cliName), nil); err != nil {
+				return err
+			}
+			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
+			result, err := callMCPRemoteToolForCommand(cmd, opts, entry, tool, arguments, trace)
+			if err != nil {
+				return err
+			}
+			return writeMCPRemoteToolResult(cmd, opts, result)
+		},
+	}
+	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote toolbox HTTP requests and responses to stderr")
+	return cmd
+}
+
+func runNativeToolboxWhoami(cmd *cobra.Command, opts *options, entry nativeToolboxEntry) error {
+	var identitySpec actions.Spec
+	for _, spec := range nativeToolboxActionSpecs(entry) {
+		if spec.Resource == string(actions.ResourceConnection) && spec.Action == string(actions.VerbRead) && spec.Args.Min == 0 && spec.Args.Max == 0 {
+			identitySpec = spec
+			break
+		}
+	}
+	if identitySpec.ID == "" {
+		return fmt.Errorf("native toolbox %q does not expose a read-only connection identity action", entry.Name)
+	}
+	if err := authorize(cmd, opts, identitySpec, nil); err != nil {
+		return err
+	}
+	handler, ok := providers.ActionHandler(entry.Provider, nativeToolboxHandlerID(entry, identitySpec))
+	if !ok {
+		return fmt.Errorf("native toolbox %q identity action is unavailable", entry.Name)
+	}
+	store, err := opts.credentials()
+	if err != nil {
+		return err
+	}
+	execCtx := actionExecutionContext(commandContext(cmd), opts, store, entry.Provider, entry.Name)
+	execCtx.Interactive = interactiveCommand(cmd, opts)
+	execCtx.Progress = newConnectUI(cmd, opts)
+	result, err := handler(execCtx, actions.Invocation{Spec: identitySpec, Flags: map[string]any{}})
+	if err != nil {
+		return err
+	}
+	return writeActionResult(cmd, opts, execCtx, result)
+}
+
+func mcpRemoteIdentityTool(entry mcpRemoteServerEntry, cache mcpRemoteCache) (mcpRemoteTool, map[string]any, bool) {
+	_, definition, ok := mcpRemoteCatalogDefinitionForServer(entry.Name, entry.Server)
+	if !ok {
+		return mcpRemoteTool{}, nil, false
+	}
+	for _, probe := range definition.Identity {
+		if tool, found := mcpRemoteToolFromCache(cache, probe.Tool); found {
+			return tool, cloneMCPRemoteMap(probe.Arguments), true
+		}
+	}
+	return mcpRemoteTool{}, nil, false
+}
+
+func mcpRemoteToolIsIdentityProbe(entry mcpRemoteServerEntry, toolName string) bool {
+	_, definition, ok := mcpRemoteCatalogDefinitionForServer(entry.Name, entry.Server)
+	if !ok {
+		return false
+	}
+	for _, probe := range definition.Identity {
+		if probe.Tool == toolName {
+			return true
+		}
+	}
+	return false
 }
 
 func authLoginCommand(opts *options) *cobra.Command {

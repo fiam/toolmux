@@ -49,6 +49,7 @@ type mcpRemoteServer struct {
 
 type mcpRemoteServerEntry struct {
 	Name   string          `json:"name" yaml:"name"`
+	Label  string          `json:"label,omitempty" yaml:"label,omitempty"`
 	Scope  string          `json:"scope" yaml:"scope"`
 	Scopes []string        `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path   string          `json:"path" yaml:"path"`
@@ -149,6 +150,7 @@ type mcpRemoteCatalogEntry struct {
 	Status                  string                         `json:"status" yaml:"status"`
 	Registered              bool                           `json:"registered" yaml:"registered"`
 	RegisteredNames         []string                       `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
+	Registrations           []toolboxRegistration          `json:"registrations,omitempty" yaml:"registrations,omitempty"`
 	Scope                   string                         `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Scopes                  []string                       `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Path                    string                         `json:"path,omitempty" yaml:"path,omitempty"`
@@ -167,6 +169,7 @@ type toolboxCatalogEntry struct {
 	Status                  string                         `json:"status" yaml:"status"`
 	Registered              bool                           `json:"registered" yaml:"registered"`
 	RegisteredNames         []string                       `json:"registered_names,omitempty" yaml:"registered_names,omitempty"`
+	Registrations           []toolboxRegistration          `json:"registrations,omitempty" yaml:"registrations,omitempty"`
 	Command                 string                         `json:"command,omitempty" yaml:"command,omitempty"`
 	Scope                   string                         `json:"scope,omitempty" yaml:"scope,omitempty"`
 	Scopes                  []string                       `json:"scopes,omitempty" yaml:"scopes,omitempty"`
@@ -177,6 +180,14 @@ type toolboxCatalogEntry struct {
 	DefaultArgumentHints    []mcpRemoteDefaultArgumentHint `json:"default_argument_hints,omitempty" yaml:"default_argument_hints,omitempty"`
 	MissingDefaultArguments []string                       `json:"missing_default_arguments,omitempty" yaml:"missing_default_arguments,omitempty"`
 	Reason                  string                         `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+type toolboxRegistration struct {
+	Name   string   `json:"name" yaml:"name"`
+	Label  string   `json:"label,omitempty" yaml:"label,omitempty"`
+	Scope  string   `json:"scope" yaml:"scope"`
+	Scopes []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Path   string   `json:"path" yaml:"path"`
 }
 
 type toolboxCatalogFilters struct {
@@ -193,6 +204,12 @@ type mcpRemoteCatalogDefinition struct {
 	Server               mcpRemoteServer                `json:"server" yaml:"server"`
 	DisplayName          string                         `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	DefaultArgumentHints []mcpRemoteDefaultArgumentHint `json:"default_argument_hints,omitempty" yaml:"default_argument_hints,omitempty"`
+	Identity             []mcpRemoteIdentityProbe       `json:"identity,omitempty" yaml:"identity,omitempty"`
+}
+
+type mcpRemoteIdentityProbe struct {
+	Tool      string         `json:"tool" yaml:"tool"`
+	Arguments map[string]any `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 }
 
 type mcpRemoteDefaultArgumentHint struct {

@@ -23,13 +23,13 @@ func TestMCPRemoteServerSyncAndTopLevelCommand(t *testing.T) {
 	defer upstream.Close()
 
 	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
-	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "linear create_issue")
+	policyOutput := runRootForRemoteTest(t, env, "policy", "check", "--command", "linear create-issue")
 	if !strings.Contains(policyOutput, "allowed") {
 		t.Fatalf("expected remote command policy check, got %q", policyOutput)
 	}
 
 	output := runRootForRemoteTest(t, env,
-		"linear", "create_issue",
+		"linear", "create-issue",
 		"--title", "Bug",
 		"--draft",
 		"--labels", "backend",
@@ -105,7 +105,7 @@ func TestMCPRemoteDefaultArgumentsApplyToToolCalls(t *testing.T) {
 	if !strings.Contains(setOutput, "set default argument cloudId") {
 		t.Fatalf("expected defaults set output, got %q", setOutput)
 	}
-	listOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "ls", "jira")
+	listOutput := runRootForRemoteTest(t, env, "mcp", "defaults", "list", "jira")
 	if !strings.Contains(listOutput, "cloudId") || !strings.Contains(listOutput, "cloud-123") {
 		t.Fatalf("expected defaults list output to include cloudId, got %q", listOutput)
 	}
@@ -118,7 +118,7 @@ func TestMCPRemoteDefaultArgumentsApplyToToolCalls(t *testing.T) {
 		t.Fatalf("unexpected defaulted arguments: %#v", called)
 	}
 
-	output = runRootForRemoteTest(t, env, "jira", "search", "--jql", "project = DEMO", "--cloudId", "cloud-456")
+	output = runRootForRemoteTest(t, env, "jira", "search", "--jql", "project = DEMO", "--cloud-id", "cloud-456")
 	if !strings.Contains(output, "called search: cloud-456") {
 		t.Fatalf("expected overridden cloudId output, got %q", output)
 	}
@@ -343,7 +343,7 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	runRootForRemoteTest(t, env, "add", upstream.URL, "--name", "linear", "--global")
 
 	serverHelp := runRootForRemoteTest(t, env, "linear")
-	for _, want := range []string{"Imported remote MCP server linear", "create_issue", "calculate"} {
+	for _, want := range []string{"Imported remote MCP server linear", "create-issue", "calculate"} {
 		if !strings.Contains(serverHelp, want) {
 			t.Fatalf("expected remote server help to contain %q, got:\n%s", want, serverHelp)
 		}
@@ -419,6 +419,53 @@ func TestMCPRemoteToolCommandsUseInputSchema(t *testing.T) {
 	}
 	if called["operation"] != "multiply" || called["a"] != float64(6) || called["b"] != float64(7) {
 		t.Fatalf("unexpected calculate arguments: %#v", called)
+	}
+}
+
+func TestCatalogRemoteCLITrimsPrefixAndKeepsRawAliases(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	notion := mcpBuiltinRemoteServers()["notion"]
+	writeRemoteTestConfig(t, env, map[string]mcpRemoteServer{"notion": notion})
+	tool := mcpRemoteTool{
+		Name:        "notion-get-users",
+		Description: "Get a Notion user",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"user_id"},
+			"properties": map[string]any{
+				"user_id": map[string]any{"type": "string"},
+			},
+		},
+	}
+	if err := writeMCPRemoteCache(env.CacheDir, "notion", mcpRemoteCache{
+		Name:      "notion",
+		URL:       notion.URL,
+		Transport: notion.Transport,
+		Tools:     []mcpRemoteTool{tool},
+		SyncedAt:  time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	root := rootForRemoteTest(env)
+	canonical, _, err := root.Find([]string{"notion", "get-users"})
+	if err != nil || canonical.Name() != "get-users" {
+		t.Fatalf("find canonical Notion command: command=%v err=%v", canonical, err)
+	}
+	legacy, _, err := root.Find([]string{"notion", "notion-get-users"})
+	if err != nil || legacy != canonical {
+		t.Fatalf("find raw Notion alias: command=%v err=%v", legacy, err)
+	}
+	if canonical.Flags().Lookup("user-id") == nil || canonical.Flags().Lookup("user_id") == nil {
+		t.Fatal("expected canonical --user-id and raw --user_id to resolve")
+	}
+	help := runRootForRemoteTest(t, env, "notion")
+	if !strings.Contains(help, "get-users") || strings.Contains(help, "notion-get-users") {
+		t.Fatalf("unexpected Notion command help:\n%s", help)
+	}
+	schema := runRootForRemoteTest(t, env, "mcp", "schema", "notion", "get-users")
+	if !strings.Contains(schema, `"user_id"`) {
+		t.Fatalf("canonical schema lookup lost raw argument key: %s", schema)
 	}
 }
 

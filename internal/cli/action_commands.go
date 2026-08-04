@@ -141,32 +141,45 @@ func actionArgs(spec policy.CommandSpec) cobra.PositionalArgs {
 }
 
 func addMetadataFlags(cmd *cobra.Command, spec policy.CommandSpec) {
+	names := make([]string, 0, len(spec.Flags))
 	for _, flag := range spec.Flags {
+		names = append(names, flag.Name)
+	}
+	mapping := newCLINameMapping(names, nil)
+	mapping.installFlagAliases(cmd.Flags())
+	for _, flag := range spec.Flags {
+		name := mapping.name(flag.Name)
 		switch flag.Type {
 		case actions.FlagBool:
-			cmd.Flags().Bool(flag.Name, flag.DefaultBool, flag.Usage)
+			cmd.Flags().Bool(name, flag.DefaultBool, flag.Usage)
 		case actions.FlagInt:
-			cmd.Flags().Int(flag.Name, flag.DefaultInt, flag.Usage)
+			cmd.Flags().Int(name, flag.DefaultInt, flag.Usage)
 		case actions.FlagString:
-			cmd.Flags().String(flag.Name, flag.Default, flag.Usage)
+			cmd.Flags().String(name, flag.Default, flag.Usage)
 		case actions.FlagStringSlice:
-			cmd.Flags().StringSlice(flag.Name, flag.DefaultString, flag.Usage)
+			cmd.Flags().StringSlice(name, flag.DefaultString, flag.Usage)
 		}
 	}
 }
 
 func metadataFlagValues(cmd *cobra.Command, spec policy.CommandSpec) map[string]any {
+	names := make([]string, 0, len(spec.Flags))
+	for _, flag := range spec.Flags {
+		names = append(names, flag.Name)
+	}
+	mapping := newCLINameMapping(names, nil)
 	values := make(map[string]any, len(spec.Flags))
 	for _, flag := range spec.Flags {
+		name := mapping.name(flag.Name)
 		switch flag.Type {
 		case actions.FlagBool:
-			values[flag.Name], _ = cmd.Flags().GetBool(flag.Name)
+			values[flag.Name], _ = cmd.Flags().GetBool(name)
 		case actions.FlagInt:
-			values[flag.Name], _ = cmd.Flags().GetInt(flag.Name)
+			values[flag.Name], _ = cmd.Flags().GetInt(name)
 		case actions.FlagString:
-			values[flag.Name], _ = cmd.Flags().GetString(flag.Name)
+			values[flag.Name], _ = cmd.Flags().GetString(name)
 		case actions.FlagStringSlice:
-			values[flag.Name], _ = cmd.Flags().GetStringSlice(flag.Name)
+			values[flag.Name], _ = cmd.Flags().GetStringSlice(name)
 		}
 	}
 	return values

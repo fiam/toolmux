@@ -130,8 +130,8 @@ account identity, so multiple Slack workspaces can be added with distinct
 names:
 
 ```bash
-toolmux add slack --name slack-work --auth broker
-toolmux add slack --name slack-personal --auth broker
+toolmux add slack --name slack-work --label "Work workspace" --auth broker
+toolmux add slack --name slack-personal --label "Personal workspace" --auth broker
 ```
 
 Common setup options:
@@ -160,36 +160,42 @@ request it with `--workspace` or `--from-browser`.
 Useful Slack commands:
 
 ```bash
-toolmux slack auth_test
-toolmux slack channels_list --channel_types public_channel,private_channel
-toolmux slack users_conversations --limit 20
-toolmux slack experimental_conversations_list --query build
-toolmux slack conversations_history --channel_id C123456 --limit 50
-toolmux slack conversations_search_messages --search_query "from:@alice roadmap"
-toolmux slack conversations_open --user_id U123456
-toolmux slack conversations_add_message --channel_id C123456 --text "Build is green" --dry-run
-toolmux slack conversations_add_message --channel_id C123456 --text "Build is green"
+toolmux slack auth-test
+toolmux slack channels-list --channel-types public_channel,private_channel
+toolmux slack users-conversations --limit 20
+toolmux slack experimental-conversations-list --query build
+toolmux slack conversations-history --channel-id C123456 --limit 50
+toolmux slack conversations-search-messages --search-query "from:@alice roadmap"
+toolmux slack conversations-open --user-id U123456
+toolmux slack conversations-add-message --channel-id C123456 --text "Build is green" --dry-run
+toolmux slack conversations-add-message --channel-id C123456 --text "Build is green"
+toolmux auth whoami slack
 toolmux status slack
 toolmux remove slack
 ```
 
-Supported native Slack tool names:
+Supported native Slack CLI command names:
 
-- Auth: `auth_test`
-- Channels and history: `channels_list`, `conversations_history`,
-  `conversations_replies`, `conversations_search_messages`,
-  `conversations_unreads`, `conversations_mark`, `users_conversations`,
-  `experimental_conversations_list`
-- Messages and DMs: `conversations_open`, `conversations_add_message`
-- Files, reactions, users: `attachment_get_data`, `reactions_add`,
-  `reactions_remove`, `users_search`
-- User groups: `usergroups_list`, `usergroups_me`, `usergroups_create`,
-  `usergroups_update`, `usergroups_users_update`
+- Auth: `auth-test`
+- Channels and history: `channels-list`, `conversations-history`,
+  `conversations-replies`, `conversations-search-messages`,
+  `conversations-unreads`, `conversations-mark`, `users-conversations`,
+  `experimental-conversations-list`
+- Messages and DMs: `conversations-open`, `conversations-add-message`
+- Files, reactions, users: `attachment-get-data`, `reactions-add`,
+  `reactions-remove`, `users-search`
+- User groups: `usergroups-list`, `usergroups-me`, `usergroups-create`,
+  `usergroups-update`, `usergroups-users-update`
+
+The human CLI uses kebab-case commands and flags. Existing snake_case command
+and flag spellings remain accepted as compatibility aliases. Stable action IDs
+and MCP tool names retain their provider/upstream spelling, such as
+`slack.auth_test`.
 
 In Enterprise/Grid workspaces, Slack may restrict workspace-wide
-`channels_list`. Try `users_conversations` to list conversations the
+`channels-list`. Try `users-conversations` to list conversations the
 authenticated user is a member of; this documented Slack API method can still
-be restricted by workspace policy. `experimental_conversations_list` is a
+be restricted by workspace policy. `experimental-conversations-list` is a
 read-only Slack web-session fallback for browser-session auth and is explicitly
 prefixed as experimental because it uses an undocumented Slack web app endpoint.
 
@@ -209,9 +215,12 @@ Native Google commands and MCP tools are shown when the toolbox is registered
 in config. The registered name is also the credential account identity:
 
 ```bash
-toolmux add google --name google-work
-toolmux add google --name google-personal
+toolmux add google --name google-work --label "Work Google account"
+toolmux add google --name google-personal --label "Personal Google account"
 ```
+
+The commands below use the default `google` registration. For a named account,
+replace that namespace with its registered name, such as `google-work`.
 
 ```bash
 toolmux google docs get 1abc...
@@ -319,11 +328,34 @@ Add from the built-in catalog:
 
 ```bash
 toolmux list
-toolmux add notion
-toolmux auth login notion
-toolmux mcp sync notion
-toolmux notion
+toolmux add notion --name notion-work --label "Work Notion"
+toolmux add notion --name notion-personal --label "Personal Notion"
+toolmux auth whoami notion-work
+toolmux auth whoami notion-personal
+toolmux status notion-work notion-personal
 ```
+
+`--name` is the unique registered CLI namespace and credential slot; `--label`
+is a local human-readable account or workspace label. Toolmux cannot enumerate
+unregistered SaaS accounts from an OAuth provider. `toolmux auth whoami <name>`
+calls a supported read-only provider identity tool, so it shows which account
+is actually authorized without exposing token material. For Notion it uses the
+hosted server's self-user probe. Register each account under a different
+`--name`; each registration runs its own OAuth flow and stores separate auth.
+
+If Notion is already registered under the default `notion` name, rename that
+credential slot before adding another one:
+
+```bash
+toolmux rename notion notion-work --label "Work Notion"
+toolmux add notion --name notion-personal --label "Personal Notion"
+toolmux auth whoami notion-work
+toolmux auth whoami notion-personal
+```
+
+`toolmux list --output json` keeps `registered_names` for compatibility and
+also returns a `registrations` array containing each namespace, label, config
+scope, and path.
 
 Register a custom MCP endpoint:
 
@@ -371,29 +403,33 @@ when command arguments use dash-prefixed flags, so those flags are passed to
 the command instead of Toolmux.
 
 The registered name becomes the CLI namespace. A server named `linear-work`
-exposes commands as `toolmux linear-work <tool-name>` and MCP tools as
-`linear-work.<tool-name>`.
+exposes kebab-case commands as `toolmux linear-work <tool-name>`. Toolmux strips
+a redundant catalog prefix when it is unambiguous, so an upstream Notion tool
+named `notion-get-users` appears as `toolmux notion-work get-users`. Raw
+upstream spellings remain CLI aliases, while proxied MCP tool IDs remain stable,
+for example `notion-work.notion-get-users`.
 
 For repeated non-secret arguments, configure defaults:
 
 ```bash
 toolmux mcp defaults set atlassian cloudId <cloud-id>
-toolmux mcp defaults ls atlassian
+toolmux mcp defaults list atlassian
 ```
 
 Show registered toolboxes and cached tools:
 
 ```bash
 toolmux status
-toolmux mcp ls
-toolmux mcp ls -R
+toolmux mcp list
+toolmux mcp list -R
 toolmux mcp show linear-work
+toolmux rename linear-work linear-personal
 ```
 
 Inspect schemas and call tools:
 
 ```bash
-toolmux mcp ls linear-work
+toolmux mcp list linear-work
 toolmux mcp schema linear-work <tool>
 toolmux linear-work <tool> --json '{"key":"value"}'
 ```
@@ -524,7 +560,7 @@ opens, and selectors.
 Use structured output for scripts and agents:
 
 ```bash
-toolmux --output json mcp ls -R
+toolmux --output json mcp list -R
 toolmux --output yaml list
 ```
 
@@ -564,7 +600,9 @@ Project config lives in:
 Registered toolbox definitions, MCP server details, and cached tool metadata
 are non-secret config. Native and remote toolboxes are stored under the
 top-level `toolboxes` key; the map key is the registered command namespace and
-the credential account identity.
+the credential account identity. An optional non-secret `label` describes the
+human account or workspace. `toolmux rename` moves the registration, cached MCP
+tools, and matching stored credential to the new namespace.
 Provider tokens, OAuth tokens, refresh tokens, bearer tokens, auth codes,
 client secrets, and Slack token-cookie credentials are stored only in the OS
 credential store or transient process memory.
@@ -587,8 +625,8 @@ tool credentials are read:
 
 ```bash
 toolmux --read-only google drive available
-toolmux --read-only slack conversations_add_message \
-  --channel_id C123456 \
+toolmux --read-only slack conversations-add-message \
+  --channel-id C123456 \
   --text "This will be blocked"
 ```
 

@@ -45,64 +45,7 @@ func mcpRemoteSyncCommand(opts *options) *cobra.Command {
 }
 
 func mcpRemoteRenameCommand(opts *options) *cobra.Command {
-	var scope mcpProfileScopeOptions
-	cmd := &cobra.Command{
-		Use:   "rename <old-name> <new-name>",
-		Short: "Rename a registered remote MCP server",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			oldName, err := cleanMCPRemoteName(args[0])
-			if err != nil {
-				return err
-			}
-			newName, err := cleanMCPRemoteName(args[1])
-			if err != nil {
-				return err
-			}
-			if oldName == newName {
-				return fmt.Errorf("old and new MCP server names are both %q", oldName)
-			}
-			entry, ok, err := lookupMCPRemoteServer(oldName, opts.workDir)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("MCP server %q is not registered", oldName)
-			}
-			configPath := entry.Path
-			if scope.Global || scope.Project {
-				var scopeName string
-				configPath, scopeName, err = mcpProfileWritePath(scope)
-				if err != nil {
-					return err
-				}
-				_ = scopeName
-			}
-			config, err := readToolmuxConfigFile(configPath)
-			if err != nil {
-				return err
-			}
-			server, exists := configMCPRemoteServer(config, oldName)
-			if !exists {
-				return fmt.Errorf("MCP server %q is not registered in %s", oldName, configPath)
-			}
-			if _, exists := configMCPRemoteServer(config, newName); exists {
-				return fmt.Errorf("MCP server %q is already registered in %s", newName, configPath)
-			}
-			if err := ensureMCPRemoteNameAvailable(cmd.Root(), newName); err != nil {
-				return err
-			}
-			renameConfigMCPRemoteServer(&config, oldName, newName, server)
-			if err := writeToolmuxConfigFile(configPath, config); err != nil {
-				return err
-			}
-			_ = renameMCPRemoteCache(opts.mcpCacheDir, oldName, newName)
-			fmt.Fprintf(cmd.OutOrStdout(), "renamed MCP server %s to %s in %s\n", oldName, newName, configPath)
-			return nil
-		},
-	}
-	addMCPProfileScopeFlags(cmd, &scope)
-	return cmd
+	return toolboxRenameCommandWithMode(opts, true)
 }
 
 func toolboxRemoveCommand(opts *options) *cobra.Command {

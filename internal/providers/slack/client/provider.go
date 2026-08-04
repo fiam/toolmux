@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"strings"
 	"time"
 
 	"github.com/fiam/toolmux/internal/actions"
@@ -221,31 +222,35 @@ func slackTool(name, short, resource string, verb actions.Verb, remote actions.E
 		actions.Description(slackToolDescription(name, short)),
 		actions.RBAC(actions.ResourceName(resource), verb, remote),
 	}
+	segment := actions.CLIName(name)
+	if !strings.EqualFold(segment, name) {
+		base = append(base, actions.Aliases(name))
+	}
 	base = append(base, opts...)
-	return actions.Command(actions.LocalName(name), name, base...)
+	return actions.Command(actions.LocalName(name), segment, base...)
 }
 
 func slackToolDescription(name, fallback string) string {
 	descriptions := map[string]string{
 		"auth_test":                       "Validate the stored Slack credentials and return the authenticated team, user, team ID, user ID, and workspace URL. Use this first when Slack tools fail to distinguish bad auth from workspace or method restrictions.",
-		"conversations_history":           "Read recent messages from a Slack channel, private channel, DM, or MPIM by conversation ID. Use --channel_id with IDs such as C123, G123, or D123. Slack timestamps are strings like 1712345678.000100; use --oldest, --latest, and --inclusive to page by time, and --cursor for Slack cursor pagination.",
-		"conversations_replies":           "Read replies in a Slack thread. Pass --channel_id for the parent conversation and --thread_ts for the thread root timestamp, for example 1712345678.000100. Use this after search or history returns a message with replies.",
-		"conversations_add_message":       "Send a Slack message to a channel, DM, or MPIM. Pass --channel_id and --text, or --payload as an alias for text. Use --thread_ts to reply in a thread. Use --dry-run to preview the request without sending.",
-		"conversations_open":              "Open or resume a direct message or multi-person direct message. Pass --user_id for one user or --users with comma-separated Slack user IDs. Set --prevent_creation to avoid creating a new DM/MPIM when one does not already exist.",
-		"reactions_add":                   "Add an emoji reaction to a Slack message. Pass --channel_id, --timestamp with the message ts, and --emoji without surrounding colons, for example white_check_mark. Use --dry-run to inspect the request.",
-		"reactions_remove":                "Remove an emoji reaction from a Slack message. Pass --channel_id, --timestamp with the message ts, and --emoji without surrounding colons. Use --dry-run to inspect the request.",
+		"conversations_history":           "Read recent messages from a Slack channel, private channel, DM, or MPIM by conversation ID. Use --channel-id with IDs such as C123, G123, or D123. Slack timestamps are strings like 1712345678.000100; use --oldest, --latest, and --inclusive to page by time, and --cursor for Slack cursor pagination.",
+		"conversations_replies":           "Read replies in a Slack thread. Pass --channel-id for the parent conversation and --thread-ts for the thread root timestamp, for example 1712345678.000100. Use this after search or history returns a message with replies.",
+		"conversations_add_message":       "Send a Slack message to a channel, DM, or MPIM. Pass --channel-id and --text, or --payload as an alias for text. Use --thread-ts to reply in a thread. Use --dry-run to preview the request without sending.",
+		"conversations_open":              "Open or resume a direct message or multi-person direct message. Pass --user-id for one user or --users with comma-separated Slack user IDs. Set --prevent-creation to avoid creating a new DM/MPIM when one does not already exist.",
+		"reactions_add":                   "Add an emoji reaction to a Slack message. Pass --channel-id, --timestamp with the message ts, and --emoji without surrounding colons, for example white_check_mark. Use --dry-run to inspect the request.",
+		"reactions_remove":                "Remove an emoji reaction from a Slack message. Pass --channel-id, --timestamp with the message ts, and --emoji without surrounding colons. Use --dry-run to inspect the request.",
 		"attachment_get_data":             "Download a Slack file attachment by file ID. Text-like files return inline text content; binary files return base64 content. Slack file access still follows the authenticated user's permissions.",
-		"conversations_search_messages":   "Search Slack messages visible to the authenticated user. Provide --search_query using Slack search syntax, or combine filters such as --filter_in_channel, --filter_users_from, --filter_date_after, and --filter_threads_only. This often works in Enterprise workspaces even when workspace-wide channel listing is restricted.",
+		"conversations_search_messages":   "Search Slack messages visible to the authenticated user. Provide --search-query using Slack search syntax, or combine filters such as --filter-in-channel, --filter-users-from, --filter-date-after, and --filter-threads-only. This often works in Enterprise workspaces even when workspace-wide channel listing is restricted.",
 		"conversations_unreads":           "List unread or recent Slack conversations and optionally include recent messages from each. This uses conversation listing plus history reads, so it may be restricted in Enterprise/Grid workspaces where conversations.list is disabled.",
-		"conversations_mark":              "Mark a Slack conversation read through a timestamp. Pass --channel_id and optionally --ts; when --ts is omitted Toolmux uses the current time. Use --dry-run to inspect the request.",
+		"conversations_mark":              "Mark a Slack conversation read through a timestamp. Pass --channel-id and optionally --ts; when --ts is omitted Toolmux uses the current time. Use --dry-run to inspect the request.",
 		"channels_list":                   "List channel-like conversations in the workspace using Slack conversations.list. This is workspace-wide and may be blocked by Enterprise/Grid policy with enterprise_is_restricted. For channels the authenticated user is a member of, prefer users_conversations.",
-		"users_conversations":             "List conversations the authenticated Slack user is a member of using Slack users.conversations. Try this for membership-focused channel discovery before workspace-wide channels_list. Some Enterprise/Grid workspaces may still restrict this public Web API method. Use --user_id only to narrow to conversations shared with another user; use --team_id when Slack requires an explicit workspace team ID for an org-level token.",
+		"users_conversations":             "List conversations the authenticated Slack user is a member of using Slack users.conversations. Try this for membership-focused channel discovery before workspace-wide channels-list. Some Enterprise/Grid workspaces may still restrict this public Web API method. Use --user-id only to narrow to conversations shared with another user; use --team-id when Slack requires an explicit workspace team ID for an org-level token.",
 		"experimental_conversations_list": "Experimental: list Slack web-session conversations from Slack's web app bootstrap response. This uses an undocumented read-only web-session endpoint and is intended for Enterprise/Grid workspaces where documented public listing APIs return enterprise_is_restricted. Prefer documented tools when they work.",
-		"usergroups_list":                 "List Slack user groups. Use --include_count for member counts, --include_users for member IDs, and --include_disabled when disabled user groups should be returned.",
-		"usergroups_me":                   "Manage the authenticated user's membership in a Slack user group. Set --action to list, join, or leave. Join and leave require --usergroup_id. Use --dry-run to preview write operations.",
+		"usergroups_list":                 "List Slack user groups. Use --include-count for member counts, --include-users for member IDs, and --include-disabled when disabled user groups should be returned.",
+		"usergroups_me":                   "Manage the authenticated user's membership in a Slack user group. Set --action to list, join, or leave. Join and leave require --usergroup-id. Use --dry-run to preview write operations.",
 		"usergroups_create":               "Create a Slack user group. Pass --name and --handle, with optional --description and comma-separated default --channels. Use --dry-run to preview the request without creating anything.",
-		"usergroups_update":               "Update a Slack user group. Pass --usergroup_id and any fields to change: --name, --handle, --description, or comma-separated default --channels. Use --dry-run to preview the request.",
-		"usergroups_users_update":         "Replace the full member list of a Slack user group. Pass --usergroup_id and comma-separated --users. This is a replacement operation, not an append. Use --dry-run to preview the request.",
+		"usergroups_update":               "Update a Slack user group. Pass --usergroup-id and any fields to change: --name, --handle, --description, or comma-separated default --channels. Use --dry-run to preview the request.",
+		"usergroups_users_update":         "Replace the full member list of a Slack user group. Pass --usergroup-id and comma-separated --users. This is a replacement operation, not an append. Use --dry-run to preview the request.",
 		"users_search":                    "Search Slack users by name, display name, real name, title, or email-like text visible to the authenticated user. Use --limit to bound the number of returned users.",
 	}
 	return firstNonEmpty(descriptions[name], fallback)

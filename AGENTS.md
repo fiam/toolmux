@@ -291,7 +291,9 @@ names, and default profile selection, similar to Git config layering. Native
 and remote toolbox registrations live under the top-level `toolboxes` key. The
 registered toolbox name is both the command namespace and the credential
 account identity, so native and remote providers can be registered multiple
-times with `--name`. The root `toolmux config` command is a CLI-only
+times with `--name`. The optional non-secret `label` is a human account or
+workspace label and must not replace the unique registered name. The root
+`toolmux config` command is a CLI-only
 management surface and must never be listed as an MCP tool.
 Profiles select tools with shell-style globs (`--tool`, `--exclude-tool`) and
 regular expressions (`--tool-regex`, `--exclude-tool-regex`). Keep profile docs
@@ -333,7 +335,7 @@ sessionful remote servers. Remote MCP `tools/call` response inactivity timeout
 defaults to 60 seconds and is controlled by the top-level
 `--mcp-tool-call-timeout` flag for both CLI remote commands and
 `toolmux mcp serve`.
-Root MCP management commands such as `mcp ls`, `mcp show`, `mcp sync`,
+Root MCP management commands such as `mcp list`, `mcp show`, `mcp sync`,
 `mcp defaults`, and `mcp schema` are CLI maintenance surfaces and do not need
 policy metadata because they are not tools.
 Command-backed MCP servers use the `stdio` transport and are added with
@@ -385,32 +387,39 @@ all built-in toolboxes, include a toolbox type column, and support `--mcp` and
 `--internal` filters. MCP catalog entries must be listed whether or not they
 are registered, support scriptable `--enable`/`--disable`, and provide
 interactive `--manage` checkbox toggling for built-ins. Catalog
-enablement must allow `--enable <catalog-name>=<registered-name>` so built-ins
-can be registered under a non-conflicting command namespace.
+machine output keeps `registered_names` for compatibility and includes
+structured `registrations` with each registered name, label, scope, scopes,
+and config path. Human output calls the namespace column `Registered as`.
+Catalog enablement must allow
+`--enable <catalog-name>=<registered-name>` so built-ins can be registered
+under a non-conflicting command namespace.
 Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
 endpoints that can be added and authenticated through the server's own OAuth
 flow without users creating their own OAuth app first. Keep built-in remote MCP
 catalog data in `internal/cli/mcp_remote_catalog.yaml`, include a
 `display_name` for every entry, and keep the user-facing catalog summary in
 `README.md` current.
-`toolmux mcp ls` must use shared table styling for human output, display only
-`project` or `global` scope labels, support `mcp ls <name>` for one server's
-cached tools, and support `mcp ls -R` for a tree of all registered servers and
+`toolmux mcp list` must use shared table styling for human output, display only
+`project` or `global` scope labels, support `mcp list <name>` for one server's
+cached tools, and support `mcp list -R` for a tree of all registered servers and
 their cached tools. Running a registered remote namespace such as
 `toolmux linear` without a tool must show command help with available cached
 tools. Interactive human output must compact remote MCP tool descriptions and
 may use shared color tones for command names, arguments, and secondary text.
 Keep full upstream descriptions available through non-interactive output,
 JSON/YAML, `toolmux <server> --full-help`, and the `--full-descriptions` flag
-on `toolmux mcp ls`.
+on `toolmux mcp list`. Keep `ls` as a compatibility alias.
 
 Use `charm.land/glamour/v2` for terminal Markdown rendering. Render Markdown
 only for interactive human table output; keep non-TTY, JSON, and YAML output
 plain and stable for agents.
 
 Toolbox status is owned by the root `status [toolbox...]` command, which should
-report registered toolbox state, backend kind, stored auth type, tool count,
-scope, and source URL when available. Do not add provider-specific
+report the registered name, optional account label, toolbox state, backend
+kind, stored auth type, tool count, scope, and source URL when available.
+`toolmux auth whoami <toolbox>` should use a provider-owned read-only connection
+identity action or a catalog-declared remote identity probe and must not print
+token material. Do not add provider-specific
 `status` subcommands. The root status command is CLI-only management and does
 not need policy metadata.
 
@@ -420,6 +429,10 @@ remote MCP diagnostics with actionable remediation as CLI-only management.
 `doctor --fix` may perform safe non-interactive repairs such as remote MCP OAuth
 refresh and stale cache sync, but must not start OAuth login, open browsers,
 prompt, or create new auth.
+Policy evaluation uses `toolmux policy check`; keep `policy explain` only as a
+compatibility alias. Detailed per-tool explanations belong to root
+`toolmux why`, and the hidden legacy `policy doctor` path must not replace root
+`doctor` in help or documentation.
 
 When adding or changing a provider, update the PRD or implementation docs if the
 provider needs new output fields, error fields, aliases, shell completions,
@@ -497,7 +510,11 @@ MCP tool commands and agent-callable Toolmux management tools such as
 `toolmux.auth_refresh` do need policy metadata. Imported remote MCP server names
 must not collide with native top-level commands or aliases. If a newly added
 native command collides with an existing imported MCP server, startup must fail
-with an actionable error that prints `toolmux mcp rename <old-name> <new-name>`.
+with an actionable error that prints `toolmux rename <old-name> <new-name>`.
+Root `toolmux rename` must support native and remote toolboxes and move the
+registration, cached remote tool metadata, and matching credential-store entry
+together. Keep `toolmux mcp rename` as a compatibility path for remote MCP
+servers.
 Synthetic remote MCP tool commands must generate flags for representable
 top-level input-schema properties, keep help focused on command usage, expose
 full schemas through the `toolmux mcp schema` command, and provide
@@ -509,8 +526,15 @@ leaf help must come from a provider-owned `actions.Spec` tree. Use the same
 type for group nodes and leaf actions, and let upper layers walk the tree
 instead of maintaining a parallel group model. Do not hardcode provider command
 trees or provider command flags in the Cobra root layer. Root management
-surfaces such as `add`, `remove`, `rm`, `list`, `status`, `doctor`, `config`,
-`policy`, `workflow`, and `mcp` are code-driven CLI-only command surfaces.
+surfaces such as `add`, `remove`, `rm`, `rename`, `list`, `status`, `doctor`,
+`config`, `policy`, `workflow`, and `mcp` are code-driven CLI-only command
+surfaces.
+Human CLI commands and flags use kebab-case. Preserve stable provider action
+IDs, MCP tool names, structured argument keys, and upstream calls, and keep
+older snake_case or camelCase spellings as compatibility aliases when their
+human CLI spelling changes. Strip a redundant catalog provider prefix from a
+remote human CLI command only when the resulting name is unambiguous; MCP tool
+IDs must retain the raw upstream name.
 Use `actions.Short` for compact command listings and `actions.Description` for
 detailed long help and MCP `tools/list` descriptions. Keep provider
 descriptions concrete enough for agents to understand identifiers, timestamp

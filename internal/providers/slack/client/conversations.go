@@ -99,7 +99,7 @@ func handleConversationsAddMessage(exec actions.Context, inv actions.Invocation)
 func handleConversationsOpen(exec actions.Context, inv actions.Invocation) (any, error) {
 	users := firstNonEmpty(inv.String("users"), inv.String("user_id"))
 	if users == "" {
-		return nil, fmt.Errorf("users is required; pass --user_id or --users")
+		return nil, fmt.Errorf("users is required; pass --user-id or --users")
 	}
 	request := openConversationRequest{
 		Users:           users,

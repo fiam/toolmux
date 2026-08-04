@@ -82,6 +82,58 @@ func registeredGoogleWorkDir(t *testing.T) string {
 	return workDir
 }
 
+func TestNativeCLIUsesKebabCaseWithLegacyAliases(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	if err := writeToolmuxConfigFile(filepath.Join(workDir, toolmuxConfigRelPath), toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"slack": {Type: toolboxTypeInternal, Provider: "slack"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	root := NewRootCommandWithDeps(Dependencies{WorkDir: workDir})
+	canonical, _, err := root.Find([]string{"slack", "conversations-add-message"})
+	if err != nil || canonical.Name() != "conversations-add-message" {
+		t.Fatalf("find canonical Slack command: command=%v err=%v", canonical, err)
+	}
+	legacy, _, err := root.Find([]string{"slack", "conversations_add_message"})
+	if err != nil || legacy != canonical {
+		t.Fatalf("find legacy Slack alias: command=%v err=%v", legacy, err)
+	}
+	if canonical.Flags().Lookup("channel-id") == nil || canonical.Flags().Lookup("channel_id") == nil {
+		t.Fatal("expected canonical --channel-id and legacy --channel_id to resolve")
+	}
+}
+
+func TestPolicyCommandHidesRedundantCompatibilityPaths(t *testing.T) {
+	t.Parallel()
+	root := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
+	check, _, err := root.Find([]string{"policy", "check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	explain, _, err := root.Find([]string{"policy", "explain"})
+	if err != nil || explain != check {
+		t.Fatalf("policy explain alias: command=%v err=%v", explain, err)
+	}
+	doctor, _, err := root.Find([]string{"policy", "doctor"})
+	if err != nil || !doctor.Hidden {
+		t.Fatalf("hidden policy doctor compatibility command: command=%v err=%v", doctor, err)
+	}
+	out := &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"policy", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\n  explain ") || strings.Contains(out.String(), "\n  doctor ") {
+		t.Fatalf("policy help exposes redundant compatibility commands:\n%s", out.String())
+	}
+}
+
 func TestRootAuthCommandIsPublicAndMCPAuthIsHidden(t *testing.T) {
 	t.Parallel()
 	cmd := NewRootCommandWithDeps(Dependencies{Credentials: credentials.NewMemoryStore()})
@@ -92,7 +144,7 @@ func TestRootAuthCommandIsPublicAndMCPAuthIsHidden(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Manage stored auth for toolboxes") || !strings.Contains(out.String(), "refresh") {
+	if !strings.Contains(out.String(), "Manage stored auth for toolboxes") || !strings.Contains(out.String(), "refresh") || !strings.Contains(out.String(), "whoami") {
 		t.Fatalf("expected root auth help, got %q", out.String())
 	}
 

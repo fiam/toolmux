@@ -26,25 +26,42 @@ func writeMCPRemoteToolResult(cmd *cobra.Command, opts *options, result mcpCallT
 	return writeValue(cmd, opts, result, nil)
 }
 
-func mcpRemoteActionSpecForEntry(entry mcpRemoteServerEntry, tool mcpRemoteTool) actions.Spec {
+func mcpRemoteActionSpecForEntry(entry mcpRemoteServerEntry, tool mcpRemoteTool, names ...string) actions.Spec {
 	serverName := entry.Name
 	id := serverName + "." + tool.Name
+	cliName := mcpRemoteToolCLIBaseName(entry, tool.Name)
+	if len(names) > 0 && names[0] != "" {
+		cliName = names[0]
+	}
 	localEffect := actions.EffectNone
+	remoteEffect := actions.EffectWrite
 	risks := []string{"remote-mcp", "remote-write"}
+	if mcpRemoteToolIsIdentityProbe(entry, tool.Name) {
+		remoteEffect = actions.EffectRead
+		risks = []string{"remote-mcp"}
+	}
 	if entry.Server.Transport == mcpRemoteTransportStdio {
 		localEffect = actions.EffectWrite
 		risks = []string{"stdio-mcp", "local-command", "remote-write", "local-write"}
 	}
-	spec := actions.Command(actions.LocalName(id), tool.Name,
-		actions.Use(tool.Name),
+	spec := actions.Command(actions.LocalName(id), cliName,
+		actions.Use(cliName),
 		actions.Short(firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name)),
-		actions.RBAC(actions.ResourceName("mcp_remote"), actions.Verb("call"), actions.EffectWrite, localEffect),
+		actions.RBAC(actions.ResourceName("mcp_remote"), actions.Verb("call"), remoteEffect, localEffect),
 		actions.Risks(risks...),
 		actions.Scopes("mcp:"+serverName),
 	)
+	if cliName != tool.Name {
+		spec.Aliases = []string{tool.Name}
+	}
 	spec.Provider = serverName
-	spec.Path = []string{serverName, tool.Name}
+	spec.Path = []string{serverName, cliName}
 	return spec
+}
+
+func mcpRemoteActionSpecForRef(ref mcpRemoteToolRef) actions.Spec {
+	cliNames := mcpRemoteToolCLINames(ref.Entry, ref.Cache.Tools)
+	return mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool, cliNames[ref.Tool.Name])
 }
 
 func cachedMCPRemoteCommandSpecs(opts *options) []policy.CommandSpec {
@@ -54,7 +71,7 @@ func cachedMCPRemoteCommandSpecs(opts *options) []policy.CommandSpec {
 	refs := mcpRemoteToolRefs(opts)
 	specs := make([]policy.CommandSpec, 0, len(refs))
 	for _, ref := range refs {
-		specs = append(specs, mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool))
+		specs = append(specs, mcpRemoteActionSpecForRef(ref))
 	}
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].ID < specs[j].ID
@@ -67,8 +84,9 @@ func mcpRemoteSpecForCommandParts(opts *options, parts []string) (policy.Command
 		return policy.CommandSpec{}, false
 	}
 	for _, ref := range mcpRemoteToolRefs(opts) {
-		if ref.Entry.Name == parts[0] && ref.Tool.Name == parts[1] {
-			return mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool), true
+		spec := mcpRemoteActionSpecForRef(ref)
+		if ref.Entry.Name == parts[0] && (ref.Tool.Name == parts[1] || spec.Path[1] == parts[1]) {
+			return spec, true
 		}
 	}
 	return policy.CommandSpec{}, false
@@ -81,7 +99,7 @@ func (server mcpServer) remoteMCPTools(ctx context.Context) []any {
 	refs := server.remoteMCPToolRefs(ctx)
 	tools := make([]any, 0, len(refs))
 	for _, ref := range refs {
-		spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
+		spec := mcpRemoteActionSpecForRef(ref)
 		if !server.selector.matches(spec) {
 			continue
 		}
@@ -169,7 +187,7 @@ func mcpRemoteToolRefsWithRefresh(ctx context.Context, cmd *cobra.Command, opts 
 
 func (server mcpServer) lookupRemoteMCPTool(ctx context.Context, name string) (mcpRemoteToolRef, bool) {
 	for _, ref := range server.remoteMCPToolRefs(ctx) {
-		spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
+		spec := mcpRemoteActionSpecForRef(ref)
 		if spec.ID == name && server.selector.matches(spec) {
 			return ref, true
 		}
@@ -199,7 +217,7 @@ func mcpRemoteConflictsError(conflicts []mcpRemoteNameConflict) error {
 		return conflicts[i].Name < conflicts[j].Name
 	})
 	conflict := conflicts[0]
-	return fmt.Errorf("imported MCP server %q conflicts with a native Toolmux command; rename it with: toolmux mcp rename %s <new-name>", conflict.Name, conflict.Name)
+	return fmt.Errorf("imported MCP server %q conflicts with a native Toolmux command; rename it with: toolmux rename %s <new-name>", conflict.Name, conflict.Name)
 }
 
 func mcpRemoteCommandAllowsConflicts(cmd *cobra.Command) bool {
@@ -207,7 +225,7 @@ func mcpRemoteCommandAllowsConflicts(cmd *cobra.Command) bool {
 		return false
 	}
 	path := commandPathNames(cmd)
-	if len(path) >= 2 && path[0] == "toolmux" && (path[1] == "add" || path[1] == "remove" || path[1] == "rm") {
+	if len(path) >= 2 && path[0] == "toolmux" && (path[1] == "add" || path[1] == "remove" || path[1] == "rm" || path[1] == "rename") {
 		return true
 	}
 	if len(path) < 3 || path[0] != "toolmux" || path[1] != "mcp" {

@@ -12,8 +12,8 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 	var recursive bool
 	var fullDescriptions bool
 	cmd := &cobra.Command{
-		Use:     "ls [name]",
-		Aliases: []string{"list"},
+		Use:     "list [name]",
+		Aliases: []string{"ls"},
 		Short:   "List registered remote MCP servers",
 		Args:    cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,7 +45,7 @@ func mcpRemoteListCommand(opts *options) *cobra.Command {
 					Tools:  sortedMCPRemoteTools(cache.Tools),
 				}
 				return writeValue(cmd, opts, result, func(w io.Writer) {
-					renderMCPRemoteToolTable(w, cmd, opts, entry.Name, result.Tools, fullDescriptions)
+					renderMCPRemoteToolTable(w, cmd, opts, entry, result.Tools, fullDescriptions)
 				})
 			}
 			if recursive {

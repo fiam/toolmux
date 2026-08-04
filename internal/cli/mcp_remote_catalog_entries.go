@@ -48,9 +48,17 @@ func mcpRemoteCatalogEntries(root *cobra.Command, opts *options) ([]mcpRemoteCat
 			entry.Status = "registered"
 			entry.Registered = true
 			entry.RegisteredNames = make([]string, 0, len(matches))
+			entry.Registrations = make([]toolboxRegistration, 0, len(matches))
 			scopes := map[string]bool{}
 			for _, match := range matches {
 				entry.RegisteredNames = append(entry.RegisteredNames, match.Name)
+				entry.Registrations = append(entry.Registrations, toolboxRegistration{
+					Name:   match.Name,
+					Label:  match.Label,
+					Scope:  mcpRemoteScopeLabel(match.Scope),
+					Scopes: mcpRemoteNormalizedScopes(match.Scopes),
+					Path:   match.Path,
+				})
 				for _, scope := range match.Scopes {
 					scopes[scope] = true
 				}

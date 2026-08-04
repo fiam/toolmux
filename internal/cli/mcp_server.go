@@ -390,7 +390,7 @@ func (server mcpServer) callRemoteTool(ctx context.Context, ref mcpRemoteToolRef
 		return mcpCallToolResult{}, mcpError{Code: -32602, Message: err.Error()}
 	}
 	arguments = mcpRemoteMergeDefaultArguments(arguments, ref.Entry.Server.DefaultArguments, ref.Tool.InputSchema)
-	spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
+	spec := mcpRemoteActionSpecForRef(ref)
 	decision, derr := decisionFor(server.cmd, server.opts, spec, nil)
 	if derr != nil {
 		server.recordToolCall(ctx, spec, arguments, policy.Decision{Reason: derr.Error(), Rule: "error"}, derr, 0)

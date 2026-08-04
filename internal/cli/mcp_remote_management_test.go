@@ -110,13 +110,147 @@ func TestMCPRemoteServerStartupConflictPrintsRenameCommand(t *testing.T) {
 	cmd := rootForRemoteTest(env)
 	cmd.SetArgs([]string{"status"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "toolmux mcp rename status <new-name>") {
+	if err == nil || !strings.Contains(err.Error(), "toolmux rename status <new-name>") {
 		t.Fatalf("expected rename guidance, got %v", err)
 	}
 
 	out := runRootForRemoteTest(t, env, "mcp", "rename", "status", "status2")
 	if !strings.Contains(out, "renamed MCP server status to status2") {
 		t.Fatalf("expected rename output, got %q", out)
+	}
+}
+
+func TestToolboxRenameMovesRemoteAuthCacheAndLabel(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	server := mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}
+	config := toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"notion": withToolboxLabel(toolboxConfigFromMCPRemoteServer(server, "notion"), "Work workspace"),
+		},
+	}
+	if err := writeToolmuxConfigFile(env.Config, config); err != nil {
+		t.Fatal(err)
+	}
+	oldRef := mcpRemoteCredentialRef(&options{profile: "default"}, "notion")
+	if err := env.Store.SaveOAuthTokens(context.Background(), oldRef, credentials.OAuthTokens{
+		AccessToken: "notion-token",
+		Extra:       map[string]string{"mcp_server": "notion"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMCPRemoteCache(env.CacheDir, "notion", mcpRemoteCache{
+		Name: "notion",
+		URL:  server.URL,
+		Tools: []mcpRemoteTool{
+			{Name: "notion-get-users"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTest(t, env, "rename", "notion", "notion-work")
+	if !strings.Contains(output, "renamed toolbox notion to notion-work") {
+		t.Fatalf("unexpected rename output: %q", output)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := config.Toolboxes["notion"]; exists {
+		t.Fatal("old toolbox config still exists")
+	}
+	if got := config.Toolboxes["notion-work"].Label; got != "Work workspace" {
+		t.Fatalf("renamed toolbox label = %q", got)
+	}
+	newRef := mcpRemoteCredentialRef(&options{profile: "default"}, "notion-work")
+	tokens, err := env.Store.LoadOAuthTokens(context.Background(), newRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "notion-token" || tokens.Extra["mcp_server"] != "notion-work" {
+		t.Fatalf("unexpected renamed tokens: %#v", tokens)
+	}
+	if _, err := env.Store.LoadOAuthTokens(context.Background(), oldRef); !errors.Is(err, credentials.ErrNotFound) {
+		t.Fatalf("old stored auth still exists: %v", err)
+	}
+	if cache, ok, err := readMCPRemoteCacheIfExists(env.CacheDir, "notion-work"); err != nil || !ok || cache.Name != "notion-work" {
+		t.Fatalf("renamed cache missing: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestToolboxRenameKeepsAuthAndCacheForOtherConfigScope(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	server := mcpRemoteServer{URL: "https://mcp.notion.com/mcp", Transport: mcpRemoteTransportStreamableHTTP}
+	globalConfig := toolmuxConfigFile{Version: 1, Toolboxes: map[string]toolboxConfig{
+		"notion": toolboxConfigFromMCPRemoteServer(server, "notion"),
+	}}
+	if err := writeToolmuxConfigFile(env.Config, globalConfig); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	t.Chdir(projectDir)
+	projectPath := filepath.Join(projectDir, toolmuxConfigRelPath)
+	if err := writeToolmuxConfigFile(projectPath, globalConfig); err != nil {
+		t.Fatal(err)
+	}
+	oldRef := mcpRemoteCredentialRef(&options{profile: "default"}, "notion")
+	if err := env.Store.SaveOAuthTokens(context.Background(), oldRef, credentials.OAuthTokens{AccessToken: "notion-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMCPRemoteCache(env.CacheDir, "notion", mcpRemoteCache{Name: "notion", URL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+
+	runRootForRemoteTest(t, env, "rename", "notion", "notion-work", "--project")
+	if _, err := env.Store.LoadOAuthTokens(context.Background(), oldRef); err != nil {
+		t.Fatalf("global registration lost shared auth: %v", err)
+	}
+	newRef := mcpRemoteCredentialRef(&options{profile: "default"}, "notion-work")
+	if _, err := env.Store.LoadOAuthTokens(context.Background(), newRef); err != nil {
+		t.Fatalf("renamed project registration missing copied auth: %v", err)
+	}
+	if _, ok, err := readMCPRemoteCacheIfExists(env.CacheDir, "notion"); err != nil || !ok {
+		t.Fatalf("global registration lost shared cache: ok=%v err=%v", ok, err)
+	}
+	if cache, ok, err := readMCPRemoteCacheIfExists(env.CacheDir, "notion-work"); err != nil || !ok || cache.Name != "notion-work" {
+		t.Fatalf("project registration missing copied cache: cache=%#v ok=%v err=%v", cache, ok, err)
+	}
+}
+
+func TestToolboxRenameMovesNativeAuthAndLabel(t *testing.T) {
+	env := newMCPRemoteTestEnv(t)
+	config := toolmuxConfigFile{
+		Version: 1,
+		Toolboxes: map[string]toolboxConfig{
+			"slack-work": {Type: toolboxTypeInternal, Provider: "slack", Label: "Work workspace"},
+		},
+	}
+	if err := writeToolmuxConfigFile(env.Config, config); err != nil {
+		t.Fatal(err)
+	}
+	oldRef := credentials.ConnectionRef{Profile: "default", Provider: "slack", AccountID: "slack-work"}
+	if err := env.Store.SaveOAuthTokens(context.Background(), oldRef, credentials.OAuthTokens{AccessToken: "slack-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runRootForRemoteTest(t, env, "rename", "slack-work", "slack-personal", "--label", "Personal workspace")
+	if !strings.Contains(output, "renamed toolbox slack-work to slack-personal") {
+		t.Fatalf("unexpected rename output: %q", output)
+	}
+	config, err := readToolmuxConfigFile(env.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Toolboxes["slack-personal"].Label; got != "Personal workspace" {
+		t.Fatalf("renamed native toolbox label = %q", got)
+	}
+	newRef := credentials.ConnectionRef{Profile: "default", Provider: "slack", AccountID: "slack-personal"}
+	if _, err := env.Store.LoadOAuthTokens(context.Background(), newRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Store.LoadOAuthTokens(context.Background(), oldRef); !errors.Is(err, credentials.ErrNotFound) {
+		t.Fatalf("old native stored auth still exists: %v", err)
 	}
 }
 

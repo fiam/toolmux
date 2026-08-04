@@ -74,12 +74,22 @@ func lookupMCPRemoteToolForSchema(ctx context.Context, cmd *cobra.Command, opts 
 	}
 	tool, found := mcpRemoteToolFromCache(cache, toolName)
 	if !found {
+		cliNames := mcpRemoteToolCLINames(entry, cache.Tools)
+		for _, candidate := range cache.Tools {
+			if cliNames[candidate.Name] == toolName {
+				tool = candidate
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
 		return mcpRemoteToolRef{}, false, nil
 	}
 	return mcpRemoteToolRef{Entry: entry, Cache: cache, Tool: tool}, true, nil
 }
 
-func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool, defaultArguments ...map[string]any) {
+func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool, defaultArguments ...map[string]any) map[string]string {
 	properties := mcpRemoteSchemaProperties(tool.InputSchema)
 	required := mcpRemoteRequiredSet(tool.InputSchema)
 	if len(defaultArguments) > 0 {
@@ -92,12 +102,17 @@ func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool, defaultArgume
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	for _, name := range names {
+	mapping := newCLINameMapping(names, func(name string) bool {
+		return mcpRemoteFlagNameReserved(cmd, name)
+	})
+	mapping.installFlagAliases(cmd.Flags())
+	for _, rawName := range names {
+		name := mapping.name(rawName)
 		if mcpRemoteFlagNameReserved(cmd, name) {
 			continue
 		}
-		property, _ := properties[name].(map[string]any)
-		usage := mcpRemoteFlagUsage(property, required[name])
+		property, _ := properties[rawName].(map[string]any)
+		usage := mcpRemoteFlagUsage(property, required[rawName])
 		switch mcpRemoteSchemaType(property) {
 		case "boolean":
 			cmd.Flags().Bool(name, false, usage)
@@ -117,9 +132,10 @@ func addMCPRemoteToolFlags(cmd *cobra.Command, tool mcpRemoteTool, defaultArgume
 			cmd.Flags().StringArray(name, nil, usage)
 		}
 	}
+	return mapping.canonical
 }
 
-func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRemoteTool, defaultArguments map[string]any) (map[string]any, error) {
+func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRemoteTool, defaultArguments map[string]any, flagNames map[string]string) (map[string]any, error) {
 	arguments := mcpRemoteDefaultArgumentsForTool(defaultArguments, tool.InputSchema)
 	rawJSON = strings.TrimSpace(rawJSON)
 	if rawJSON != "" {
@@ -141,61 +157,62 @@ func decodeMCPRemoteCLIArguments(cmd *cobra.Command, rawJSON string, tool mcpRem
 		maps.Copy(arguments, rawArguments)
 	}
 	properties := mcpRemoteSchemaProperties(tool.InputSchema)
-	for name := range properties {
+	for rawName := range properties {
+		name := firstNonEmpty(flagNames[rawName], rawName)
 		flag := cmd.Flags().Lookup(name)
 		if flag == nil || !cmd.Flags().Changed(name) {
 			continue
 		}
-		property, _ := properties[name].(map[string]any)
+		property, _ := properties[rawName].(map[string]any)
 		switch mcpRemoteSchemaType(property) {
 		case "boolean":
 			value, err := cmd.Flags().GetBool(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "integer":
 			value, err := cmd.Flags().GetInt(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "number":
 			value, err := cmd.Flags().GetFloat64(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "string":
 			value, err := cmd.Flags().GetString(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "boolean_array":
 			value, err := cmd.Flags().GetBoolSlice(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "integer_array":
 			value, err := cmd.Flags().GetIntSlice(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "number_array":
 			value, err := cmd.Flags().GetFloat64Slice(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		case "string_array":
 			value, err := cmd.Flags().GetStringArray(name)
 			if err != nil {
 				return nil, err
 			}
-			arguments[name] = value
+			arguments[rawName] = value
 		}
 	}
 	if err := validateMCPRemoteRequiredArguments(arguments, tool.InputSchema); err != nil {
@@ -451,6 +468,6 @@ func setMCPRemoteToolHelp(cmd *cobra.Command, entry mcpRemoteServerEntry, tool m
 			fmt.Fprint(cmd.OutOrStdout(), cmd.UsageString())
 		}
 		fmt.Fprintln(cmd.OutOrStdout())
-		fmt.Fprintf(cmd.OutOrStdout(), "Run `toolmux mcp schema %s %s` to view the full input schema.\n", entry.Name, tool.Name)
+		fmt.Fprintf(cmd.OutOrStdout(), "Run `toolmux mcp schema %s %s` to view the full input schema.\n", entry.Name, cmd.Name())
 	})
 }

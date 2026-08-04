@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -109,7 +110,16 @@ func commandMatchesPolicySpec(parts []string, spec policy.CommandSpec) bool {
 	if len(parts) == 1 && parts[0] == spec.ID {
 		return true
 	}
-	return len(parts) >= len(spec.Path) && equalStrings(parts[:len(spec.Path)], spec.Path)
+	if len(parts) < len(spec.Path) {
+		return false
+	}
+	if equalStrings(parts[:len(spec.Path)], spec.Path) {
+		return true
+	}
+	if len(spec.Path) == 0 || !equalStrings(parts[:len(spec.Path)-1], spec.Path[:len(spec.Path)-1]) {
+		return false
+	}
+	return slices.Contains(spec.Aliases, parts[len(spec.Path)-1])
 }
 
 func nativePolicyCommandSpecs(opts *options) []policy.CommandSpec {

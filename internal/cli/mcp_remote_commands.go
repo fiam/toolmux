@@ -84,24 +84,26 @@ func mcpRemoteRootCommand(opts *options, entry mcpRemoteServerEntry) *cobra.Comm
 		}
 		return cmd
 	}
+	cliNames := mcpRemoteToolCLINames(entry, cache.Tools)
 	for _, tool := range cache.Tools {
-		cmd.AddCommand(mcpRemoteToolCommand(opts, entry, tool))
+		cmd.AddCommand(mcpRemoteToolCommand(opts, entry, tool, cliNames[tool.Name]))
 	}
 	return cmd
 }
 
-func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRemoteTool) *cobra.Command {
+func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRemoteTool, cliName string) *cobra.Command {
 	var rawJSON string
 	var verboseHTTP bool
-	spec := mcpRemoteActionSpecForEntry(entry, tool)
+	var flagNames map[string]string
+	spec := mcpRemoteActionSpecForEntry(entry, tool, cliName)
 	description := firstNonEmpty(tool.Description, "Call remote MCP tool "+tool.Name)
 	cmd := &cobra.Command{
-		Use:   tool.Name,
+		Use:   cliName,
 		Short: description,
 		Long:  description,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			arguments, err := decodeMCPRemoteCLIArguments(cmd, rawJSON, tool, entry.Server.DefaultArguments)
+			arguments, err := decodeMCPRemoteCLIArguments(cmd, rawJSON, tool, entry.Server.DefaultArguments, flagNames)
 			if err != nil {
 				return mcpRemoteDefaultArgumentErrorWithHint(err, entry)
 			}
@@ -109,43 +111,51 @@ func mcpRemoteToolCommand(opts *options, entry mcpRemoteServerEntry, tool mcpRem
 				return err
 			}
 			trace := newMCPRemoteHTTPTrace(cmd.ErrOrStderr(), verboseHTTP)
-			toolForCall := tool
-			if refreshed, ok := refreshMCPRemoteCacheIfStale(commandContext(cmd), cmd, opts, entry, trace); ok {
-				freshTool, found := mcpRemoteToolFromCache(refreshed, tool.Name)
-				if !found {
-					return fmt.Errorf("remote MCP tool %s.%s no longer exists after cache refresh", entry.Name, tool.Name)
-				}
-				toolForCall = freshTool
-			}
-			token := ""
-			if entry.Server.Transport != mcpRemoteTransportStdio {
-				var err error
-				token, err = loadMCPRemoteAccessTokenForCommand(cmd, opts, entry)
-				if err != nil {
-					return err
-				}
-			}
-			result, err := callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, token, mcpRemoteToolCallTimeout(opts), trace)
-			if err != nil && entry.Server.Transport != mcpRemoteTransportStdio && mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
-				refreshedToken, refreshed, refreshErr := refreshMCPRemoteAccessTokenAfterUnauthorizedForCommand(cmd, opts, entry)
-				if refreshErr != nil {
-					return fmt.Errorf("%s; OAuth refresh failed for MCP server %s: %w; run `toolmux auth login %s` if the refresh token is no longer valid", err.Error(), entry.Name, refreshErr, entry.Name)
-				}
-				if refreshed {
-					result, err = callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, refreshedToken, mcpRemoteToolCallTimeout(opts), trace)
-				}
-			}
+			result, err := callMCPRemoteToolForCommand(cmd, opts, entry, tool, arguments, trace)
 			if err != nil {
 				return err
 			}
 			return writeMCPRemoteToolResult(cmd, opts, result)
 		},
 	}
+	if cliName != tool.Name {
+		cmd.Aliases = []string{tool.Name}
+	}
 	cmd.Flags().StringVar(&rawJSON, "json", "", "JSON object with remote MCP tool arguments, or @path")
 	cmd.Flags().BoolVarP(&verboseHTTP, "verbose", "v", false, "print raw remote MCP HTTP requests and responses to stderr")
-	addMCPRemoteToolFlags(cmd, tool, entry.Server.DefaultArguments)
+	flagNames = addMCPRemoteToolFlags(cmd, tool, entry.Server.DefaultArguments)
 	setMCPRemoteToolHelp(cmd, entry, tool)
 	return cmd
+}
+
+func callMCPRemoteToolForCommand(cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, tool mcpRemoteTool, arguments map[string]any, trace *mcpRemoteHTTPTrace) (mcpCallToolResult, error) {
+	toolForCall := tool
+	if refreshed, ok := refreshMCPRemoteCacheIfStale(commandContext(cmd), cmd, opts, entry, trace); ok {
+		freshTool, found := mcpRemoteToolFromCache(refreshed, tool.Name)
+		if !found {
+			return mcpCallToolResult{}, fmt.Errorf("remote MCP tool %s.%s no longer exists after cache refresh", entry.Name, tool.Name)
+		}
+		toolForCall = freshTool
+	}
+	token := ""
+	if entry.Server.Transport != mcpRemoteTransportStdio {
+		var err error
+		token, err = loadMCPRemoteAccessTokenForCommand(cmd, opts, entry)
+		if err != nil {
+			return mcpCallToolResult{}, err
+		}
+	}
+	result, err := callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, token, mcpRemoteToolCallTimeout(opts), trace)
+	if err != nil && entry.Server.Transport != mcpRemoteTransportStdio && mcpRemoteErrorStatus(err, http.StatusUnauthorized) {
+		refreshedToken, refreshed, refreshErr := refreshMCPRemoteAccessTokenAfterUnauthorizedForCommand(cmd, opts, entry)
+		if refreshErr != nil {
+			return mcpCallToolResult{}, fmt.Errorf("%s; OAuth refresh failed for MCP server %s: %w; run `toolmux auth login %s` if the refresh token is no longer valid", err.Error(), entry.Name, refreshErr, entry.Name)
+		}
+		if refreshed {
+			result, err = callMCPRemoteTool(commandContext(cmd), opts.httpClient, entry, toolForCall, arguments, refreshedToken, mcpRemoteToolCallTimeout(opts), trace)
+		}
+	}
+	return result, err
 }
 
 func setMCPRemoteRootHelp(cmd *cobra.Command, opts *options, fullHelp *bool) {

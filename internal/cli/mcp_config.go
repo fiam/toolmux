@@ -29,6 +29,7 @@ type toolboxConfig struct {
 	Type             string         `json:"type" yaml:"type"`
 	Provider         string         `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Catalog          string         `json:"catalog,omitempty" yaml:"catalog,omitempty"`
+	Label            string         `json:"label,omitempty" yaml:"label,omitempty"`
 	URL              string         `json:"url,omitempty" yaml:"url,omitempty"`
 	Command          string         `json:"command,omitempty" yaml:"command,omitempty"`
 	Args             []string       `json:"args,omitempty" yaml:"args,omitempty"`

@@ -35,8 +35,8 @@ func mcpRemoteDefaultsCommand(opts *options) *cobra.Command {
 
 func mcpRemoteDefaultsListCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
-		Use:     "ls <name>",
-		Aliases: []string{"list", "show"},
+		Use:     "list <name>",
+		Aliases: []string{"ls", "show"},
 		Short:   "List default arguments for a remote MCP server",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -89,7 +89,7 @@ func (server mcpServer) lazyToolUniverse(ctx context.Context) []lazyToolEntry {
 		})
 	}
 	for _, ref := range server.remoteMCPToolRefs(ctx) {
-		spec := mcpRemoteActionSpecForEntry(ref.Entry, ref.Tool)
+		spec := mcpRemoteActionSpecForRef(ref)
 		if !server.selector.matches(spec) {
 			continue
 		}

@@ -101,8 +101,8 @@ func mcpProfileCommand(opts *options) *cobra.Command {
 	cmd.AddCommand(defaultCommand)
 
 	cmd.AddCommand(&cobra.Command{
-		Use:     "ls",
-		Aliases: []string{"list"},
+		Use:     "list",
+		Aliases: []string{"ls"},
 		Short:   "List MCP tool profiles",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

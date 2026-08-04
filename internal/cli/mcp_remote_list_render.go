@@ -61,20 +61,21 @@ func renderMCPRemoteListTable(w io.Writer, cmd *cobra.Command, opts *options, it
 	})
 }
 
-func renderMCPRemoteToolTable(w io.Writer, cmd *cobra.Command, opts *options, serverName string, tools []mcpRemoteTool, fullDescriptions bool) {
+func renderMCPRemoteToolTable(w io.Writer, cmd *cobra.Command, opts *options, entry mcpRemoteServerEntry, tools []mcpRemoteTool, fullDescriptions bool) {
 	human := humanOutputOptions(cmd, opts)
+	cliNames := mcpRemoteToolCLINames(entry, tools)
 	rows := make([][]string, 0, len(tools))
 	for _, tool := range tools {
 		rows = append(rows, []string{
-			output.ToneText(human, output.ToneInfo, tool.Name),
+			output.ToneText(human, output.ToneInfo, cliNames[tool.Name]),
 			output.ToneText(human, output.ToneMuted, mcpRemoteToolArgumentsLabel(tool)),
 			output.Value(mcpRemoteDisplayDescription(cmd, opts, tool.Description, fullDescriptions)),
 		})
 	}
 	output.RenderTable(w, human, output.Table{
-		Headers: []string{"Tool", "Arguments", "Description"},
+		Headers: []string{"Command", "Arguments", "Description"},
 		Rows:    rows,
-		Empty:   "no cached tools for " + serverName,
+		Empty:   "no cached tools for " + entry.Name,
 	})
 }
 
@@ -115,6 +116,14 @@ func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items [
 		if item.Status != "synced" {
 			continue
 		}
+		entry := mcpRemoteServerEntry{
+			Name: item.Name,
+			Server: mcpRemoteServer{
+				URL:       item.URL,
+				Transport: item.Transport,
+			},
+		}
+		cliNames := mcpRemoteToolCLINames(entry, item.Tools)
 		for toolIndex, tool := range item.Tools {
 			connector := "├──"
 			if toolIndex == len(item.Tools)-1 {
@@ -131,7 +140,7 @@ func renderMCPRemoteTree(w io.Writer, cmd *cobra.Command, opts *options, items [
 			if strings.TrimSpace(tool.Description) != "" {
 				description = " " + output.ToneText(human, output.ToneMuted, "- "+mcpRemoteDisplayDescription(cmd, opts, tool.Description, fullDescriptions))
 			}
-			fmt.Fprintf(w, "%s %s%s%s\n", connector, output.ToneText(human, output.ToneInfo, tool.Name), args, description)
+			fmt.Fprintf(w, "%s %s%s%s\n", connector, output.ToneText(human, output.ToneInfo, cliNames[tool.Name]), args, description)
 		}
 		if entryIndex != len(items)-1 {
 			fmt.Fprintln(w)
@@ -192,9 +201,10 @@ func mcpRemoteToolArgumentsLabel(tool mcpRemoteTool) string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	mapping := newCLINameMapping(names, nil)
 	labels := make([]string, 0, len(names))
 	for _, name := range names {
-		label := name
+		label := mapping.name(name)
 		if required[name] {
 			label += "*"
 		}

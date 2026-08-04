@@ -83,6 +83,11 @@ servers:
     server:
       url: https://mcp.notion.com/mcp
       transport: streamable-http
+    identity:
+      - tool: notion-get-self
+      - tool: notion-get-users
+        arguments:
+          user_id: self
   pagerduty:
     display_name: PagerDuty
     server:
