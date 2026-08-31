@@ -21,3 +21,23 @@ func TestDocsAPIURLKeepsCustomBase(t *testing.T) {
 		t.Fatalf("expected custom Docs API URL %q, got %q", want, got)
 	}
 }
+
+func TestSheetsAPIURLUsesSheetsHostForGoogleDefaultBase(t *testing.T) {
+	t.Parallel()
+
+	got := sheetsAPIURL(Client{BaseURL: DefaultAPIBaseURL}, "/v4/spreadsheets/sheet-1")
+	want := DefaultSheetsBaseURL + "/v4/spreadsheets/sheet-1"
+	if got != want {
+		t.Fatalf("expected Sheets API URL %q, got %q", want, got)
+	}
+}
+
+func TestSheetsAPIURLKeepsCustomBaseAndEscapedRange(t *testing.T) {
+	t.Parallel()
+
+	got := sheetsAPIURL(Client{BaseURL: "https://example.test/google"}, "/v4/spreadsheets/sheet-1/values/Sheet%201%21A1:B2")
+	want := "https://example.test/google/v4/spreadsheets/sheet-1/values/Sheet%201%21A1:B2"
+	if got != want {
+		t.Fatalf("expected custom Sheets API URL %q, got %q", want, got)
+	}
+}

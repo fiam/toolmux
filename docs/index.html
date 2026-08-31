@@ -36,7 +36,7 @@
           <h1>Toolmux</h1>
           <p class="lede">
             Toolmux connects services such as Slack, Google Drive, Google Docs,
-            and remote MCP servers to local coding agents through one
+            Google Sheets, and remote MCP servers to local coding agents through one
             policy-aware command surface.
           </p>
           <div class="actions">
@@ -79,14 +79,15 @@
 
       <section class="band">
         <div class="section">
-          <h2>Google Drive and Docs integration</h2>
+          <h2>Google Drive, Docs, and Sheets integration</h2>
           <p class="lede">
             Toolmux uses Google's non-sensitive <code>drive.file</code> scope.
             It can create files and access files you explicitly open for
-            Toolmux, then run Drive and Docs commands you request.
+            Toolmux, then run Drive, Docs, and Sheets commands you request.
           </p>
           <pre class="terminal"><code>toolmux add google
 toolmux google docs export 1abc... --format markdown
+toolmux google sheets values update 1abc... --range 'Sheet1!A1:B2' --file ./data.csv
 toolmux google drive files upload ./report.docx --target-mime-type application/vnd.google-apps.document</code></pre>
         </div>
       </section>

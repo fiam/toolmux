@@ -60,12 +60,12 @@ func TestGoogleBrokerOAuthDriveFlow(t *testing.T) {
 	toolmuxtest.AssertContains(t, out, "Google already has the requested Google OAuth scopes")
 
 	out = toolmuxtest.Run(t, deps, "status", "google")
-	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "23"} {
+	for _, want := range []string{"google", "native", "connected", "brokered-oauth", "43"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 
 	out = toolmuxtest.Run(t, deps, "list", "--internal")
-	for _, want := range []string{"google", "internal", "connected", "23"} {
+	for _, want := range []string{"google", "internal", "connected", "43"} {
 		toolmuxtest.AssertContains(t, out, want)
 	}
 	if strings.Contains(out, "built-in") {
@@ -532,6 +532,26 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 		"google.drive.files.trash",
 		"google.drive.selected.remove",
 		"google.drive.available",
+		"google.sheets.create",
+		"google.sheets.get",
+		"google.sheets.values.get",
+		"google.sheets.values.update",
+		"google.sheets.values.append",
+		"google.sheets.values.clear",
+		"google.sheets.values.batch_update",
+		"google.sheets.tabs.add",
+		"google.sheets.tabs.delete",
+		"google.sheets.tabs.rename",
+		"google.sheets.rows.insert",
+		"google.sheets.rows.delete",
+		"google.sheets.columns.insert",
+		"google.sheets.columns.delete",
+		"google.sheets.format_range",
+		"google.sheets.merge_cells",
+		"google.sheets.unmerge_cells",
+		"google.sheets.protected_ranges.add",
+		"google.sheets.protected_ranges.delete",
+		"google.sheets.batch_update",
 	} {
 		if !seen[want] {
 			t.Fatalf("missing Google MCP tool command %s", want)
@@ -552,5 +572,12 @@ func TestGoogleDriveCommandsExposeMCPTools(t *testing.T) {
 	}
 	if !hasScopes(comments.Scopes, googleapi.ScopeDriveFile) {
 		t.Fatalf("expected comments action to require drive.file, got %#v", comments.Scopes)
+	}
+	sheetsUpdate := specs["google.sheets.values.update"]
+	if sheetsUpdate.Resource != "spreadsheet" || sheetsUpdate.Action != "update" || sheetsUpdate.RemoteEffect != "write" || sheetsUpdate.LocalEffect != "read" {
+		t.Fatalf("unexpected Sheets values update metadata: %#v", sheetsUpdate)
+	}
+	if !hasScopes(sheetsUpdate.Scopes, googleapi.ScopeDriveFile) {
+		t.Fatalf("expected Sheets values update to require drive.file, got %#v", sheetsUpdate.Scopes)
 	}
 }

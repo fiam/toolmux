@@ -373,17 +373,16 @@ For Slack broker testing, configure fake or local upstream endpoints through
 `toolmuxd`, use `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, optional endpoint
 overrides, and `SLACK_SCOPES`.
 
-Google uses the native command namespace `google`, with `drive` and `docs`
-command groups. Google stores one local OAuth bundle per registered toolbox
-name under the `google` credential provider. Its client facet lives under
-`internal/providers/google/client`, and
-shared Google REST/OAuth helpers live under
-`internal/providers/google/googleapi`. Google tests must cover brokered OAuth
-through `toolmuxd`, the default non-sensitive `drive.file` scope for both
-Drive and Docs API commands, local scope checks before API calls,
-refresh-token preservation, and representative Drive and Docs API commands
-against fake upstream servers. Google tests must cover the Docs commands
-`get`, `find-structure`, `export`, `append`, `replace-all-text`,
+Google uses the native command namespace `google`, with `drive`, `docs`, and
+`sheets` command groups. Google stores one local OAuth bundle per registered
+toolbox name under the `google` credential provider. Its client facet lives
+under `internal/providers/google/client`, and shared Google REST/OAuth helpers
+live under `internal/providers/google/googleapi`. Google tests must cover
+brokered OAuth through `toolmuxd`, the default non-sensitive `drive.file`
+scope for Drive, Docs, and Sheets API commands, local scope checks before API
+calls, refresh-token preservation, and representative Drive, Docs, and Sheets
+commands against fake upstream servers. Google tests must cover the Docs
+commands `get`, `find-structure`, `export`, `append`, `replace-all-text`,
 `style-ranges`, `insert-table`, `insert-image`, and `batch-update`;
 `toolmux google drive selected add/list/remove`;
 `toolmux google drive files copy/upload/update/trash`;
@@ -394,8 +393,12 @@ assert `trigger_onepick=true`, a
 single `drive.file` scope, returned `picked_file_ids`, token exchange in
 `toolmuxd`, and no CLI-side Picker API key. Drive upload/update tests must
 cover local file paths and `--content-base64`; Drive copy/upload/update tests
-must cover `--target-mime-type` conversion metadata. Configure Google broker
-credentials on `toolmuxd`.
+must cover `--target-mime-type` conversion metadata. Sheets tests must cover
+create/get, value get/update/append/clear/batch-update, tab/row/column changes,
+formatting, merges, protected ranges, and raw batch-update. Cover inline JSON
+and JSON/CSV/TSV file inputs, `RAW` and `USER_ENTERED`, escaped A1 ranges,
+dry-run without credentials, and API permission, rate-limit, and malformed
+responses. Configure Google broker credentials on `toolmuxd`.
 
 ## Local OAuth Testing
 

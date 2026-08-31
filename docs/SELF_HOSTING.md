@@ -167,7 +167,7 @@ Self-hosters need their own provider OAuth apps:
 
 1. Slack: Slack OAuth app with your callback URL and requested bot scopes.
 2. Google: Google Cloud project with a web OAuth client and the Drive, Docs,
-   and Picker APIs enabled.
+   Sheets, and Picker APIs enabled.
 
 Remote MCP servers may use their own OAuth flows and do not require a native
 provider app in `toolmuxd` unless Toolmux adds a provider-specific broker for
@@ -175,23 +175,25 @@ that service.
 
 ## Google Setup
 
-Google is a Drive and Docs native provider. It uses brokered OAuth through
-`toolmuxd`, a Google web OAuth client, Google Picker, the Google Drive API, the
-Google Docs API, and the non-sensitive `drive.file` scope. The CLI stores the
-resulting token locally; `toolmuxd` holds provider client configuration and
-short-lived OAuth/Picker handoff state only.
+Google is a Drive, Docs, and Sheets native provider. It uses brokered OAuth
+through `toolmuxd`, a Google web OAuth client, Google Picker, the Google Drive
+API, the Google Docs API, the Google Sheets API, and the non-sensitive
+`drive.file` scope. The CLI stores the resulting token locally; `toolmuxd`
+holds provider client configuration and short-lived OAuth/Picker handoff state
+only.
 
 ### Cloud project
 
 Create or choose one Google Cloud project for Toolmux. Enable the Google Drive,
-Google Docs, and Google Picker APIs in that project:
+Google Docs, Google Sheets, and Google Picker APIs in that project:
 
 1. Open the Google Cloud console.
 2. Select an existing project or create a new project for Toolmux.
 3. Open APIs & Services > Library.
 4. Search for Google Drive API and click Enable.
 5. Search for Google Docs API and click Enable.
-6. Search for Google Picker API and click Enable.
+6. Search for Google Sheets API and click Enable.
+7. Search for Google Picker API and click Enable.
 
 You can also enable all required APIs with `gcloud`:
 
@@ -199,6 +201,7 @@ You can also enable all required APIs with `gcloud`:
 gcloud services enable \
   drive.googleapis.com \
   docs.googleapis.com \
+  sheets.googleapis.com \
   picker.googleapis.com \
   --project=my-google-project
 ```
@@ -209,6 +212,10 @@ the Google Docs API is not enabled for the Cloud project that owns the OAuth
 client ID in `GOOGLE_CLIENT_ID`. Select that exact project in the Cloud Console
 and enable `docs.googleapis.com`, or rerun the `gcloud services enable` command
 above with the correct `--project`.
+
+The equivalent Sheets error links to `sheets.googleapis.com`; enable that API
+in the same project. Enabling the service does not add an OAuth scope: Sheets
+commands continue to use only `drive.file`.
 
 `gcloud` cannot create the regular Google Auth Platform OAuth client that Drive
 Picker requires. `gcloud iam oauth-clients` creates IAM OAuth clients for Google
@@ -302,6 +309,8 @@ toolmux google drive files upload --content-base64 "$DOCX_BASE64" \
 toolmux google drive files update <file-id-or-url> --name "Renamed file"
 toolmux google drive files trash <file-id-or-url>
 toolmux google docs get <document-id-or-url>
+toolmux google sheets create --title "Toolmux smoke test"
+toolmux google sheets values get <spreadsheet-id-or-url> --range 'Sheet1!A1:D20'
 ```
 
 `toolmux google drive selected add` is the normal first-run command for file
@@ -374,6 +383,30 @@ image to Drive and creates an anyone-reader permission. The
 public image URI. Use `--make-public` only for images that are acceptable to
 expose to anyone with the link.
 
+### Google Sheets
+
+`toolmux google sheets create`, `get`, `values ...`, and the structural edit
+commands call the Google Sheets API at `sheets.googleapis.com`. Like Drive and
+Docs tools, they require only `drive.file`: a spreadsheet must be created by
+Toolmux or explicitly selected for the app. To select an existing spreadsheet,
+run:
+
+```bash
+toolmux google drive selected add \
+  --mime-type application/vnd.google-apps.spreadsheet
+```
+
+Self-hosted deployments must enable the Google Sheets API service
+(`sheets.googleapis.com`) in the Cloud project that owns the OAuth client.
+Values can come from a two-dimensional `--values-json` array or a JSON, CSV, or
+TSV `--file`. The default input mode is `RAW`; use
+`--value-input-option USER_ENTERED` only when Google should parse formulas,
+dates, and locale-sensitive numbers. Dedicated commands manage values, tabs,
+rows, columns, formatting, merges, and protected ranges. Raw
+`spreadsheets.batchUpdate` requests are available through `toolmux google
+sheets batch-update <spreadsheet-id> --json ...`. Use `--dry-run` to inspect
+write requests without loading credentials or calling Google.
+
 ### Manual smoke test
 
 After configuring the CLI:
@@ -413,6 +446,11 @@ toolmux google drive files trash <file-id-or-url> --dry-run
 toolmux google drive comments list <file-id-or-url>
 toolmux google drive pick
 toolmux google drive available
+toolmux google sheets create --title "Toolmux sheet smoke test" --dry-run
+toolmux google sheets values update <spreadsheet-id-or-url> \
+  --range 'Sheet1!A1:B2' \
+  --values-json '[["Status","Count"],["Open",12]]' \
+  --dry-run
 ```
 
 Add `toolmux add google` only when you want to test Drive API authorization

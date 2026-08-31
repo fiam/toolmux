@@ -1,6 +1,6 @@
 # Toolmux MCP-First Provider PRD
 
-Last updated: 2026-05-25
+Last updated: 2026-08-31
 
 ## Summary
 
@@ -14,11 +14,12 @@ providers are deferred until a provider-specific workflow clearly needs one.
 The first release optimizes for a simple connection experience without asking
 users to create personal API keys or provider developer apps. Provider tokens
 are stored locally by default; Toolmux does not provide cloud token storage in
-the initial release. Google is exposed through one native Drive-focused
-`google` toolbox, backed by brokered OAuth through `toolmuxd`, one local
+the initial release. Google is exposed through one native `google` toolbox for
+Drive, Docs, and Sheets, backed by brokered OAuth through `toolmuxd`, one local
 credential bundle, and the non-sensitive `drive.file` scope unless a product
 requirement explicitly justifies broader Google data access. Existing Drive
-files are selected through the brokered Google Picker flow, with a normal
+files, Docs documents, and Sheets spreadsheets are selected through the
+brokered Google Picker flow, with a normal
 `google drive pick` action for one-off selection and `google drive selected ...`
 actions for local selected-file cache management. Accessible files can be
 copied into My Drive through `google drive files copy`, updated in place
@@ -28,7 +29,11 @@ listed through `google drive comments list`. Drive copy, upload, and
 content-replacing update commands can request Google Workspace conversion with
 an explicit target MIME type, and commands that upload content accept base64
 payloads so MCP callers do not need a shared filesystem with the Toolmux
-process.
+process. Google Sheets supports spreadsheet creation, metadata and value reads,
+JSON/CSV/TSV value writes with `RAW` as the default input mode, common
+tab/row/column/format/merge/protection operations, and raw Sheets batch-update
+requests. Sheets commands retain the same Picker-controlled per-file boundary
+and do not require the broader `spreadsheets` scope.
 
 ## Goals
 

@@ -52,6 +52,10 @@ func (c Client) getDocs(ctx context.Context, suffix string, values url.Values, o
 	return c.getURL(ctx, docsAPIURL(c, suffix), values, out)
 }
 
+func (c Client) getSheets(ctx context.Context, suffix string, values url.Values, out any) error {
+	return c.getURL(ctx, sheetsAPIURL(c, suffix), values, out)
+}
+
 func (c Client) getURL(ctx context.Context, rawURL string, values url.Values, out any) error {
 	reqURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -95,6 +99,14 @@ func (c Client) getBytes(ctx context.Context, suffix string, values url.Values) 
 
 func (c Client) postDocsJSON(ctx context.Context, suffix string, body any, out any) error {
 	return c.postJSONURL(ctx, docsAPIURL(c, suffix), nil, body, out)
+}
+
+func (c Client) postSheetsJSON(ctx context.Context, suffix string, values url.Values, body any, out any) error {
+	return c.postJSONURL(ctx, sheetsAPIURL(c, suffix), values, body, out)
+}
+
+func (c Client) putSheetsJSON(ctx context.Context, suffix string, values url.Values, body any, out any) error {
+	return c.jsonURL(ctx, http.MethodPut, sheetsAPIURL(c, suffix), values, body, out)
 }
 
 func (c Client) postJSONQuery(ctx context.Context, suffix string, values url.Values, body any, out any) error {
@@ -246,7 +258,13 @@ func apiURL(baseURL, suffix string) string {
 	if err != nil {
 		return baseURL + "/" + strings.TrimLeft(suffix, "/")
 	}
-	parsed.Path = path.Join(parsed.Path, strings.TrimLeft(suffix, "/"))
+	rawPath := path.Join(parsed.EscapedPath(), strings.TrimLeft(suffix, "/"))
+	decodedPath, decodeErr := url.PathUnescape(rawPath)
+	if decodeErr != nil {
+		return baseURL + "/" + strings.TrimLeft(suffix, "/")
+	}
+	parsed.Path = decodedPath
+	parsed.RawPath = rawPath
 	return parsed.String()
 }
 
@@ -256,6 +274,17 @@ func docsAPIURL(client Client, suffix string) string {
 		baseURL = strings.TrimSpace(client.BaseURL)
 		if baseURL == "" || strings.TrimRight(baseURL, "/") == strings.TrimRight(DefaultAPIBaseURL, "/") {
 			baseURL = DefaultDocsAPIBaseURL
+		}
+	}
+	return apiURL(baseURL, suffix)
+}
+
+func sheetsAPIURL(client Client, suffix string) string {
+	baseURL := strings.TrimSpace(client.SheetsBaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(client.BaseURL)
+		if baseURL == "" || strings.TrimRight(baseURL, "/") == strings.TrimRight(DefaultAPIBaseURL, "/") {
+			baseURL = DefaultSheetsBaseURL
 		}
 	}
 	return apiURL(baseURL, suffix)

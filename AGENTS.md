@@ -217,14 +217,14 @@ OAuth through `toolmuxd`, token refresh, and representative Web API commands.
 Do not use live Slack workspaces as the default correctness signal.
 
 Google native-provider tests must exercise the preferred unified `google`
-namespace and the `google drive` and `google docs` command groups against fake
-upstreams while using one local Google OAuth credential bundle per registered
-toolbox name. Keep Google auth on Google's non-sensitive `drive.file` scope
-unless product requirements explicitly justify broader access. Cover brokered
-OAuth through `toolmuxd`,
+namespace and the `google drive`, `google docs`, and `google sheets` command
+groups against fake upstreams while using one local Google OAuth credential
+bundle per registered toolbox name. Keep Google auth on Google's non-sensitive
+`drive.file` scope unless product requirements explicitly justify broader
+access. Cover brokered OAuth through `toolmuxd`,
 toolmuxd token exchange, local missing-scope failures before Google API calls,
-refresh-token preservation, and representative Drive and Docs API commands. Cover
-the Docs commands `get`, `find-structure`, `export`, `append`,
+refresh-token preservation, and representative Drive, Docs, and Sheets API
+commands. Cover the Docs commands `get`, `find-structure`, `export`, `append`,
 `replace-all-text`, `style-ranges`, `insert-table`, `insert-image`, and
 `batch-update`; `toolmux google drive selected add/list/remove`,
 `toolmux google drive files copy/upload/update/trash`,
@@ -236,6 +236,11 @@ use Google's
 client secrets and Picker configuration out of CLI output. Drive upload/update
 tests must cover local file paths and `--content-base64`; Drive
 copy/upload/update tests must cover `--target-mime-type` conversion metadata.
+Sheets tests must cover create/get, values get/update/append/clear/batch-update,
+tab/row/column changes, formatting, merges, protected ranges, and raw
+batch-update. Cover inline JSON and JSON/CSV/TSV file inputs, `RAW` and
+`USER_ENTERED`, escaped A1 ranges, dry-run without credentials, and permission,
+rate-limit, and malformed upstream responses.
 Do not add a local Google Picker fallback unless product requirements
 explicitly change.
 

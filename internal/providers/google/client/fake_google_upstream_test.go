@@ -46,6 +46,11 @@ type fakeGoogleUpstream struct {
 	lastUpdateContent    string
 	lastPermissionFileID string
 	lastPermissionBody   map[string]any
+	lastSheetsMethod     string
+	lastSheetsPath       string
+	lastSheetsQuery      url.Values
+	lastSheetsBody       map[string]any
+	lastSheetsAPIToken   string
 	imageTrashed         bool
 	imageTrashRecorded   bool
 }
@@ -76,6 +81,14 @@ func newFakeGoogleUpstream(t *testing.T) *fakeGoogleUpstream {
 	registerFakeGoogleHandler(mux, t, "PATCH /drive/v3/files/doc-1", upstream.updateFile)
 	registerFakeGoogleHandler(mux, t, "PATCH /upload/drive/v3/files/doc-1", upstream.updateFileUpload)
 	registerFakeGoogleHandler(mux, t, "POST /drive/v3/files/image-1/permissions", upstream.createPermission)
+	registerFakeGoogleHandler(mux, t, "POST /v4/spreadsheets", upstream.createSpreadsheet)
+	registerFakeGoogleHandler(mux, t, "GET /v4/spreadsheets/sheet-1", upstream.getSpreadsheet)
+	registerFakeGoogleHandler(mux, t, "GET /v4/spreadsheets/sheet-1/values:batchGet", upstream.getSpreadsheetValues)
+	registerFakeGoogleHandler(mux, t, "PUT /v4/spreadsheets/sheet-1/values/", upstream.updateSpreadsheetValues)
+	registerFakeGoogleHandler(mux, t, "POST /v4/spreadsheets/sheet-1/values/", upstream.appendSpreadsheetValues)
+	registerFakeGoogleHandler(mux, t, "POST /v4/spreadsheets/sheet-1/values:batchUpdate", upstream.batchUpdateSpreadsheetValues)
+	registerFakeGoogleHandler(mux, t, "POST /v4/spreadsheets/sheet-1/values:batchClear", upstream.batchClearSpreadsheetValues)
+	registerFakeGoogleHandler(mux, t, "POST /v4/spreadsheets/sheet-1:batchUpdate", upstream.batchUpdateSpreadsheet)
 	upstream.Server = httptest.NewServer(mux)
 	t.Cleanup(upstream.Server.Close)
 	return upstream
@@ -617,6 +630,162 @@ func (s *fakeGoogleUpstream) createPermission(t *testing.T, w http.ResponseWrite
 		"type": body["type"],
 		"role": body["role"],
 	})
+}
+
+func (s *fakeGoogleUpstream) createSpreadsheet(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	writeGoogleJSON(w, fakeSpreadsheet("sheet-new", "Quarterly plan"))
+}
+
+func (s *fakeGoogleUpstream) getSpreadsheet(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, false) {
+		return
+	}
+	writeGoogleJSON(w, fakeSpreadsheet("sheet-1", "Support metrics"))
+}
+
+func (s *fakeGoogleUpstream) getSpreadsheetValues(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, false) {
+		return
+	}
+	ranges := r.URL.Query()["ranges"]
+	valueRanges := make([]map[string]any, 0, len(ranges))
+	for _, rangeName := range ranges {
+		valueRanges = append(valueRanges, map[string]any{
+			"range":          rangeName,
+			"majorDimension": "ROWS",
+			"values":         [][]any{{"Name", "Count"}, {"Open", 12}},
+		})
+	}
+	writeGoogleJSON(w, map[string]any{"spreadsheetId": "sheet-1", "valueRanges": valueRanges})
+}
+
+func (s *fakeGoogleUpstream) updateSpreadsheetValues(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	writeGoogleJSON(w, map[string]any{
+		"spreadsheetId":  "sheet-1",
+		"updatedRange":   strings.TrimPrefix(r.URL.Path, "/v4/spreadsheets/sheet-1/values/"),
+		"updatedRows":    2,
+		"updatedColumns": 2,
+		"updatedCells":   4,
+	})
+}
+
+func (s *fakeGoogleUpstream) appendSpreadsheetValues(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	rangeName := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v4/spreadsheets/sheet-1/values/"), ":append")
+	writeGoogleJSON(w, map[string]any{
+		"spreadsheetId": "sheet-1",
+		"tableRange":    rangeName,
+		"updates": map[string]any{
+			"spreadsheetId":  "sheet-1",
+			"updatedRange":   "Sheet1!A3:B3",
+			"updatedRows":    1,
+			"updatedColumns": 2,
+			"updatedCells":   2,
+		},
+	})
+}
+
+func (s *fakeGoogleUpstream) batchUpdateSpreadsheetValues(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	writeGoogleJSON(w, map[string]any{
+		"spreadsheetId":       "sheet-1",
+		"totalUpdatedSheets":  1,
+		"totalUpdatedRows":    2,
+		"totalUpdatedColumns": 2,
+		"totalUpdatedCells":   4,
+		"responses":           []map[string]any{{"updatedRange": "Sheet1!A1:B2", "updatedCells": 4}},
+	})
+}
+
+func (s *fakeGoogleUpstream) batchClearSpreadsheetValues(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	s.mu.Lock()
+	bodyRanges, _ := s.lastSheetsBody["ranges"].([]any)
+	s.mu.Unlock()
+	writeGoogleJSON(w, map[string]any{"spreadsheetId": "sheet-1", "clearedRanges": bodyRanges})
+}
+
+func (s *fakeGoogleUpstream) batchUpdateSpreadsheet(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if !s.recordSheetsRequest(t, w, r, true) {
+		return
+	}
+	writeGoogleJSON(w, map[string]any{
+		"spreadsheetId": "sheet-1",
+		"replies":       []map[string]any{{"addSheet": map[string]any{"properties": map[string]any{"sheetId": 7, "title": "Archive"}}}},
+	})
+}
+
+func (s *fakeGoogleUpstream) recordSheetsRequest(t *testing.T, w http.ResponseWriter, r *http.Request, decodeBody bool) bool {
+	t.Helper()
+	if !s.authorizeAPI(t, w, r) {
+		return false
+	}
+	body := map[string]any{}
+	if decodeBody {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad JSON", http.StatusBadRequest)
+			t.Errorf("decode Sheets request body: %v", err)
+			return false
+		}
+	}
+	s.mu.Lock()
+	s.lastSheetsMethod = r.Method
+	s.lastSheetsPath = r.URL.Path
+	s.lastSheetsQuery = cloneURLValues(r.URL.Query())
+	s.lastSheetsBody = body
+	s.lastSheetsAPIToken = bearerToken(r)
+	s.mu.Unlock()
+	return true
+}
+
+func fakeSpreadsheet(id, title string) map[string]any {
+	return map[string]any{
+		"spreadsheetId":  id,
+		"spreadsheetUrl": "https://docs.google.com/spreadsheets/d/" + id + "/edit",
+		"properties": map[string]any{
+			"title":    title,
+			"locale":   "en_US",
+			"timeZone": "Europe/Lisbon",
+		},
+		"sheets": []map[string]any{{
+			"properties": map[string]any{
+				"sheetId":   0,
+				"title":     "Sheet1",
+				"index":     0,
+				"sheetType": "GRID",
+				"gridProperties": map[string]any{
+					"rowCount":    1000,
+					"columnCount": 26,
+				},
+			},
+			"protectedRanges": []map[string]any{{
+				"protectedRangeId": 3,
+				"description":      "Header",
+				"warningOnly":      true,
+				"range":            map[string]any{"sheetId": 0, "startRowIndex": 0, "endRowIndex": 1},
+			}},
+		}},
+	}
 }
 
 func readDriveMultipart(t *testing.T, w http.ResponseWriter, r *http.Request) (map[string]any, string, string, bool) {

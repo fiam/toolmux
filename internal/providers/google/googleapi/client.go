@@ -7,6 +7,7 @@ import (
 const (
 	DefaultAPIBaseURL     = "https://www.googleapis.com"
 	DefaultDocsAPIBaseURL = "https://docs.googleapis.com"
+	DefaultSheetsBaseURL  = "https://sheets.googleapis.com"
 	DefaultAuthURL        = "https://accounts.google.com/o/oauth2/v2/auth"
 	// #nosec G101 -- this is Google's public OAuth token endpoint, not a token.
 	DefaultTokenURL  = "https://oauth2.googleapis.com/token"
@@ -20,10 +21,11 @@ const (
 )
 
 type Client struct {
-	BaseURL     string
-	DocsBaseURL string
-	AccessToken string
-	HTTPClient  *http.Client
+	BaseURL       string
+	DocsBaseURL   string
+	SheetsBaseURL string
+	AccessToken   string
+	HTTPClient    *http.Client
 }
 
 type OAuthOptions struct {

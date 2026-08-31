@@ -19,13 +19,14 @@ Toolmux is built around four ideas:
 4. Workflows that turn repeatable prompts into commands.
 
 Toolmux is early software. Today it is most useful for Slack, Google Drive,
-remote MCP toolboxes, and local agent setup for Codex and Claude Code.
+Google Docs, Google Sheets, remote MCP toolboxes, and local agent setup for
+Codex and Claude Code.
 
 ## Supported Today
 
 | Area | What is supported |
 | --- | --- |
-| Native toolboxes | Slack, Google Drive, Google Docs |
+| Native toolboxes | Slack, Google Drive, Google Docs, Google Sheets |
 | Remote MCP catalog | Hosted Streamable HTTP MCP servers listed by `toolmux list --mcp` |
 | Custom remote MCP | Any compatible Streamable HTTP MCP server URL |
 | Agents | Codex, Claude Code |
@@ -204,14 +205,15 @@ Run `toolmux slack --help` for the command list and per-tool flags.
 
 ## Google
 
-Google is a native Toolmux toolbox focused on Google Drive and Google Docs.
+Google is a native Toolmux toolbox for Google Drive, Google Docs, and Google
+Sheets.
 
 Google uses brokered OAuth through `toolmuxd` and stores one local Google OAuth
 bundle per registered toolbox name in the OS credential store. The default and
 only supported scope is the
 non-sensitive `drive.file` scope, which lets Toolmux create files and access
-files the user explicitly opens for the app. Docs read and write commands use
-the same per-file grant.
+files the user explicitly opens for the app. Docs and Sheets read/write
+commands use the same per-file grant.
 Native Google commands and MCP tools are shown when the toolbox is registered
 in config. The registered name is also the credential account identity:
 
@@ -237,6 +239,22 @@ toolmux google docs insert-image 1abc... --upload-file ./diagram.png \
 toolmux google docs insert-image 1abc... --content-base64 "$PNG_BASE64" \
   --name diagram.png --mime-type image/png --make-public
 toolmux google docs batch-update 1abc... --json @requests.json
+
+toolmux google sheets create --title "Quarterly plan" --sheet Summary --sheet Data
+toolmux google sheets get 1abc...
+toolmux google sheets values get 1abc... --range 'Summary!A1:D20'
+toolmux google sheets values update 1abc... --range 'Summary!A1:B2' \
+  --values-json '[["Status","Count"],["Open",12]]'
+toolmux google sheets values update 1abc... --range 'Data!A1:D100' \
+  --file ./data.csv
+toolmux google sheets values append 1abc... --range 'Data!A:D' \
+  --file ./new-rows.tsv --value-input-option USER_ENTERED
+toolmux google sheets values clear 1abc... --range 'Data!A2:D100'
+toolmux google sheets tabs add 1abc... --title Archive
+toolmux google sheets rows insert 1abc... --sheet-id 0 --start 2 --count 3
+toolmux google sheets format-range 1abc... --sheet-id 0 --range A1:D1 \
+  --bold --background-color '#336699'
+toolmux google sheets batch-update 1abc... --json @sheet-requests.json
 
 toolmux google drive selected add
 toolmux google drive selected list
@@ -284,6 +302,35 @@ URL. `find-structure` returns Google Docs UTF-16 indexes for targeted edits.
 `batch-update` accepts a full Docs API batchUpdate object, a requests array, or
 `@path`; use `--required-revision-id` when an edit should only apply to a known
 revision.
+
+Google Sheets creation, value reads/writes, and structural edits also use
+`drive.file`. Toolmux can immediately edit spreadsheets it creates. Select an
+existing spreadsheet first with:
+
+```bash
+toolmux google drive selected add \
+  --mime-type application/vnd.google-apps.spreadsheet
+```
+
+Sheets value updates accept a two-dimensional array through `--values-json`,
+or a JSON, CSV, or TSV file through `--file`. Values are written as `RAW` by
+default, so strings beginning with `=` remain strings; pass
+`--value-input-option USER_ENTERED` when Google should interpret formulas,
+dates, and locale-sensitive numbers. The dedicated command groups cover
+values, tabs, rows, columns, cell formatting, merges, and protected ranges.
+Use `toolmux google sheets batch-update <spreadsheet-id> --json ...` for Sheets
+API operations outside that surface. Sheets write commands support `--dry-run`.
+
+Supported native Sheets CLI command names:
+
+- Spreadsheets: `create`, `get`
+- Values: `values get`, `values update`, `values append`, `values clear`,
+  `values batch-update`
+- Tabs: `tabs add`, `tabs delete`, `tabs rename`
+- Dimensions: `rows insert/delete`, `columns insert/delete`
+- Structure and formatting: `format-range`, `merge-cells`, `unmerge-cells`,
+  `protected-ranges add/delete`, `batch-update`
+
 `toolmux google drive comments list` reads Drive comments and inline replies
 for an accessible file with the same selected/opened-file boundary. It returns
 plain comment text, author display names, quoted file content, resolved/deleted
@@ -661,9 +708,10 @@ To self-host the broker, point the CLI at your own `toolmuxd`:
 export TOOLMUX_TOOLMUXD_URL=https://auth.example.com
 ```
 
-Google Drive uses the broker by default. For self-hosting, create a Google web
-OAuth client, enable the Drive and Picker APIs, configure the Google variables
-on `toolmuxd`, and point the CLI at that broker with `TOOLMUX_TOOLMUXD_URL`.
+Google uses the broker by default. For self-hosting, create a Google web OAuth
+client, enable the Drive, Docs, Sheets, and Picker APIs, configure the Google
+variables on `toolmuxd`, and point the CLI at that broker with
+`TOOLMUX_TOOLMUXD_URL`.
 
 Self-hosting instructions are in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 
