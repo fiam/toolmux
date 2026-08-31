@@ -142,6 +142,7 @@ func TestMCPRemoteOAuthCallbackPageInfersNewCatalogNames(t *testing.T) {
 		"https://mcp.pagerduty.com/mcp":           "PagerDuty",
 		"https://mcp.eu.pagerduty.com/mcp":        "PagerDuty EU",
 		"https://mcp.posthog.com/mcp":             "PostHog",
+		"https://mcp.usepylon.com/":               "Pylon",
 		"https://mcp.zoom.us/mcp/zoom/streamable": "Zoom",
 		"https://mcp.zoominfo.com/mcp":            "ZoomInfo",
 		"https://mcp.supabase.com/mcp":            "Supabase",

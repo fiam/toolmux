@@ -103,6 +103,11 @@ servers:
     server:
       url: https://mcp.posthog.com/mcp
       transport: streamable-http
+  pylon:
+    display_name: Pylon
+    server:
+      url: https://mcp.usepylon.com/
+      transport: streamable-http
   sentry:
     display_name: Sentry
     server:

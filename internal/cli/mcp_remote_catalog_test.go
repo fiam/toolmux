@@ -63,6 +63,7 @@ func TestMCPBuiltinRemoteCatalogIncludesHostedServers(t *testing.T) {
 		"pagerduty":    "https://mcp.pagerduty.com/mcp",
 		"pagerduty-eu": "https://mcp.eu.pagerduty.com/mcp",
 		"posthog":      "https://mcp.posthog.com/mcp",
+		"pylon":        "https://mcp.usepylon.com/",
 		"sentry":       "https://mcp.sentry.dev/mcp",
 		"stripe":       "https://mcp.stripe.com",
 		"supabase":     "https://mcp.supabase.com/mcp",
@@ -103,6 +104,7 @@ func TestCatalogListsAndTogglesBuiltins(t *testing.T) {
 		"available",
 		"linear",
 		"notion",
+		"pylon",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected catalog output to contain %q, got:\n%s", want, output)

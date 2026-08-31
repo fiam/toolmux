@@ -396,7 +396,8 @@ under a non-conflicting command namespace.
 Add remote MCP catalog entries only for documented hosted Streamable HTTP MCP
 endpoints that can be added and authenticated through the server's own OAuth
 flow without users creating their own OAuth app first. Keep built-in remote MCP
-catalog data in `internal/cli/mcp_remote_catalog.yaml`, include a
+catalog data alphabetized by catalog name in
+`internal/cli/mcp_remote_catalog.yaml`, include a
 `display_name` for every entry, and keep the user-facing catalog summary in
 `README.md` current.
 `toolmux mcp list` must use shared table styling for human output, display only

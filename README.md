@@ -53,8 +53,9 @@ Built-in remote MCP entries currently include:
 airtable      asana        atlassian    cloudflare    datadog
 excalidraw    figma        gainsight     github        grafana
 granola       incident-io  linear        miro          neon
-notion        pagerduty    pagerduty-eu  posthog       sentry
-stripe        supabase     vercel        zoom          zoominfo
+notion        pagerduty    pagerduty-eu  posthog       pylon
+sentry        stripe       supabase      vercel        zoom
+zoominfo
 ```
 
 <p align="center">
