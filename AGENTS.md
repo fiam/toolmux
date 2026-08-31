@@ -40,8 +40,8 @@ history first:
 
 ## Go Version
 
-Use the latest stable Go toolchain. As of 2026-08-04, `govulncheck` requires
-Go 1.26.5 as the security-fix patch release for the Go 1.26 line.
+Use the latest stable Go toolchain. As of 2026-08-31, CI and release builds use
+Go 1.26.7 as the latest patch release for the supported Go 1.26 line.
 
 Repository expectations:
 

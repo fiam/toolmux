@@ -7,7 +7,7 @@ CLI, `toolmuxd`, provider integrations, docs, tests, and release tooling.
 
 Install:
 
-1. Go 1.26.5 or newer on the Go 1.26 line.
+1. Go 1.26.7 or newer on the Go 1.26 line.
 2. A C compiler such as `clang` or `gcc`, for cgo-enabled `toolmux` builds.
 3. Docker, for the full Dockerfile-based linter pass.
 4. `make`.

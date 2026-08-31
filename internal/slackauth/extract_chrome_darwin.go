@@ -23,6 +23,8 @@ func chromeProfileBase() (string, error) {
 // `open -a` returns immediately after handing the request to launchd, so this
 // doesn't block on Chrome's lifetime.
 func openChromeURL(ctx context.Context, url string) error {
+	// #nosec G204 -- the executable and argument boundaries are fixed; no shell
+	// interprets the generated OAuth URL.
 	return exec.CommandContext(ctx, "open", "-a", "Google Chrome", url).Run()
 }
 

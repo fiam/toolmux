@@ -17,8 +17,8 @@ not scrape browser cookies, local browser storage, session tokens, or
 provider-owned client credentials except for Slack's explicit browser-session
 setup through `toolmux add slack`.
 
-Use the latest stable Go release. As of 2026-08-04, `govulncheck` requires Go
-1.26.5 as the security-fix patch release for the Go 1.26 line. Set the module
+Use the latest stable Go release. As of 2026-08-31, CI and release builds use Go
+1.26.7 as the latest patch release for the supported Go 1.26 line. Set the module
 to Go 1.26, pin CI to the latest Go 1.26 patch, and update `AGENTS.md`
 whenever the project intentionally changes Go versions or toolchain
 expectations.
